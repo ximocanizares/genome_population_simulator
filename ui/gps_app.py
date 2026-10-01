@@ -740,6 +740,7 @@ def _(
                 "sequence": "",
                 "start": 1,
                 "end": 1,
+                "insert_after": "",
                 "motifs": "",
                 "reference_units": "",
                 "max_units": "",
@@ -751,7 +752,10 @@ def _(
             "Loci de repetición (motivo y posición; una fila sin `id` se omite."
             " `motifs` admite varios separados por comas; con referencia simulada,"
             " un compuesto declara en `reference_units` las unidades de cada bloque"
-            " en la referencia, también separadas por comas)"
+            " en la referencia, también separadas por comas. Con referencia"
+            " suministrada, `insert_after` inserta el tracto tras esa base del"
+            " genoma de partida: deje vacíos `start` y `end` y declare"
+            " `reference_units`, también con un solo motivo)"
         ),
         pagination=False,
     )
@@ -849,7 +853,15 @@ def _(
             " (vacío no declara tope)"
         ),
     )
+    inserted_reference_id_control = mo.ui.text(
+        value=imported_form.reference.inserted_reference_id or "",
+        label=(
+            "ID de la referencia final cuando algún locus inserta su tracto"
+            " (vacío si ninguno inserta)"
+        ),
+    )
     return (
+        inserted_reference_id_control,
         repeat_allele_source_control,
         repeat_alleles_editor,
         repeat_interruptions_editor,
@@ -911,6 +923,7 @@ def _(
     repeat_loci_editor,
     repeat_loci_from_editor_rows,
     repeat_max_tract_output_control,
+    inserted_reference_id_control,
     repeat_min_longest_run_control,
     repeat_min_purity_control,
     repeat_slippage_editor,
@@ -1157,6 +1170,11 @@ def _(
                 repeat_loci=authored_repeat_loci,
                 repeat_admission=authored_repeat_admission,
                 max_tract_output_bases=authored_max_tract_output_bases,
+                inserted_reference_id=(
+                    str(inserted_reference_id_control.value).strip() or None
+                    if selected_kind == "supplied"
+                    else None
+                ),
             ),
             reduced_references=authored_reductions,
             population_snvs=population_snvs,
@@ -1877,6 +1895,7 @@ def _(
     repeat_interruptions_editor,
     repeat_loci_editor,
     repeat_max_tract_output_control,
+    inserted_reference_id_control,
     repeat_min_longest_run_control,
     repeat_min_purity_control,
     repeat_slippage_editor,
@@ -2428,6 +2447,7 @@ def _(
                         repeat_min_purity_control,
                         repeat_min_longest_run_control,
                         repeat_max_tract_output_control,
+                        inserted_reference_id_control,
                     ]
                 ),
             ),

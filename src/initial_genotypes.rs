@@ -345,7 +345,7 @@ pub fn sample_initial_genotypes(
     matrix: &PreparedPopulationSnvs,
 ) -> Result<InitialGenotypeCompositions, InitialGenotypeSamplingError> {
     sample_initial_genotype_compositions(
-        config.reference_id(),
+        config.simulation_reference_id(),
         reference,
         config.reproducibility().root_seed(),
         config.initial_populations(),

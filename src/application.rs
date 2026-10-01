@@ -359,11 +359,144 @@ pub struct EffectiveRepeatLocus {
     /// lleva colocado. Solo existe en un locus compuesto sobre referencia
     /// simulada, ya validado contra el tramo.
     reference_units: Option<Vec<u64>>,
+    /// Lo que el usuario escribió para situar el locus, en coordenadas del
+    /// **genoma de partida**. Solo existe cuando la ejecución inserta algún
+    /// tracto (DTC-098): entonces el intervalo de `declaration` está en
+    /// coordenadas del genoma **final**, y esto es lo que permite publicar
+    /// además lo declarado. Sin inserción no hay traducción ni nada que
+    /// publicar aparte, y queda en `None`.
+    declared_position: Option<DeclaredLocusPosition>,
     max_units: u64,
     admission: EffectiveRepeatAdmission,
     slippage: Option<EffectiveRepeatSlippage>,
     alleles: Vec<EffectiveRepeatAllele>,
     normalization: RepeatFrequencyNormalization,
+}
+
+/// Cómo situó el usuario un locus, en coordenadas del genoma de partida y en
+/// base uno.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeclaredLocusPosition {
+    /// Tramo de un tracto que ya está en el FASTA suministrado.
+    Interval { start: u64, end: u64 },
+    /// El tracto se inserta justo después de esta base.
+    InsertAfter(u64),
+}
+
+/// Un punto de inserción resuelto: dónde entra el tracto de un locus y qué
+/// bases lleva (DTC-098).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectiveInsertionPoint {
+    locus_id: String,
+    sequence_id: String,
+    /// Base uno del genoma de partida tras la que entra el tracto.
+    insert_after: u64,
+    bases: Arc<[u8]>,
+}
+
+impl EffectiveInsertionPoint {
+    #[must_use]
+    pub fn locus_id(&self) -> &str {
+        &self.locus_id
+    }
+
+    #[must_use]
+    pub fn sequence_id(&self) -> &str {
+        &self.sequence_id
+    }
+
+    /// Base uno del genoma de partida tras la que entra el tracto.
+    #[must_use]
+    pub const fn insert_after(&self) -> u64 {
+        self.insert_after
+    }
+
+    /// Bases del tracto: cada motivo repetido tantas veces como digan sus
+    /// unidades, en orden.
+    #[must_use]
+    pub fn bases(&self) -> &[u8] {
+        &self.bases
+    }
+
+    fn length(&self) -> u64 {
+        self.bases.len() as u64
+    }
+}
+
+/// **El plan de inserción de tractos de una ejecución** (REQ-REF-37,
+/// DTC-098).
+///
+/// Es lo único que hace falta para traducir cualquier posición del genoma de
+/// partida al final: los puntos y las longitudes. No necesita las bases del
+/// FASTA, y por eso se resuelve con la configuración, antes de leer nada.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectiveTractInsertion {
+    derived_reference_id: String,
+    /// Catálogo del genoma final: el de partida con cada secuencia alargada
+    /// por los tractos que recibe.
+    sequences: Vec<EffectiveSequence>,
+    /// En el orden del catálogo y, dentro de cada secuencia, del punto.
+    points: Vec<EffectiveInsertionPoint>,
+}
+
+impl EffectiveTractInsertion {
+    #[must_use]
+    pub fn derived_reference_id(&self) -> &str {
+        &self.derived_reference_id
+    }
+
+    #[must_use]
+    pub fn sequences(&self) -> &[EffectiveSequence] {
+        &self.sequences
+    }
+
+    #[must_use]
+    pub fn points(&self) -> &[EffectiveInsertionPoint] {
+        &self.points
+    }
+
+    /// Bases insertadas **antes** de la base `position` (base uno, partida)
+    /// en su secuencia: las de todo tracto que entra tras una base anterior.
+    fn shift_before(&self, sequence_id: &str, position: u64) -> u64 {
+        self.points
+            .iter()
+            .filter(|point| point.sequence_id == sequence_id && point.insert_after < position)
+            .map(EffectiveInsertionPoint::length)
+            .sum()
+    }
+
+    /// Traduce una base del genoma de partida (base uno) a la del final.
+    #[must_use]
+    pub fn translate_position(&self, sequence_id: &str, position: u64) -> u64 {
+        position + self.shift_before(sequence_id, position)
+    }
+
+    /// Traduce un tramo cerrado en base uno. Devuelve el punto que lo
+    /// **parte** si un tracto se insertaría dentro: entre dos bases del tramo.
+    fn translate_interval(
+        &self,
+        sequence_id: &str,
+        start: u64,
+        end: u64,
+    ) -> Result<(u64, u64), &EffectiveInsertionPoint> {
+        if let Some(inside) = self.points.iter().find(|point| {
+            point.sequence_id == sequence_id
+                && start <= point.insert_after
+                && point.insert_after < end
+        }) {
+            return Err(inside);
+        }
+        Ok((
+            self.translate_position(sequence_id, start),
+            self.translate_position(sequence_id, end),
+        ))
+    }
+
+    /// Primera base (base uno, genoma final) del tracto insertado tras
+    /// `insert_after`: la que sigue a la base ancla ya traducida.
+    fn inserted_start(&self, sequence_id: &str, insert_after: u64) -> u64 {
+        self.translate_position(sequence_id, insert_after) + 1
+    }
 }
 
 /// El generador de alelos por deslizamiento biológico de un locus.
@@ -444,6 +577,13 @@ impl EffectiveRepeatLocus {
     #[must_use]
     pub fn id(&self) -> &str {
         self.declaration.id().as_str()
+    }
+
+    /// Lo declarado en coordenadas del genoma de partida, solo cuando la
+    /// ejecución inserta algún tracto (DTC-098).
+    #[must_use]
+    pub const fn declared_position(&self) -> Option<DeclaredLocusPosition> {
+        self.declared_position
     }
 
     #[must_use]
@@ -680,6 +820,10 @@ pub struct EffectiveConfig {
     repeat_loci: Vec<EffectiveRepeatLocus>,
     repeat_admission: EffectiveRepeatAdmission,
     repeat_output_budget: EffectiveRepeatOutputBudget,
+    /// Plan de inserción de tractos, si algún locus inserta el suyo en la
+    /// referencia suministrada (DTC-098). Con él, la referencia de la
+    /// simulación es la final y no la suministrada.
+    tract_insertion: Option<EffectiveTractInsertion>,
 }
 
 /// Configuración F5 ya resuelta entre sus dos documentos de autoría y el
@@ -1434,6 +1578,26 @@ impl EffectiveConfig {
         &self.repeat_loci
     }
 
+    /// Plan de inserción de tractos, si la ejecución inserta alguno.
+    #[must_use]
+    pub const fn tract_insertion(&self) -> Option<&EffectiveTractInsertion> {
+        self.tract_insertion.as_ref()
+    }
+
+    /// **Identificador de la referencia sobre la que se simula.** Es el de la
+    /// referencia final cuando hay inserción de tractos (DTC-098) y el de la
+    /// declarada en los demás casos. Todo consumidor que siembre un sorteo o
+    /// nombre la referencia de la verdad, el VCF o las lecturas usa este, y
+    /// no [`Self::reference_id`], que es el del fichero suministrado.
+    #[must_use]
+    pub fn simulation_reference_id(&self) -> &str {
+        self.tract_insertion
+            .as_ref()
+            .map_or(&self.reference_id, |insertion| {
+                &insertion.derived_reference_id
+            })
+    }
+
     /// Genera el abanico de alelos de los loci que lo piden, partiendo del
     /// **alelo que el genoma de referencia lleva** en cada uno.
     ///
@@ -1475,7 +1639,7 @@ impl EffectiveConfig {
             let ancestral = reference_repeat_tract(reference, locus)?;
             let fan = generate_allele_fan(
                 self.reproducibility.root_seed(),
-                &self.reference_id,
+                self.simulation_reference_id(),
                 locus.declaration.id().as_str(),
                 &ancestral,
                 locus.max_units,
@@ -2345,15 +2509,27 @@ pub fn build_effective_config_with_entropy(
         },
     };
     let repeat_admission = effective_repeat_admission(general)?;
+    // **El plan de inserción va antes que los loci**: es lo que traduce los
+    // intervalos de los demás al genoma final (DTC-098).
+    let tract_insertion = effective_tract_insertion(general, &sequences)?;
     let repeat_loci = effective_repeat_loci(
         general,
         &sequences,
         normalization.tolerance,
         repeat_admission,
+        tract_insertion.as_ref(),
     )?;
     let reproducibility = ReproducibilityMetadata::new(root_seed, seed_origin);
     let initial_populations = effective_initial_populations(general, root_seed)?;
-    let population_snvs = effective_population_snvs(general)?;
+    let mut population_snvs = effective_population_snvs(general)?;
+    if let Some(insertion) = &tract_insertion {
+        translate_generation_regions(general, insertion, population_snvs.as_mut())?;
+    }
+    // Las regiones se comprueban contra el catálogo del genoma sobre el que se
+    // generará la matriz: el final si hay inserción.
+    let generation_sequences = tract_insertion
+        .as_ref()
+        .map_or(sequences.as_slice(), EffectiveTractInsertion::sequences);
     let direct_events = effective_direct_events(general, &initial_populations, &sequences)?;
     let mut technical_event =
         effective_technical_event(general, &initial_populations, &direct_events)?;
@@ -2385,7 +2561,7 @@ pub fn build_effective_config_with_entropy(
     }) = population_snvs_generation_from_effective(population_snvs.as_ref())
     {
         for region in regions {
-            let valid = sequences
+            let valid = generation_sequences
                 .iter()
                 .find(|sequence| sequence.id() == region.contig)
                 .is_some_and(|sequence| {
@@ -2436,7 +2612,315 @@ pub fn build_effective_config_with_entropy(
         repeat_output_budget,
         repeat_loci,
         repeat_admission,
+        tract_insertion,
     })
+}
+
+/// **El plan de inserción de tractos** (REQ-REF-37, DTC-098).
+///
+/// Reúne los loci que declaran `insert_after`, construye el tracto de cada uno
+/// desde su motivo y sus `reference_units`, y rechaza antes de simular todo lo
+/// que esta primera versión no admite junto a una inserción. Sin ningún locus
+/// que inserte devuelve `None`, y entonces `inserted_reference_id` no puede
+/// estar declarado.
+///
+/// # Lo que se rechaza, y por qué
+///
+/// - Dos inserciones en el mismo punto: fijar su orden sería una decisión que
+///   nadie ha tomado.
+/// - Un punto antes de la primera base o después de la última: toda inserción
+///   configurada se ancla en una base anterior y deja un punto interno
+///   (REQ-IND-40).
+/// - Los cambios directos: sus inserciones y deleciones se declaran en
+///   coordenadas **vigentes** de la copia, que no tienen traducción sin un
+///   segundo modelo de coordenadas.
+/// - La matriz de SNV suministrada o reutilizada: está atada por huella al
+///   genoma de partida.
+/// - La reducción: se haría sobre la suministrada, sin el tracto.
+fn effective_tract_insertion(
+    general: &DeclaredGeneralConfig,
+    sequences: &[EffectiveSequence],
+) -> Result<Option<EffectiveTractInsertion>, Diagnostic> {
+    const FIELD: &str = "reference.repeat_loci.insert_after";
+    let reference = general.reference();
+    let inserting = reference
+        .repeat_loci
+        .iter()
+        .filter(|locus| locus.insert_after.is_some())
+        .collect::<Vec<_>>();
+    let Some(first) = inserting.first() else {
+        if let Some(declared) = &reference.inserted_reference_id {
+            return Err(config_error(
+                general,
+                "reference.inserted_reference_id",
+                format!(
+                    "inserted_reference_id = {} se declara sin ningún locus que inserte su tracto: solo nombra la referencia final de una inserción",
+                    declared.value()
+                ),
+            ));
+        }
+        return Ok(None);
+    };
+    if !matches!(reference.source, DeclaredReferenceSource::Supplied { .. }) {
+        return Err(repeat_error(
+            general,
+            FIELD,
+            first.id.value(),
+            "insert_after solo se admite con referencia suministrada: con referencia simulada el tracto se coloca en su tramo",
+        ));
+    }
+    let Some(declared_id) = &reference.inserted_reference_id else {
+        return Err(repeat_error(
+            general,
+            "reference.inserted_reference_id",
+            first.id.value(),
+            "el locus inserta su tracto y la referencia no declara inserted_reference_id: el genoma final no es el fichero suministrado y necesita identidad propia",
+        ));
+    };
+    ReferenceId::parse(declared_id.value(), "configuration").map_err(|diagnostic| {
+        diagnostic
+            .with("path", general.source().path().display().to_string())
+            .with("location", declared_id.location().to_string())
+    })?;
+    if declared_id.value() == reference.id.value() {
+        return Err(config_error(
+            general,
+            "reference.inserted_reference_id",
+            format!(
+                "inserted_reference_id repite el identificador de la referencia suministrada ({}): el genoma final no es el fichero suministrado",
+                declared_id.value()
+            ),
+        ));
+    }
+    if !general.direct_events().is_empty() {
+        return Err(repeat_error(
+            general,
+            "reference.repeat_loci.insert_after,direct_events",
+            first.id.value(),
+            "insertar un tracto junto a cambios directos no se admite en esta versión: sus inserciones y deleciones se declaran en coordenadas vigentes de la copia, que no tienen traducción al genoma final",
+        ));
+    }
+    match general.population_snvs() {
+        Some(DeclaredPopulationSnvs::Supplied { .. }) => {
+            return Err(repeat_error(
+                general,
+                "reference.repeat_loci.insert_after,population_snvs.mode",
+                first.id.value(),
+                "insertar un tracto junto a una matriz de SNV suministrada no se admite en esta versión: sus posiciones y su huella son las del genoma de partida; use mode = \"generate\"",
+            ));
+        }
+        Some(DeclaredPopulationSnvs::Reuse { .. }) => {
+            return Err(repeat_error(
+                general,
+                "reference.repeat_loci.insert_after,population_snvs.mode",
+                first.id.value(),
+                "insertar un tracto junto a una matriz de SNV reutilizada no se admite en esta versión: está atada por huella al genoma de partida; use mode = \"generate\"",
+            ));
+        }
+        Some(DeclaredPopulationSnvs::Generate { .. }) | None => {}
+    }
+    if !general.reduced_references().is_empty() {
+        return Err(repeat_error(
+            general,
+            "reference.repeat_loci.insert_after,reduced_references",
+            first.id.value(),
+            "insertar un tracto junto a una reducción de referencia no se admite en esta versión: la reducción se haría sobre la suministrada, sin el tracto",
+        ));
+    }
+    let mut points: Vec<(usize, EffectiveInsertionPoint)> = Vec::with_capacity(inserting.len());
+    for locus in &inserting {
+        let locus_id = locus.id.value();
+        let insert_after = locus
+            .insert_after
+            .as_ref()
+            .map(|value| *value.value())
+            .ok_or_else(|| {
+                Diagnostic::internal_invariant("application", "tract_insertion")
+                    .with("detail", "un locus filtrado por insert_after no lo tiene")
+            })?;
+        let (sequence_index, sequence) = sequences
+            .iter()
+            .enumerate()
+            .find(|(_, sequence)| sequence.id() == locus.sequence.value())
+            .ok_or_else(|| {
+                repeat_error(
+                    general,
+                    "reference.repeat_loci.sequence",
+                    locus_id,
+                    format!("secuencia desconocida: {}", locus.sequence.value()),
+                )
+            })?;
+        if insert_after == 0 || insert_after >= sequence.length() {
+            return Err(repeat_error(
+                general,
+                FIELD,
+                locus_id,
+                format!(
+                    "insert_after = {insert_after} no deja una base a cada lado en {} ({} bases): va de 1 a {}",
+                    sequence.id(),
+                    sequence.length(),
+                    sequence.length().saturating_sub(1)
+                ),
+            ));
+        }
+        let Some(units) = &locus.reference_units else {
+            return Err(repeat_error(
+                general,
+                "reference.repeat_loci.reference_units",
+                locus_id,
+                "el locus inserta su tracto y no declara reference_units: sin tramo en el genoma de partida, las unidades de cada bloque son lo único que dice qué se inserta",
+            ));
+        };
+        if units.len() != locus.motifs.len() {
+            return Err(repeat_error(
+                general,
+                "reference.repeat_loci.reference_units",
+                locus_id,
+                format!(
+                    "reference_units declara {} valores y el locus tiene {} motivos: hace falta uno por bloque",
+                    units.len(),
+                    locus.motifs.len()
+                ),
+            ));
+        }
+        let max_units = locus
+            .max_units
+            .as_ref()
+            .map_or(DEFAULT_REPEAT_MAX_UNITS, |declared| *declared.value());
+        let mut total_units = 0_u64;
+        let mut bases = Vec::new();
+        for (block, (declared_units, declared_motif)) in units.iter().zip(&locus.motifs).enumerate()
+        {
+            let block_units = *declared_units.value();
+            if block_units == 0 {
+                return Err(repeat_error(
+                    general,
+                    "reference.repeat_loci.reference_units",
+                    locus_id,
+                    format!(
+                        "reference_units declara cero unidades en el bloque {block}: cada bloque lleva al menos una"
+                    ),
+                ));
+            }
+            total_units = total_units.saturating_add(block_units);
+            // **Antes de construir nada**, como con los alelos: un error de
+            // dedo de nueve cifras no puede reservar gigabytes.
+            if total_units > max_units {
+                return Err(repeat_error(
+                    general,
+                    "reference.repeat_loci.reference_units",
+                    locus_id,
+                    format!(
+                        "el tracto insertado mide al menos {total_units} unidades y rebasa el tope de {max_units}"
+                    ),
+                ));
+            }
+            let motif = RepeatMotif::new(declared_motif.value().as_bytes()).map_err(|error| {
+                repeat_error(
+                    general,
+                    "reference.repeat_loci.motif",
+                    locus_id,
+                    error.detail(),
+                )
+            })?;
+            for _ in 0..block_units {
+                bases.extend_from_slice(motif.bases());
+            }
+        }
+        if let Some((_, other)) = points.iter().find(|(_, other)| {
+            other.sequence_id == sequence.id() && other.insert_after == insert_after
+        }) {
+            return Err(repeat_error(
+                general,
+                FIELD,
+                locus_id,
+                format!(
+                    "inserta su tracto en el mismo punto que el locus {} ({}:{insert_after}): el orden entre los dos no está definido",
+                    other.locus_id,
+                    sequence.id()
+                ),
+            ));
+        }
+        points.push((
+            sequence_index,
+            EffectiveInsertionPoint {
+                locus_id: locus_id.clone(),
+                sequence_id: sequence.id().to_owned(),
+                insert_after,
+                bases: Arc::from(bases),
+            },
+        ));
+    }
+    points.sort_by_key(|(index, point)| (*index, point.insert_after));
+    let points = points
+        .into_iter()
+        .map(|(_, point)| point)
+        .collect::<Vec<_>>();
+    let mut derived_sequences = Vec::with_capacity(sequences.len());
+    for sequence in sequences {
+        let added = points
+            .iter()
+            .filter(|point| point.sequence_id == sequence.id)
+            .map(EffectiveInsertionPoint::length)
+            .sum::<u64>();
+        let length = sequence.length.checked_add(added).ok_or_else(|| {
+            config_error(
+                general,
+                "reference.repeat_loci.reference_units",
+                format!(
+                    "los tractos insertados desbordan la longitud de {}",
+                    sequence.id
+                ),
+            )
+        })?;
+        derived_sequences.push(EffectiveSequence {
+            id: sequence.id.clone(),
+            class: sequence.class,
+            length,
+        });
+    }
+    Ok(Some(EffectiveTractInsertion {
+        derived_reference_id: declared_id.value().clone(),
+        sequences: derived_sequences,
+        points,
+    }))
+}
+
+/// Traduce al genoma final las regiones del generador de la matriz de SNV
+/// (DTC-098). Una región que un tracto partiría se rechaza: sus bases dejarían
+/// de ser contiguas.
+fn translate_generation_regions(
+    general: &DeclaredGeneralConfig,
+    insertion: &EffectiveTractInsertion,
+    population_snvs: Option<&mut EffectivePopulationSnvs>,
+) -> Result<(), Diagnostic> {
+    let Some(EffectivePopulationSnvs::Generate { parameters }) = population_snvs else {
+        return Ok(());
+    };
+    let GeneratedSpatialMode::WeightedRegions { regions, .. } = &mut parameters.spatial else {
+        return Ok(());
+    };
+    for region in regions {
+        let (start, end) = insertion
+            .translate_interval(&region.contig, region.start_1based, region.end_1based)
+            .map_err(|inside| {
+                config_error(
+                    general,
+                    "population_snvs.generate.regions,reference.repeat_loci.insert_after",
+                    format!(
+                        "la región {}:{}..{} contiene el punto de inserción del locus {} (tras la base {}): un tracto insertado la partiría",
+                        region.contig,
+                        region.start_1based,
+                        region.end_1based,
+                        inside.locus_id,
+                        inside.insert_after
+                    ),
+                )
+            })?;
+        region.start_1based = start;
+        region.end_1based = end;
+    }
+    Ok(())
 }
 
 /// **Guarda de admisión que cruza el evento técnico con los loci declarados.**
@@ -4159,6 +4643,90 @@ fn parse_unknown_base_fraction(
     Ok(value)
 }
 
+/// El intervalo de un locus, en base uno, en el **marco de la simulación**:
+/// el genoma final si hay inserción y el declarado si no (DTC-098).
+///
+/// Devuelve además lo declarado, solo cuando hay inserción, que es cuando lo
+/// declarado y el intervalo dejan de coincidir.
+fn locus_interval_in_frame(
+    general: &DeclaredGeneralConfig,
+    locus: &crate::configuration::DeclaredRepeatLocus,
+    sequence: &EffectiveSequence,
+    insertion: Option<&EffectiveTractInsertion>,
+) -> Result<(u64, u64, Option<DeclaredLocusPosition>), Diagnostic> {
+    if let Some(insert_after) = &locus.insert_after {
+        let insert_after = *insert_after.value();
+        let (Some(plan), Some(point)) = (
+            insertion,
+            insertion.and_then(|plan| {
+                plan.points()
+                    .iter()
+                    .find(|point| point.locus_id() == locus.id.value().as_str())
+            }),
+        ) else {
+            return Err(
+                Diagnostic::internal_invariant("application", "tract_insertion").with(
+                    "detail",
+                    "un locus que inserta no está en el plan de inserción",
+                ),
+            );
+        };
+        let start = plan.inserted_start(sequence.id(), insert_after);
+        let end = start + point.length() - 1;
+        return Ok((
+            start,
+            end,
+            Some(DeclaredLocusPosition::InsertAfter(insert_after)),
+        ));
+    }
+    let (Some(start), Some(end)) = (&locus.start, &locus.end) else {
+        return Err(
+            Diagnostic::internal_invariant("application", "repeat_locus_interval").with(
+                "detail",
+                "un locus sin insert_after llega sin start o sin end",
+            ),
+        );
+    };
+    let (start, end) = (*start.value(), *end.value());
+    let Some(plan) = insertion else {
+        return Ok((start, end, None));
+    };
+    // Primero contra el genoma de partida, que es donde se declaró: un tramo
+    // que no cabe allí no puede traducirse a ningún sitio.
+    if start == 0 || start > end || end > sequence.length() {
+        return Err(repeat_error(
+            general,
+            "reference.repeat_loci.start,reference.repeat_loci.end",
+            locus.id.value(),
+            format!(
+                "el intervalo {start}..{end} no cabe en {} ({} bases del genoma de partida)",
+                sequence.id(),
+                sequence.length()
+            ),
+        ));
+    }
+    let (final_start, final_end) = plan
+        .translate_interval(sequence.id(), start, end)
+        .map_err(|inside| {
+            repeat_error(
+                general,
+                "reference.repeat_loci.start,reference.repeat_loci.end,reference.repeat_loci.insert_after",
+                locus.id.value(),
+                format!(
+                    "el locus {} inserta su tracto tras la base {} de {}, dentro del tracto {start}..{end}, y lo partiría",
+                    inside.locus_id(),
+                    inside.insert_after(),
+                    sequence.id()
+                ),
+            )
+        })?;
+    Ok((
+        final_start,
+        final_end,
+        Some(DeclaredLocusPosition::Interval { start, end }),
+    ))
+}
+
 /// Resuelve los loci de repetición declarados.
 ///
 /// # El tope se comprueba **antes** de materializar nada
@@ -4192,11 +4760,19 @@ fn effective_repeat_loci(
     sequences: &[EffectiveSequence],
     tolerance: f64,
     admission: EffectiveRepeatAdmission,
+    insertion: Option<&EffectiveTractInsertion>,
 ) -> Result<Vec<EffectiveRepeatLocus>, Diagnostic> {
-    let reference_id = ReferenceId::parse(general.reference().id.value().as_str(), "execution")
-        .map_err(|diagnostic| {
+    // **Con inserción, los intervalos viven en el genoma final** (DTC-098):
+    // llevan su identificador y miden contra su catálogo. Sin ella, todo es
+    // como siempre.
+    let frame_reference_id = insertion.map_or(general.reference().id.value().as_str(), |plan| {
+        plan.derived_reference_id()
+    });
+    let reference_id =
+        ReferenceId::parse(frame_reference_id, "execution").map_err(|diagnostic| {
             diagnostic.with("path", general.source().path().display().to_string())
         })?;
+    let frame_sequences = insertion.map_or(sequences, EffectiveTractInsertion::sequences);
     let mut resolved: Vec<EffectiveRepeatLocus> =
         Vec::with_capacity(general.reference().repeat_loci.len());
     for locus in &general.reference().repeat_loci {
@@ -4240,23 +4816,28 @@ fn effective_repeat_loci(
             SequenceId::parse(sequence.id(), reference_id.as_str()).map_err(|diagnostic| {
                 diagnostic.with("path", general.source().path().display().to_string())
             })?;
+        let frame_length = frame_sequences
+            .iter()
+            .find(|frame| frame.id() == sequence.id())
+            .map_or(sequence.length(), EffectiveSequence::length);
+        let (start, end, declared_position) =
+            locus_interval_in_frame(general, locus, sequence, insertion)?;
         // El intervalo pasa por el servicio común de coordenadas, que es quien
         // convierte de base uno cerrada a base cero semiabierta y quien
         // comprueba que cabe en la secuencia. Aquí no se resta ni se suma uno.
-        let closed =
-            ClosedInterval1::new(*locus.start.value(), *locus.end.value()).map_err(|error| {
-                repeat_error(
-                    general,
-                    "reference.repeat_loci.start,reference.repeat_loci.end",
-                    locus.id.value(),
-                    format!("intervalo declarado inválido: {error:?}"),
-                )
-            })?;
+        let closed = ClosedInterval1::new(start, end).map_err(|error| {
+            repeat_error(
+                general,
+                "reference.repeat_loci.start,reference.repeat_loci.end",
+                locus.id.value(),
+                format!("intervalo declarado inválido: {error:?}"),
+            )
+        })?;
         let interval = GenomicInterval::from_closed_1(
             reference_id.clone(),
             sequence_id,
             closed,
-            sequence.length(),
+            frame_length,
         )
         .map_err(|error| {
             repeat_error(
@@ -4264,11 +4845,8 @@ fn effective_repeat_loci(
                 "reference.repeat_loci.start,reference.repeat_loci.end",
                 locus.id.value(),
                 format!(
-                    "el intervalo {}..{} no cabe en {} ({} bases): {error:?}",
-                    locus.start.value(),
-                    locus.end.value(),
+                    "el intervalo {start}..{end} no cabe en {} ({frame_length} bases): {error:?}",
                     sequence.id(),
-                    sequence.length()
                 ),
             )
         })?;
@@ -4465,6 +5043,7 @@ fn effective_repeat_loci(
             resolved.push(EffectiveRepeatLocus {
                 declaration,
                 reference_units,
+                declared_position,
                 max_units,
                 admission: locus_admission,
                 slippage,
@@ -4522,6 +5101,7 @@ fn effective_repeat_loci(
         resolved.push(EffectiveRepeatLocus {
             declaration,
             reference_units,
+            declared_position,
             max_units,
             admission: locus_admission,
             slippage,
@@ -4560,6 +5140,16 @@ fn resolve_reference_units(
         crate::configuration::DeclaredReferenceSource::Simulated { .. }
     );
     let motifs = declaration.motifs();
+    // **Al insertar, el campo es obligatorio también con un solo motivo**
+    // (DTC-098): no hay tramo en el genoma de partida ni tracto que leer del
+    // FASTA, y las unidades son lo único que dice qué se inserta. El plan de
+    // inserción ya exigió el campo, un valor por bloque y ninguno a cero.
+    if locus.insert_after.is_some() {
+        return Ok(locus
+            .reference_units
+            .as_ref()
+            .map(|declared| declared.iter().map(|value| *value.value()).collect()));
+    }
     let Some(declared) = &locus.reference_units else {
         if simulated && motifs.len() > 1 {
             return Err(repeat_error(
@@ -4579,7 +5169,7 @@ fn resolve_reference_units(
             general,
             FIELD,
             locus.id.value(),
-            "reference_units solo se declara en un locus compuesto: con un solo motivo el tramo declarado ya fija el tracto",
+            "reference_units no se declara en un locus de un solo motivo con tramo: el tramo declarado ya fija el tracto; solo un locus compuesto, o uno que inserta su tracto con insert_after, lo declara",
         ));
     }
     if !simulated {
@@ -4631,8 +5221,8 @@ fn resolve_reference_units(
             locus.id.value(),
             format!(
                 "reference_units suma {sum} bases (unidades por longitud de cada motivo) y el tramo declarado {}..{} mide {}",
-                locus.start.value(),
-                locus.end.value(),
+                locus.start.as_ref().map_or(0, |value| *value.value()),
+                locus.end.as_ref().map_or(0, |value| *value.value()),
                 interval.len()
             ),
         ));

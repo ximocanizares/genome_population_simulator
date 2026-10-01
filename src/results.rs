@@ -37,8 +37,8 @@ use crate::randomness::{
     derive_subseed, f4_uniform_closed,
 };
 use crate::reference::{
-    AlphabetValidation, Reference, ReferenceOrigin, ReferenceSequence, ReversibleText,
-    SequenceClass,
+    AlphabetValidation, DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence,
+    ReversibleText, SequenceClass,
 };
 use crate::reference_fasta::{
     CANONICAL_FASTA_VERSION, CANONICAL_LINE_BASE_COUNT, SequenceExpectation,
@@ -392,6 +392,27 @@ fn repeat_loci_json(config: &EffectiveConfig) -> Result<Value, Diagnostic> {
                 .map(|allele| Value::Object(repeat_allele_json(allele)))
                 .collect::<Vec<_>>(),
         }));
+        // **Con inserción, `start`/`end` son del genoma final** (DTC-098), y
+        // lo que el usuario escribió en el de partida se publica aparte.
+        if let Some(declared) = locus.declared_position() {
+            loci.last_mut()
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| {
+                    Diagnostic::internal_invariant("results", "repeat_locus_declared")
+                        .with("detail", "el locus recién insertado no es un objeto")
+                })?
+                .insert(
+                    "declared".to_owned(),
+                    match declared {
+                        crate::application::DeclaredLocusPosition::Interval { start, end } => {
+                            json!({"start": start, "end": end})
+                        }
+                        crate::application::DeclaredLocusPosition::InsertAfter(point) => {
+                            json!({"insert_after": point})
+                        }
+                    },
+                );
+        }
         if let Some(units) = locus.reference_units() {
             loci.last_mut()
                 .and_then(Value::as_object_mut)
@@ -844,7 +865,7 @@ pub fn repeat_loci_manifest_json(
         }
     }
     Ok(Some(json!({
-        "reference_id": config.reference_id(),
+        "reference_id": config.simulation_reference_id(),
         "reference_source": match config.reference_source() {
             crate::application::EffectiveReferenceSource::Simulated => "simulated",
             crate::application::EffectiveReferenceSource::Supplied { .. } => "supplied",
@@ -1031,7 +1052,7 @@ fn resolved_technical_libraries(
     config: &EffectiveConfig,
     event: &EffectiveTechnicalEvent,
 ) -> Vec<Value> {
-    let reference_id = ReferenceId::parse(config.reference_id(), "effective_config")
+    let reference_id = ReferenceId::parse(config.simulation_reference_id(), "effective_config")
         .expect("effective configuration preserves a valid reference ID");
     let identities = derive_technical_identity_plan(
         config.reproducibility().root_seed(),
@@ -1654,6 +1675,11 @@ fn validate_effective_config_v3_against_manifest_bytes(
         fields.push("repeat_loci");
         fields.push("repeat_admission");
         fields.push("repeat_output_budget");
+        // Opcional dentro de la versión 6: solo cuando un locus inserta su
+        // tracto (DTC-098). Esta lista es exacta, así que entra solo si está.
+        if object.contains_key("inserted_reference") {
+            fields.push("inserted_reference");
+        }
     }
     // El nombre del esquema que se denuncia es el de la versión que el documento
     // declara. Antes se denunciaba siempre el de la versión 4, de modo que una
@@ -1728,6 +1754,22 @@ fn validate_effective_config_v3_against_manifest_bytes(
         ));
     }
     let mut effective_references = BTreeMap::from([(reference.0.clone(), reference.1.clone())]);
+    let inserted = validate_effective_inserted_reference(
+        object,
+        manifest,
+        effective_reference,
+        &reference.1,
+        effective_path,
+    )?;
+    if let Some((id, fasta)) = &inserted {
+        effective_references.insert(id.clone(), fasta.clone());
+    }
+    // El VCF habla de la referencia sobre la que se simula: la final si hay
+    // inserción.
+    let simulation_reference = object
+        .get("inserted_reference")
+        .and_then(Value::as_object)
+        .unwrap_or(effective_reference);
     validate_effective_population_snvs(object, manifest, &catalog, effective_path, manifest_path)?;
     validate_effective_authorizations(object, manifest, effective_path, manifest_path)?;
     let initial_individual_ids = validate_effective_initial_populations(object, effective_path)?;
@@ -1735,7 +1777,7 @@ fn validate_effective_config_v3_against_manifest_bytes(
         object,
         manifest,
         &catalog,
-        effective_reference,
+        simulation_reference,
         effective_path,
         manifest_path,
     )?;
@@ -1856,6 +1898,90 @@ fn validate_effective_config_v3_against_manifest_bytes(
         ));
     }
     Ok(())
+}
+
+/// **La sección `inserted_reference` de la configuración efectiva** frente a
+/// la `reference_insertion` del manifiesto (DTC-098).
+///
+/// Las dos secciones existen a la vez o no existe ninguna; dicen lo mismo de
+/// la referencia final, de su origen, de sus artefactos y de los cambios; el
+/// origen es la referencia declarada con su FASTA; y el catálogo final suma
+/// exactamente las bases de la suministrada más las insertadas. Devuelve el
+/// identificador de la final y su FASTA, que entran en el conjunto de
+/// referencias que el manifiesto tiene que registrar.
+fn validate_effective_inserted_reference(
+    effective: &serde_json::Map<String, Value>,
+    manifest: &serde_json::Map<String, Value>,
+    reference: &serde_json::Map<String, Value>,
+    reference_fasta: &str,
+    effective_path: &Path,
+) -> Result<Option<(String, String)>, Diagnostic> {
+    const FIELDS: [&str; 7] = [
+        "id",
+        "source_reference_id",
+        "sequences",
+        "insertions",
+        "fasta_artifact_id",
+        "map_artifact_id",
+        "source_fasta_artifact_id",
+    ];
+    let (value, section) = match (
+        effective.get("inserted_reference"),
+        manifest
+            .get("reference_insertion")
+            .and_then(Value::as_object),
+    ) {
+        (None, None) => return Ok(None),
+        (Some(value), Some(section)) => (value, section),
+        _ => {
+            return Err(effective_error(
+                effective_path,
+                "la configuración efectiva y el manifiesto no coinciden en si hay referencia final por inserción",
+            ));
+        }
+    };
+    let inserted = value
+        .as_object()
+        .ok_or_else(|| effective_error(effective_path, "inserted_reference no es objeto"))?;
+    validate_effective_closed_object(inserted, &FIELDS, "inserted_reference", effective_path)?;
+    let id = effective_non_empty_text(inserted, "id", effective_path)?;
+    let fasta = effective_non_empty_text(inserted, "fasta_artifact_id", effective_path)?;
+    if inserted.get("source_reference_id") != reference.get("id")
+        || inserted
+            .get("source_fasta_artifact_id")
+            .and_then(Value::as_str)
+            != Some(reference_fasta)
+        || [
+            ("id", "id"),
+            ("source_reference_id", "source_reference_id"),
+            ("fasta_artifact_id", "fasta_artifact_id"),
+            ("map_artifact_id", "map_artifact_id"),
+            ("source_fasta_artifact_id", "source_fasta_artifact_id"),
+            ("insertions", "insertions"),
+        ]
+        .iter()
+        .any(|(mine, theirs)| inserted.get(*mine) != section.get(*theirs))
+    {
+        return Err(effective_error(
+            effective_path,
+            "inserted_reference no coincide con la referencia declarada o con reference_insertion del manifiesto",
+        ));
+    }
+    let inserted_bases = section
+        .get("insertions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|change| change.get("inserted_bases").and_then(Value::as_u64))
+        .try_fold(0_u64, u64::checked_add);
+    let expected_total = inserted_bases
+        .zip(reference.get("total_genome_size").and_then(Value::as_u64))
+        .and_then(|(added, total)| total.checked_add(added))
+        // Un tamaño que no se puede calcular no lo alcanza ningún catálogo, y
+        // lo rechaza la comprobación del catálogo de abajo.
+        .unwrap_or(u64::MAX);
+    validate_effective_derived_sequences(inserted, expected_total, effective_path)?;
+    Ok(Some((id.to_owned(), fasta.to_owned())))
 }
 
 fn validate_effective_technical_event_link(
@@ -1982,16 +2108,37 @@ fn validate_published_resources_v3(
     )
     .map_err(|error| physical_error(effective_path, "root_seed", &error))?;
     let reference_value = effective_object(effective, "reference", effective_path)?;
-    let source_reference = read_physical_reference(
+    let declared_reference = read_physical_reference(
         root,
         reference_value,
         &artifact_paths,
         effective_path,
-        if effective_needs_reference_bases(effective) {
+        if effective_needs_reference_bases(effective)
+            || effective.contains_key("inserted_reference")
+        {
             CatalogBases::Materialized
         } else {
             CatalogBases::SummaryOnly
         },
+    )?;
+    // **Con inserción, todo lo demás se juzga contra la referencia final**, y
+    // solo después de haberla rehecho por cuenta propia (DTC-098).
+    let inserted_reference = judge_inserted_reference(
+        root,
+        effective,
+        manifest_bytes,
+        &declared_reference,
+        &artifact_paths,
+        effective_path,
+    )?;
+    let source_reference = inserted_reference.as_ref().unwrap_or(&declared_reference);
+    validate_published_reference_names(
+        root,
+        effective,
+        manifest_bytes,
+        &artifacts,
+        source_reference,
+        effective_path,
     )?;
     // **El generador de alelos por deslizamiento corre también aquí.** Este
     // juez reconstruye la configuración desde el TOML copiado, donde un locus
@@ -2008,9 +2155,9 @@ fn validate_published_resources_v3(
     // el abanico se estaría comparando consigo mismo. El juez de abajo rehace
     // el abanico **por su cuenta**, desde los bytes publicados, y contrasta lo
     // escrito con lo rehecho.
-    validate_published_slippage_fans(effective, &source_reference, root_seed, effective_path)?;
+    validate_published_slippage_fans(effective, source_reference, root_seed, effective_path)?;
     let physical_config = physical_config
-        .with_generated_repeat_alleles(&source_reference)?
+        .with_generated_repeat_alleles(source_reference)?
         .unwrap_or(physical_config);
     validate_physical_technical_event(
         root,
@@ -2019,7 +2166,7 @@ fn validate_published_resources_v3(
         manifest_bytes,
         &artifacts,
         &root_seed,
-        &source_reference,
+        source_reference,
         effective_path,
     )?;
     validate_physical_vcf_output(
@@ -2027,7 +2174,7 @@ fn validate_published_resources_v3(
         &physical_config,
         manifest_bytes,
         &artifacts,
-        &source_reference,
+        source_reference,
         effective_path,
         manifest_path,
     )?;
@@ -2041,14 +2188,14 @@ fn validate_published_resources_v3(
         effective,
         &physical_config,
         &artifacts,
-        &source_reference,
+        source_reference,
         effective_path,
         allow_empty_snv_matrix,
     )?;
     validate_physical_initial_population_statistics(
         effective,
         &physical_config,
-        &source_reference,
+        source_reference,
         matrix.as_ref(),
         effective_path,
     )?;
@@ -2056,7 +2203,7 @@ fn validate_published_resources_v3(
         validate_generated_reference(
             reference_value,
             root_seed,
-            &source_reference,
+            source_reference,
             effective_path,
             effective.get("repeat_loci"),
         )
@@ -2069,8 +2216,11 @@ fn validate_published_resources_v3(
             )
         })?;
     }
-    let mut references =
-        BTreeMap::from([(source_reference.id().as_str().to_owned(), source_reference)]);
+    drop(inserted_reference);
+    let mut references = BTreeMap::from([(
+        declared_reference.id().as_str().to_owned(),
+        declared_reference,
+    )]);
 
     for reduction_value in effective_array(effective, "reduced_references", effective_path)? {
         let reduction = reduction_value
@@ -2210,6 +2360,491 @@ fn validate_published_resources_v3(
         references.insert(id.to_owned(), derived);
     }
     Ok(())
+}
+
+/// **Todo lo publicado nombra la referencia de la simulación** (DTC-098): la
+/// final si hay inserción y la suministrada si no.
+///
+/// Es una comprobación barata, de nombres y longitudes, no una relectura de
+/// la verdad ni del VCF: la cabecera de la verdad —identificador, huella del
+/// contenido y huella del FASTA—, el identificador y la longitud de cada
+/// fragmento de la verdad que los lleva, las líneas `##reference` y
+/// `##contig` del VCF, y el identificador de la sección de loci del
+/// manifiesto. Con dos referencias en la misma ejecución, que una salida
+/// nombre la otra es justo el error que nadie más vería.
+///
+/// La huella del contenido solo se compara si la referencia se leyó con sus
+/// bases; sin ellas no puede calcularse, y entonces la ejecución no publica
+/// nada que dependa de las bases.
+fn validate_published_reference_names(
+    root: &Path,
+    effective: &serde_json::Map<String, Value>,
+    manifest_bytes: &[u8],
+    artifacts: &[ArtifactRecord],
+    reference: &Reference,
+    effective_path: &Path,
+) -> Result<(), Diagnostic> {
+    let id = reference.id().as_str();
+    let lengths = reference
+        .sequences()
+        .iter()
+        .map(|sequence| (sequence.id().as_str(), sequence.length()))
+        .collect::<Vec<_>>();
+    let fasta_digest = simulation_reference_object(effective, effective_path)?
+        .get("fasta_artifact_id")
+        .and_then(Value::as_str)
+        .and_then(|fasta| artifacts.iter().find(|artifact| artifact.id == fasta))
+        .map(|artifact| artifact.digest.as_str());
+    let read = |artifact_id: &str| {
+        artifacts
+            .iter()
+            .find(|artifact| artifact.id == artifact_id)
+            .and_then(|artifact| std::fs::read(root.join(&artifact.path)).ok())
+    };
+    if let Some(truth) = read("truth-jsonl") {
+        let text = String::from_utf8_lossy(&truth);
+        let mut lines = text.lines();
+        let header: Value = lines
+            .next()
+            .and_then(|line| serde_json::from_str(line).ok())
+            .unwrap_or(Value::Null);
+        if header.get("reference_id").and_then(Value::as_str) != Some(id) {
+            return Err(effective_error(
+                effective_path,
+                format!("la cabecera de la verdad no nombra la referencia de la simulación, {id}"),
+            ));
+        }
+        if let Ok(content) = crate::truth_validation::reference_content_sha256(reference)
+            && header
+                .get("reference_content_sha256")
+                .and_then(Value::as_str)
+                != Some(content.as_str())
+        {
+            return Err(effective_error(
+                effective_path,
+                format!("la huella del contenido en la cabecera de la verdad no es la de {id}"),
+            ));
+        }
+        let digests = header
+            .get("source_digests")
+            .and_then(Value::as_array)
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter(|digest| digest["source"]["kind"] == "reference")
+            .collect::<Vec<_>>();
+        if digests.len() != 1
+            || digests[0]["source"]["source_id"].as_str() != Some(id)
+            || digests[0]["sha256"].as_str() != fasta_digest
+        {
+            return Err(effective_error(
+                effective_path,
+                format!("la huella de referencia de la verdad no es la del FASTA de {id}"),
+            ));
+        }
+        fn foreign_fragment(value: &Value, id: &str, lengths: &[(&str, u64)]) -> bool {
+            match value {
+                Value::Object(object) => {
+                    (object.contains_key("sequence_length")
+                        && (object.get("reference_id").and_then(Value::as_str) != Some(id)
+                            || object
+                                .get("sequence_id")
+                                .and_then(Value::as_str)
+                                .and_then(|sequence| {
+                                    lengths.iter().find(|(known, _)| *known == sequence)
+                                })
+                                .map(|(_, length)| *length)
+                                != object.get("sequence_length").and_then(Value::as_u64)))
+                        || object
+                            .values()
+                            .any(|child| foreign_fragment(child, id, lengths))
+                }
+                Value::Array(items) => items.iter().any(|item| foreign_fragment(item, id, lengths)),
+                _ => false,
+            }
+        }
+        if lines.any(|line| {
+            serde_json::from_str::<Value>(line)
+                .map_or(true, |record| foreign_fragment(&record, id, &lengths))
+        }) {
+            return Err(effective_error(
+                effective_path,
+                format!(
+                    "un fragmento de la verdad no está en {id} o no tiene la longitud de su secuencia"
+                ),
+            ));
+        }
+    }
+    let vcf = read(VCF_ARTIFACT_ID).map(|bytes| {
+        if bytes.starts_with(&[0x1f, 0x8b]) {
+            let mut text = String::new();
+            let _ = std::io::Read::read_to_string(
+                &mut noodles_bgzf::io::Reader::new(bytes.as_slice()),
+                &mut text,
+            );
+            text
+        } else {
+            String::from_utf8_lossy(&bytes).into_owned()
+        }
+    });
+    if let Some(vcf) = vcf {
+        let header = vcf
+            .lines()
+            .take_while(|line| line.starts_with("##"))
+            .collect::<Vec<_>>();
+        if !header.contains(&format!("##reference={id}").as_str()) {
+            return Err(effective_error(
+                effective_path,
+                format!("la cabecera del VCF no declara ##reference={id}"),
+            ));
+        }
+        let contigs = header
+            .iter()
+            .filter(|line| line.starts_with("##contig="))
+            .map(|line| (*line).to_owned())
+            .collect::<Vec<_>>();
+        let expected = lengths
+            .iter()
+            .map(|(sequence, length)| format!("##contig=<ID={sequence},length={length}>"))
+            .collect::<Vec<_>>();
+        if contigs != expected {
+            return Err(effective_error(
+                effective_path,
+                format!("los ##contig del VCF no son el catálogo de {id}"),
+            ));
+        }
+    }
+    let manifest: Value = serde_json::from_slice(manifest_bytes).unwrap_or(Value::Null);
+    if let Some(section) = manifest.get("repeat_loci")
+        && section.get("reference_id").and_then(Value::as_str) != Some(id)
+    {
+        return Err(effective_error(
+            effective_path,
+            format!(
+                "la sección de loci del manifiesto no nombra la referencia de la simulación, {id}"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// **Juez independiente de la referencia final por inserción** (DTC-098).
+///
+/// No llama a `insert_tracts` ni a `coordinate_map_document`: todo lo que
+/// compara lo rehace aquí, desde la copia suministrada publicada y lo que la
+/// configuración efectiva declara de cada locus.
+///
+/// 1. Los cambios publicados en `inserted_reference` son los que salen de los
+///    loci con `declared.insert_after`, con el tracto de cada uno construido
+///    desde sus motivos y sus `reference_units`.
+/// 2. El FASTA final es la suministrada con esos tractos empalmados, base a
+///    base.
+/// 3. El mapa es exactamente el que describe ese empalme: segmentos
+///    contiguos, conservados con su intervalo de origen e insertados en su
+///    punto. El esquema del mapa admite huecos, intervalos invertidos e
+///    identificadores iguales, así que no basta con él.
+/// 4. El intervalo publicado de cada locus, en la configuración efectiva y en
+///    el manifiesto, es la traducción de lo declarado.
+///
+/// Devuelve la referencia final leída del FASTA publicado, que es contra la
+/// que se juzga todo lo demás, o `None` si la ejecución no inserta nada.
+fn judge_inserted_reference(
+    root: &Path,
+    effective: &serde_json::Map<String, Value>,
+    manifest_bytes: &[u8],
+    supplied: &Reference,
+    artifact_paths: &BTreeMap<&str, &str>,
+    effective_path: &Path,
+) -> Result<Option<Reference>, Diagnostic> {
+    // Que la sección sea un objeto cerrado y concuerde con el manifiesto ya lo
+    // exigió `validate_effective_inserted_reference`, antes que este juez.
+    let Some(inserted) = effective
+        .get("inserted_reference")
+        .and_then(Value::as_object)
+    else {
+        return Ok(None);
+    };
+    let derived_id = effective_non_empty_text(inserted, "id", effective_path)?;
+    let loci = effective
+        .get("repeat_loci")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    // (1) Los tractos, desde los motivos y las unidades declarados.
+    let catalog_index = |sequence: &str| {
+        supplied
+            .sequences()
+            .iter()
+            .position(|candidate| candidate.id().as_str() == sequence)
+    };
+    let mut points: Vec<(usize, u64, String, String, Vec<u8>)> = Vec::new();
+    for locus in loci {
+        let Some(insert_after) = locus
+            .get("declared")
+            .and_then(|declared| declared.get("insert_after"))
+            .and_then(Value::as_u64)
+        else {
+            continue;
+        };
+        let id = locus.get("id").and_then(Value::as_str).unwrap_or_default();
+        let sequence = locus
+            .get("sequence_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let motifs = locus
+            .get("motifs")
+            .and_then(Value::as_array)
+            .map_or(&[][..], Vec::as_slice);
+        let units = locus
+            .get("reference_units")
+            .and_then(Value::as_array)
+            .map_or(&[][..], Vec::as_slice);
+        let index = catalog_index(sequence);
+        // El punto tiene que dejar una base a cada lado (REQ-IND-40): si no,
+        // el empalme de abajo no tendría dónde cortar.
+        let anchored = index
+            .and_then(|index| supplied.sequences().get(index))
+            .is_some_and(|host| insert_after >= 1 && insert_after < host.length());
+        // Las unidades no pueden pasar del tope publicado del locus: un
+        // documento corrupto con una cifra enorme no puede hacer reservar al
+        // juez gigabytes antes de rechazarlo.
+        let total_units = units
+            .iter()
+            .try_fold(0_u64, |total, count| total.checked_add(count.as_u64()?));
+        let within_cap = total_units
+            .zip(locus.get("max_units").and_then(Value::as_u64))
+            .is_some_and(|(total, cap)| total <= cap);
+        let mut bases = Vec::new();
+        let mut well_formed =
+            anchored && within_cap && !motifs.is_empty() && motifs.len() == units.len();
+        let checked = if well_formed { motifs.len() } else { 0 };
+        for (motif, count) in motifs.iter().zip(units).take(checked) {
+            match (motif.as_str(), count.as_u64()) {
+                (Some(motif), Some(count)) if !motif.is_empty() && count > 0 => {
+                    for _ in 0..count {
+                        bases.extend_from_slice(motif.as_bytes());
+                    }
+                }
+                _ => well_formed = false,
+            }
+        }
+        let (Some(index), true) = (index, well_formed) else {
+            return Err(effective_error(
+                effective_path,
+                format!(
+                    "referencia final: el locus {id} inserta un tracto sin secuencia conocida, sin una base a cada lado, sin motivos y unidades por bloque, o con más unidades que su tope"
+                ),
+            ));
+        };
+        points.push((
+            index,
+            insert_after,
+            id.to_owned(),
+            sequence.to_owned(),
+            bases,
+        ));
+    }
+    points.sort_by_key(|(index, point, ..)| (*index, *point));
+    let expected_changes = points
+        .iter()
+        .map(|(_, insert_after, locus, sequence, bases)| {
+            json!({
+                "locus_id": locus,
+                "sequence_id": sequence,
+                "insert_after": insert_after,
+                "inserted_bases": bases.len(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if points.is_empty() || inserted.get("insertions") != Some(&Value::Array(expected_changes)) {
+        return Err(effective_error(
+            effective_path,
+            "referencia final: los cambios publicados no son los que declaran los loci",
+        ));
+    }
+    // (2) y (3): el empalme, y el mapa que lo describe, rehechos aquí.
+    let mut sequences = Vec::with_capacity(supplied.sequences().len());
+    let mut segments = Vec::new();
+    for (index, sequence) in supplied.sequences().iter().enumerate() {
+        // La copia suministrada se lee con sus bases siempre que la efectiva
+        // declara `inserted_reference` (ver la lectura en el llamador), así que
+        // un fallo aquí es una invariante rota y no un documento rechazable.
+        let source_bases = sequence.sequence().as_bytes().map_err(|_| {
+            Diagnostic::internal_invariant("results", "judge_inserted_reference")
+                .with("detail", "la copia suministrada se leyó sin sus bases")
+        })?;
+        let length = sequence.length();
+        let class = sequence_class(sequence.class());
+        let mut spliced = Vec::with_capacity(source_bases.len());
+        let (mut source_next, mut derived_next) = (1_u64, 1_u64);
+        let retained = |from: u64, to: u64, derived_next: &mut u64, segments: &mut Vec<Value>| {
+            if from > to {
+                return;
+            }
+            let span = to - from;
+            segments.push(json!({
+                "materialization_order": segments.len() + 1,
+                "segment_class": "retained",
+                "sequence_id": sequence.id().as_str(),
+                "sequence_class": class,
+                "source_interval": {"start": from, "end": to},
+                "derived_interval": {"start": *derived_next, "end": *derived_next + span},
+                "orientation": "forward",
+            }));
+            *derived_next += span + 1;
+        };
+        for (_, insert_after, _, _, bases) in points.iter().filter(|point| point.0 == index) {
+            let anchor = *insert_after;
+            spliced.extend_from_slice(&source_bases[(source_next - 1) as usize..anchor as usize]);
+            retained(source_next, anchor, &mut derived_next, &mut segments);
+            source_next = anchor + 1;
+            spliced.extend_from_slice(bases);
+            let span = bases.len() as u64;
+            segments.push(json!({
+                "materialization_order": segments.len() + 1,
+                "segment_class": "inserted",
+                "sequence_id": sequence.id().as_str(),
+                "sequence_class": class,
+                "derived_interval": {"start": derived_next, "end": derived_next + span - 1},
+                "orientation": "forward",
+            }));
+            derived_next += span;
+        }
+        spliced.extend_from_slice(&source_bases[(source_next - 1) as usize..]);
+        retained(source_next, length, &mut derived_next, &mut segments);
+        // Todo lo que se construye aquí sale de bases ya validadas: un fallo
+        // sería una invariante rota, no un documento rechazable.
+        let invariant = |what: &str, error: &dyn std::fmt::Debug| {
+            Diagnostic::internal_invariant("results", "judge_inserted_reference")
+                .with("detail", format!("{what}: {error:?}"))
+        };
+        let sequence_id = SequenceId::parse(sequence.id().as_str(), derived_id)
+            .map_err(|error| invariant("identificador", &error))?;
+        let header = FastaHeader::parse(sequence.id().as_str().as_bytes())
+            .map_err(|error| invariant("cabecera", &error))?;
+        let dna =
+            DnaSequence::try_from_bytes(&spliced).map_err(|error| invariant("bases", &error))?;
+        sequences.push(
+            ReferenceSequence::new(sequence_id, header, sequence.class(), &dna)
+                .map_err(|error| invariant("secuencia", &error))?,
+        );
+    }
+    let expected = Reference::new(
+        ReferenceId::parse(derived_id, "published-resource-validation")
+            .map_err(|error| physical_error(effective_path, "inserted_reference_id", &error))?,
+        ReferenceOrigin::TractInsertion {
+            source_reference_id: supplied.id().clone(),
+        },
+        sequences,
+    )
+    .map_err(|error| {
+        Diagnostic::internal_invariant("results", "judge_inserted_reference")
+            .with("detail", format!("{error:?}"))
+    })?;
+    let physical = read_physical_sequence_catalog(
+        root,
+        derived_id,
+        effective_non_empty_text(inserted, "fasta_artifact_id", effective_path)?,
+        effective_array(inserted, "sequences", effective_path)?,
+        "n_count",
+        artifact_paths,
+        effective_path,
+        CatalogBases::Materialized,
+    )?;
+    compare_reference_bases(&expected, &physical, effective_path, derived_id)?;
+    let map_id = effective_non_empty_text(inserted, "map_artifact_id", effective_path)?;
+    // Un mapa ausente o ilegible no es el esperado: lo rechaza la misma
+    // comparación de abajo. Que el artefacto exista con su clase ya lo exige
+    // el manifiesto.
+    let map = artifact_paths
+        .get(map_id)
+        .and_then(|relative| std::fs::read(root.join(relative)).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .unwrap_or(Value::Null);
+    let expected_map = json!({
+        "document_kind": "reference_coordinate_map",
+        "schema_version": "2",
+        "operation": "tract_insertion",
+        "source_reference_id": supplied.id().as_str(),
+        "derived_reference_id": derived_id,
+        "segments": segments,
+    });
+    if map != expected_map {
+        return Err(effective_error(
+            effective_path,
+            format!(
+                "referencia final: el mapa {map_id} no describe el empalme de los tractos declarados"
+            ),
+        ));
+    }
+    // (4) El intervalo publicado de cada locus es la traducción de lo declarado.
+    let shift = |sequence: &str, before: u64| -> u64 {
+        points
+            .iter()
+            .filter(|point| point.3 == sequence && point.1 < before)
+            .map(|point| point.4.len() as u64)
+            .sum()
+    };
+    let manifest: Value = serde_json::from_slice(manifest_bytes).unwrap_or(Value::Null);
+    let manifest_loci = manifest
+        .get("repeat_loci")
+        .and_then(|section| section.get("loci"))
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    for locus in loci {
+        let id = locus.get("id").and_then(Value::as_str).unwrap_or_default();
+        let sequence = locus
+            .get("sequence_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let declared = locus.get("declared");
+        let expected_interval = match (
+            declared
+                .and_then(|value| value.get("insert_after"))
+                .and_then(Value::as_u64),
+            declared
+                .and_then(|value| value.get("start"))
+                .and_then(Value::as_u64),
+            declared
+                .and_then(|value| value.get("end"))
+                .and_then(Value::as_u64),
+        ) {
+            (Some(anchor), None, None) => points.iter().find(|point| point.2 == id).map(|point| {
+                let start = anchor + shift(sequence, anchor) + 1;
+                (start, start + point.4.len() as u64 - 1)
+            }),
+            (None, Some(start), Some(end))
+                if !points
+                    .iter()
+                    .any(|point| point.3 == sequence && start <= point.1 && point.1 < end) =>
+            {
+                Some((start + shift(sequence, start), end + shift(sequence, end)))
+            }
+            _ => None,
+        };
+        let published = |object: &Value| {
+            (
+                object.get("start").and_then(Value::as_u64),
+                object.get("end").and_then(Value::as_u64),
+            )
+        };
+        let in_manifest = manifest_loci
+            .iter()
+            .find(|candidate| candidate.get("id").and_then(Value::as_str) == Some(id))
+            .map(published);
+        // Lo declarado frente al TOML ya lo comprobó la resolución, antes de
+        // este juez, así que aquí basta una rama: o el intervalo publicado es
+        // la traducción de lo declarado, o no lo es.
+        let translated = expected_interval.map(|(start, end)| (Some(start), Some(end)));
+        if translated.is_none() || Some(published(locus)) != translated || in_manifest != translated
+        {
+            return Err(effective_error(
+                effective_path,
+                format!(
+                    "referencia final: el intervalo publicado del locus {id} no es la traducción al genoma final de lo declarado"
+                ),
+            ));
+        }
+    }
+    Ok(Some(physical))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3091,6 +3726,22 @@ fn validate_effective_targets_against_configuration_v1(
     Ok(())
 }
 
+/// El objeto de la configuración efectiva que describe la referencia **de la
+/// simulación**: `inserted_reference` si la ejecución inserta tractos
+/// (DTC-098) y `reference` en los demás casos.
+fn simulation_reference_object<'a>(
+    effective: &'a serde_json::Map<String, Value>,
+    effective_path: &Path,
+) -> Result<&'a serde_json::Map<String, Value>, Diagnostic> {
+    match effective
+        .get("inserted_reference")
+        .and_then(Value::as_object)
+    {
+        Some(inserted) => Ok(inserted),
+        None => effective_object(effective, "reference", effective_path),
+    }
+}
+
 fn validate_physical_population_snvs(
     root: &Path,
     effective: &serde_json::Map<String, Value>,
@@ -3114,7 +3765,7 @@ fn validate_physical_population_snvs(
                 "modo SNV efectivo no coincide con reutilización",
             ));
         };
-        let reference_id = effective_object(effective, "reference", effective_path)?
+        let reference_id = simulation_reference_object(effective, effective_path)?
             .get("fasta_artifact_id")
             .and_then(Value::as_str)
             .ok_or_else(|| effective_error(effective_path, "referencia sin artefacto FASTA"))?;
@@ -3158,7 +3809,7 @@ fn validate_physical_population_snvs(
         .iter()
         .find(|artifact| artifact.id == "population-snvs-tsv")
         .ok_or_else(|| effective_error(effective_path, "TSV SNV ausente del catálogo"))?;
-    let reference_id = effective_object(effective, "reference", effective_path)?
+    let reference_id = simulation_reference_object(effective, effective_path)?
         .get("fasta_artifact_id")
         .and_then(Value::as_str)
         .ok_or_else(|| effective_error(effective_path, "referencia sin artefacto FASTA"))?;
@@ -3588,6 +4239,145 @@ fn validate_effective_targets_against_configuration(
                 ),
             ));
         }
+    }
+    // **Las regiones del generador de la matriz, traducidas aquí por cuenta
+    // propia** (DTC-098). La resolución que se acaba de rehacer es la del
+    // productor; si su traducción estuviera mal, compararla consigo misma no lo
+    // vería. Por eso cada región del TOML se traduce con una suma escrita aquí,
+    // desde los cambios que la configuración efectiva publica —que el juez de
+    // la referencia final ata a los loci—, y se exige la misma región que la
+    // resolución entregó al generador. Una región que un tracto partiría tiene
+    // que haberse rechazado antes de publicar.
+    if let (
+        Some(changes),
+        Some(crate::configuration::DeclaredPopulationSnvs::Generate { parameters }),
+    ) = (
+        effective
+            .get("inserted_reference")
+            .and_then(|inserted| inserted.get("insertions"))
+            .and_then(Value::as_array),
+        declared.population_snvs(),
+    ) {
+        let points = changes
+            .iter()
+            .filter_map(|change| {
+                Some((
+                    change.get("sequence_id")?.as_str()?,
+                    change.get("insert_after")?.as_u64()?,
+                    change.get("inserted_bases")?.as_u64()?,
+                ))
+            })
+            .collect::<Vec<_>>();
+        let translate = |contig: &str, position: u64| {
+            position
+                + points
+                    .iter()
+                    .filter(|(sequence, anchor, _)| *sequence == contig && *anchor < position)
+                    .map(|(_, _, bases)| bases)
+                    .sum::<u64>()
+        };
+        let translated = parameters
+            .regions
+            .iter()
+            .map(|region| {
+                let (contig, start, end) = (
+                    region.contig.value().as_str(),
+                    *region.start.value(),
+                    *region.end.value(),
+                );
+                let split = points.iter().any(|(sequence, anchor, _)| {
+                    *sequence == contig && start <= *anchor && *anchor < end
+                });
+                (!split).then(|| {
+                    (
+                        contig.to_owned(),
+                        translate(contig, start),
+                        translate(contig, end),
+                    )
+                })
+            })
+            .collect::<Option<Vec<_>>>();
+        let resolved = match expected
+            .population_snvs_generation()
+            .map(|generation| &generation.spatial)
+        {
+            Some(crate::population_snvs::GeneratedSpatialMode::WeightedRegions {
+                regions, ..
+            }) => regions
+                .iter()
+                .map(|region| {
+                    (
+                        region.contig.clone(),
+                        region.start_1based,
+                        region.end_1based,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        if translated.as_ref() != Some(&resolved) {
+            return Err(effective_error(
+                effective_path,
+                "las regiones del generador de la matriz no son la traducción al genoma final de las del TOML",
+            ));
+        }
+    }
+    // **La inserción publicada es la que el TOML declara** (DTC-098): la misma
+    // referencia final, los mismos cambios y, en cada locus, lo mismo
+    // declarado. La traducción de lo declarado al genoma final la juzga por su
+    // cuenta `judge_inserted_reference`, sin pasar por esta resolución.
+    let expected_inserted = expected
+        .tract_insertion()
+        .map(|plan| {
+            Ok::<_, Diagnostic>((
+                plan.derived_reference_id().to_owned(),
+                insertion_changes_json(&expected)?,
+            ))
+        })
+        .transpose()
+        .map_err(|error| physical_error(effective_path, "insertion_changes", &error))?;
+    let published_inserted = effective
+        .get("inserted_reference")
+        .and_then(Value::as_object)
+        .map(|inserted| {
+            (
+                inserted
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                inserted.get("insertions").cloned(),
+            )
+        });
+    let expected_declared = expected
+        .repeat_loci()
+        .iter()
+        .map(|locus| {
+            locus.declared_position().map(|declared| match declared {
+                crate::application::DeclaredLocusPosition::Interval { start, end } => {
+                    json!({"start": start, "end": end})
+                }
+                crate::application::DeclaredLocusPosition::InsertAfter(point) => {
+                    json!({"insert_after": point})
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let published_declared = effective
+        .get("repeat_loci")
+        .and_then(Value::as_array)
+        .map_or_else(Vec::new, |loci| {
+            loci.iter()
+                .map(|locus| locus.get("declared").cloned())
+                .collect()
+        });
+    if published_inserted != expected_inserted.map(|(id, changes)| (Some(id), Some(changes)))
+        || (expected.document_version() == DeclaredDocumentVersion::V4
+            && published_declared != expected_declared)
+    {
+        return Err(effective_error(
+            effective_path,
+            "la referencia final, sus cambios o lo declarado de cada locus no coinciden con el TOML",
+        ));
     }
     let expected_direct_events = Value::Array(
         expected
@@ -4342,8 +5132,11 @@ fn validate_published_slippage_fans(
     let Some(loci) = effective.get("repeat_loci").and_then(Value::as_array) else {
         return Ok(());
     };
+    // Con inserción, el ámbito de azar es el de la referencia final
+    // (DTC-098): la que el productor siembra y la que se juzga.
     let reference_id = effective
-        .get("reference")
+        .get("inserted_reference")
+        .or_else(|| effective.get("reference"))
         .and_then(Value::as_object)
         .and_then(|reference| reference.get("id"))
         .and_then(Value::as_str)
@@ -5065,6 +5858,9 @@ fn parse_general_manifest_bytes_unretagged(
     let mut fields = FIELDS.to_vec();
     if schema_version == Some(GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS) {
         fields.push("repeat_loci");
+        // La inserción de tractos exige loci, de modo que su sección solo
+        // puede vivir en la versión 6; es opcional dentro de ella (DTC-098).
+        fields.push("reference_insertion");
     }
     validate_closed_object(object, &fields, "manifest.json", path).map_err(|error| {
         retag_format_schema(error, general_manifest_schema_file_for(schema_version))
@@ -5131,6 +5927,10 @@ fn parse_general_manifest_bytes_unretagged(
         &references,
         path,
     )?;
+    let insertion = object
+        .get("reference_insertion")
+        .map(|value| validate_manifest_reference_insertion(value, &catalog, &references, path))
+        .transpose()?;
     let population_snvs =
         validate_manifest_population_snvs(object.get("population_snvs"), &catalog, path)?;
     let events = validate_manifest_events(object.get("events"), &records, &catalog, path)?;
@@ -5187,6 +5987,11 @@ fn parse_general_manifest_bytes_unretagged(
             expected_minimum.insert(artifact_id.as_str());
         }
     }
+    // El mapa de la referencia final es parte del mínimo, como su FASTA: sin
+    // él la simulación no puede relacionarse con el genoma suministrado.
+    if let Some(insertion) = &insertion {
+        expected_minimum.insert(insertion.map_artifact_id.as_str());
+    }
     validate_output_categories(
         required_object(object, "output_categories", path)?,
         &catalog,
@@ -5203,6 +6008,17 @@ fn parse_general_manifest_bytes_unretagged(
 
     match state {
         UnitState::Complete => {
+            // Rama propia, y no una condición más de la de abajo: así la
+            // puerta de cobertura la cuenta por separado.
+            if insertion
+                .as_ref()
+                .is_some_and(|insertion| insertion.state != UnitState::Complete)
+            {
+                return Err(manifest_error(
+                    path,
+                    "una ejecución complete exige que su referencia final por inserción esté complete",
+                ));
+            }
             if configuration_input.is_null()
                 || effective_id.is_none()
                 || required_array(object, "references", path)?.is_empty()
@@ -7812,6 +8628,124 @@ fn validate_references(
     Ok(references)
 }
 
+/// Lo que el manifiesto publica de la referencia final (DTC-098), ya validado.
+struct ValidatedManifestInsertion {
+    state: UnitState,
+    map_artifact_id: String,
+}
+
+/// **La sección `reference_insertion` del manifiesto general** (DTC-098,
+/// REQ-MAN-07).
+///
+/// Comprueba la forma cerrada, que la referencia final y la de origen están
+/// entre las referencias del manifiesto con los FASTA que dicen, que el mapa
+/// es un artefacto de su clase y versión, y que la lista de cambios no está
+/// vacía y cada cambio tiene sus cuatro campos. Que los cambios sean **los
+/// declarados** y que el FASTA final sea el suministrado con esos cambios lo
+/// juzga la validación física, que tiene la configuración y las bases.
+fn validate_manifest_reference_insertion(
+    value: &Value,
+    catalog: &BTreeMap<&str, &str>,
+    references: &BTreeMap<String, String>,
+    path: &Path,
+) -> Result<ValidatedManifestInsertion, Diagnostic> {
+    const FIELDS: [&str; 9] = [
+        "id",
+        "source_reference_id",
+        "state",
+        "fasta_artifact_id",
+        "map_artifact_id",
+        "source_fasta_artifact_id",
+        "map_document_kind",
+        "map_schema_version",
+        "insertions",
+    ];
+    const CHANGE_FIELDS: [&str; 4] = ["locus_id", "sequence_id", "insert_after", "inserted_bases"];
+    let object = value
+        .as_object()
+        .ok_or_else(|| manifest_error(path, "reference_insertion no es objeto"))?;
+    validate_closed_object(object, &FIELDS, "reference_insertion", path)?;
+    let id = required_non_empty_text(object, "id", path)?;
+    let source = required_non_empty_text(object, "source_reference_id", path)?;
+    let fasta = required_non_empty_text(object, "fasta_artifact_id", path)?;
+    let source_fasta = required_non_empty_text(object, "source_fasta_artifact_id", path)?;
+    if id == source
+        || references.get(id).map(String::as_str) != Some(fasta)
+        || references.get(source).map(String::as_str) != Some(source_fasta)
+    {
+        return Err(manifest_error(
+            path,
+            "reference_insertion no enlaza una referencia final distinta de su origen, con los FASTA que el manifiesto registra",
+        ));
+    }
+    let map = required_non_empty_text(object, "map_artifact_id", path)?;
+    require_artifact_kind(
+        catalog,
+        map,
+        crate::reference_tract_insertion::COORDINATE_MAP_DOCUMENT_KIND,
+        path,
+    )?;
+    if object.get("map_document_kind").and_then(Value::as_str)
+        != Some(crate::reference_tract_insertion::COORDINATE_MAP_DOCUMENT_KIND)
+        || object.get("map_schema_version").and_then(Value::as_str)
+            != Some(crate::reference_tract_insertion::COORDINATE_MAP_SCHEMA_VERSION)
+    {
+        return Err(manifest_error(
+            path,
+            "reference_insertion no declara la clase y la versión del mapa de coordenadas",
+        ));
+    }
+    let state = match object.get("state").and_then(Value::as_str) {
+        Some("complete") => UnitState::Complete,
+        Some("failed") => UnitState::Failed,
+        _ => {
+            return Err(manifest_error(
+                path,
+                "reference_insertion no tiene un estado válido",
+            ));
+        }
+    };
+    let changes = object
+        .get("insertions")
+        .and_then(Value::as_array)
+        .filter(|changes| !changes.is_empty())
+        .ok_or_else(|| manifest_error(path, "reference_insertion no publica ningún cambio"))?;
+    for change in changes {
+        let well_formed = change.as_object().is_some_and(|change| {
+            change.len() == CHANGE_FIELDS.len()
+                && CHANGE_FIELDS
+                    .iter()
+                    .all(|field| change.contains_key(*field))
+                && change
+                    .get("locus_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| !text.is_empty())
+                && change
+                    .get("sequence_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| !text.is_empty())
+                && change
+                    .get("insert_after")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|value| value >= 1)
+                && change
+                    .get("inserted_bases")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|value| value >= 1)
+        });
+        if !well_formed {
+            return Err(manifest_error(
+                path,
+                "un cambio de reference_insertion no tiene exactamente locus, secuencia, punto y bases",
+            ));
+        }
+    }
+    Ok(ValidatedManifestInsertion {
+        state,
+        map_artifact_id: map.to_owned(),
+    })
+}
+
 struct ValidatedManifestReductions {
     states: Vec<UnitState>,
     derived_reference_ids: BTreeSet<String>,
@@ -8712,6 +9646,78 @@ fn reference_json(
         })).collect::<Vec<_>>(),
         "fasta_artifact_id": output.fasta.id,
     })
+}
+
+/// Lista de los cambios que la inserción aplicó, en el orden del plan.
+fn insertion_changes_json(config: &EffectiveConfig) -> Result<Value, Diagnostic> {
+    let plan = config.tract_insertion().ok_or_else(|| {
+        Diagnostic::internal_invariant("results", "inserted_reference")
+            .with("detail", "se publica una inserción sin plan de inserción")
+    })?;
+    Ok(Value::Array(
+        plan.points()
+            .iter()
+            .map(|point| {
+                json!({
+                    "locus_id": point.locus_id(),
+                    "sequence_id": point.sequence_id(),
+                    "insert_after": point.insert_after(),
+                    "inserted_bases": point.bases().len(),
+                })
+            })
+            .collect(),
+    ))
+}
+
+/// Sección `inserted_reference` de la configuración efectiva v6 (DTC-098): la
+/// referencia **final**, sobre la que se simula, con su catálogo, los cambios
+/// que la distinguen de la suministrada y sus artefactos.
+pub fn inserted_reference_json(
+    config: &EffectiveConfig,
+    reference: &Reference,
+    fasta: &ArtifactRecord,
+    map: &ArtifactRecord,
+    source_fasta: &ArtifactRecord,
+) -> Result<Value, Diagnostic> {
+    Ok(json!({
+        "id": config.simulation_reference_id(),
+        "source_reference_id": config.reference_id(),
+        "sequences": reference.sequences().iter().map(|sequence| json!({
+            "id": sequence.id().as_str(),
+            "class": sequence_class(sequence.class()),
+            "length": sequence.length(),
+            "header": reversible_bytes_json(sequence.header().raw_bytes()),
+            "description": reversible_description_json(sequence.header().description()),
+            "alphabet_validation": alphabet_validation(sequence.alphabet_validation()),
+            "n_count": sequence.unknown_base_count(),
+        })).collect::<Vec<_>>(),
+        "insertions": insertion_changes_json(config)?,
+        "fasta_artifact_id": fasta.id,
+        "map_artifact_id": map.id,
+        "source_fasta_artifact_id": source_fasta.id,
+    }))
+}
+
+/// Sección `reference_insertion` del manifiesto general v6 (DTC-098, REQ-MAN-07):
+/// la referencia final, la de origen, los artefactos y los cambios aplicados.
+pub fn manifest_insertion_json(
+    config: &EffectiveConfig,
+    state: UnitState,
+    fasta: &ArtifactRecord,
+    map: &ArtifactRecord,
+    source_fasta: &ArtifactRecord,
+) -> Result<Value, Diagnostic> {
+    Ok(json!({
+        "id": config.simulation_reference_id(),
+        "source_reference_id": config.reference_id(),
+        "state": state.as_str(),
+        "fasta_artifact_id": fasta.id,
+        "map_artifact_id": map.id,
+        "source_fasta_artifact_id": source_fasta.id,
+        "map_document_kind": crate::reference_tract_insertion::COORDINATE_MAP_DOCUMENT_KIND,
+        "map_schema_version": crate::reference_tract_insertion::COORDINATE_MAP_SCHEMA_VERSION,
+        "insertions": insertion_changes_json(config)?,
+    }))
 }
 
 fn canonical_fasta_json() -> Value {

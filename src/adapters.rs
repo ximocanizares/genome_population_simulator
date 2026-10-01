@@ -1873,6 +1873,7 @@ fn parse_reference(
             "repeat_loci",
             "repeat_admission",
             "max_tract_output_bases",
+            "inserted_reference_id",
         ]
     } else {
         &["kind", "id", "fasta", "sequences", "composition"]
@@ -1887,6 +1888,15 @@ fn parse_reference(
                     admitted,
                     "reference.kind,reference.fasta",
                     "una referencia simulada no admite fasta",
+                ));
+            }
+            // Solo se inserta un tracto en una referencia suministrada: en la
+            // simulada el tracto se coloca en su tramo (DTC-098).
+            if table.contains_key("inserted_reference_id") {
+                return Err(semantic_error(
+                    admitted,
+                    "reference.kind,reference.inserted_reference_id",
+                    "una referencia simulada no admite inserted_reference_id: el tracto de cada locus se coloca en su tramo y no hay nada que insertar",
                 ));
             }
             let composition_table = required_table(admitted, table, "composition")?;
@@ -1983,6 +1993,11 @@ fn parse_reference(
     } else {
         None
     };
+    let inserted_reference_id = if declares_repeats {
+        optional_located_string(admitted, table, "inserted_reference_id")?
+    } else {
+        None
+    };
     Ok(DeclaredReference {
         id,
         source,
@@ -1990,6 +2005,7 @@ fn parse_reference(
         repeat_loci,
         repeat_admission,
         max_tract_output_bases,
+        inserted_reference_id,
     })
 }
 
@@ -2204,6 +2220,7 @@ fn parse_repeat_loci(
                 "sequence",
                 "start",
                 "end",
+                "insert_after",
                 "motif",
                 "motifs",
                 "reference_units",
@@ -2358,11 +2375,35 @@ fn parse_repeat_loci(
                 interruptions,
             });
         }
+        // **O el locus señala un tracto que ya está, o inserta el suyo**
+        // (DTC-098). Con `insert_after` el tracto no existe en el genoma de
+        // partida y un tramo no tendría dónde estar; sin él, el tramo es
+        // obligatorio como siempre.
+        let insert_after = optional_located_u64(admitted, locus, "insert_after")?;
+        let (start, end) = if insert_after.is_some() {
+            if locus.contains_key("start") || locus.contains_key("end") {
+                return Err(semantic_error(
+                    admitted,
+                    "reference.repeat_loci.insert_after,reference.repeat_loci.start,reference.repeat_loci.end",
+                    format!(
+                        "el locus {} declara insert_after y además start o end; son excluyentes: un tracto que se inserta no existe en el genoma de partida",
+                        id.value()
+                    ),
+                ));
+            }
+            (None, None)
+        } else {
+            (
+                Some(required_u64(admitted, locus, "start")?),
+                Some(required_u64(admitted, locus, "end")?),
+            )
+        };
         loci.push(DeclaredRepeatLocus {
             id,
             sequence: required_string(admitted, locus, "sequence")?,
-            start: required_u64(admitted, locus, "start")?,
-            end: required_u64(admitted, locus, "end")?,
+            start,
+            end,
+            insert_after,
             motifs,
             reference_units: parse_reference_units(admitted, locus)?,
             max_units: optional_located_u64(admitted, locus, "max_units")?,

@@ -60,6 +60,7 @@ LOCUS_ROWS = [
         "sequence": "chr1",
         "start": 101,
         "end": 200,
+        "insert_after": "",
         "motifs": "CA",
         "reference_units": "",
         "max_units": "120",
@@ -75,6 +76,7 @@ GENERATED_LOCUS_ROWS = [
         "sequence": "chr1",
         "start": 101,
         "end": 200,
+        "insert_after": "",
         "motifs": "CA",
         "reference_units": "",
         "max_units": "120",
@@ -91,6 +93,7 @@ COMPOSITE_LOCUS_ROW = {
     "sequence": "chr1",
     "start": 101,
     "end": 130,
+    "insert_after": "",
     "motifs": "CA,CAG",
     "reference_units": "9,4",
     "max_units": "",
@@ -100,6 +103,26 @@ COMPOSITE_LOCUS_ROW = {
 COMPOSITE_ALLELE_ROWS = [
     {"order": 1, "locus_id": "STR-C", "units": "9,4", "sequence": "", "frequency": "0.5"},
     {"order": 2, "locus_id": "STR-C", "units": "10,4", "sequence": "", "frequency": "0.5"},
+]
+
+# Locus que **inserta** `(CAG)5` tras la base 50 de una referencia suministrada
+# (F1.7.2.7): sin tramo, con `reference_units` aunque tenga un solo motivo.
+INSERTING_LOCUS_ROW = {
+    "order": 1,
+    "id": "STR-INS",
+    "sequence": "chr1",
+    "start": "",
+    "end": "",
+    "insert_after": "50",
+    "motifs": "CAG",
+    "reference_units": "5",
+    "max_units": "",
+    "min_purity": "",
+    "min_longest_run_units": "",
+}
+INSERTING_ALLELE_ROWS = [
+    {"order": 1, "locus_id": "STR-INS", "units": "5", "sequence": "", "frequency": "0.5"},
+    {"order": 2, "locus_id": "STR-INS", "units": "6", "sequence": "", "frequency": "0.5"},
 ]
 
 SLIPPAGE_ROWS = [
@@ -764,6 +787,87 @@ class RepeatLociUiTests(unittest.TestCase):
         sequence = sequences[COMPOSITE_LOCUS_ROW["sequence"]]
         self.assertEqual(sequence[100:130], "CA" * 9 + "CAG" * 4)
 
+    # -----------------------------------------------------------------------
+    # F1.7.2.7 — insertar un tracto en una referencia suministrada
+    # -----------------------------------------------------------------------
+
+    def test_an_insertion_survives_the_round_trip_through_toml_and_back(self) -> None:
+        """`insert_after` va al TOML sin `start` ni `end` y vuelve igual.
+
+        También vuelve el nombre de la referencia final. El locus declara
+        `reference_units` con un solo motivo, que es lo que exige una inserción.
+        """
+        locus_rows = [dict(INSERTING_LOCUS_ROW)]
+        loci = repeat_loci_from_editor_rows(locus_rows, INSERTING_ALLELE_ROWS, [])
+        self.assertEqual(loci[0].insert_after, 50)
+        self.assertIsNone(loci[0].start)
+        form = supplied_form(loci)
+        form.reference.inserted_reference_id = "ref-final"
+        rendered = render_general_toml(form)
+        self.assertIn("insert_after = 50", rendered)
+        self.assertIn('inserted_reference_id = "ref-final"', rendered)
+        self.assertNotIn("start = ", rendered.split("[[reference.repeat_loci]]")[1])
+        parsed = parse_general_toml(rendered)
+        self.assertEqual(parsed.reference.repeat_loci, loci)
+        self.assertEqual(parsed.reference.inserted_reference_id, "ref-final")
+        self.assertEqual(repeat_locus_editor_rows(parsed.reference.repeat_loci), locus_rows)
+
+    def test_an_insertion_that_also_declares_a_tract_is_rejected(self) -> None:
+        """Con `insert_after`, las celdas del tramo van vacías.
+
+        Control positivo al lado: la misma fila sin tramo se admite. Y el TOML
+        con las dos cosas se rechaza al importarlo, igual que en Rust.
+        """
+        repeat_loci_from_editor_rows([dict(INSERTING_LOCUS_ROW)], INSERTING_ALLELE_ROWS, [])
+        with self.assertRaises(EditorError) as raised:
+            repeat_loci_from_editor_rows(
+                [dict(INSERTING_LOCUS_ROW, start=51)], INSERTING_ALLELE_ROWS, []
+            )
+        self.assertIn("insert_after", raised.exception.path)
+        loci = repeat_loci_from_editor_rows([dict(INSERTING_LOCUS_ROW)], INSERTING_ALLELE_ROWS, [])
+        form = supplied_form(loci)
+        form.reference.inserted_reference_id = "ref-final"
+        rendered = render_general_toml(form)
+        parse_general_toml(rendered)
+        with self.assertRaises(EditorError):
+            parse_general_toml(rendered.replace("insert_after = 50", "insert_after = 50\nstart = 51"))
+
+    def test_the_authored_insertion_reaches_the_final_reference(self) -> None:
+        """El TOML que escribe la interfaz inserta el tracto y publica la final.
+
+        Se ejecuta el simulador y se lee el FASTA final: el `(CAG)5` aparece
+        justo después de la base 50 de partida, y el locus se publica en 51..65
+        del genoma final. Si la interfaz perdiera `insert_after`, Rust
+        rechazaría el locus sin tramo; si perdiera el nombre, rechazaría la
+        inserción sin referencia final.
+        """
+        loci = repeat_loci_from_editor_rows([dict(INSERTING_LOCUS_ROW)], INSERTING_ALLELE_ROWS, [])
+        form = supplied_form(loci)
+        form.reference.inserted_reference_id = "ref-final"
+        toml = render_general_toml(form)
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / "reference.fa").write_text(
+                f">chr1\n{REFERENCE_BASES}\n", encoding="utf-8"
+            )
+            validation, session = validate_toml(self.BINARY, toml, base)
+            self.assertTrue(validation.succeeded, validation.stdout or validation.stderr)
+            self.assertIsNotNone(session)
+            execution = run_toml(session, toml, self.BINARY, base, base / "result")
+            self.assertTrue(execution.succeeded, execution.stdout or execution.stderr)
+            effective = json.loads(
+                (base / "result" / "effective-config.json").read_text(encoding="utf-8")
+            )
+            fasta = (
+                base / "result" / "resources" / "references" / "ref-final.fa"
+            ).read_text(encoding="utf-8")
+        sequence = "".join(line for line in fasta.splitlines() if not line.startswith(">"))
+        self.assertEqual(sequence, REFERENCE_BASES[:50] + "CAG" * 5 + REFERENCE_BASES[50:])
+        published = effective["repeat_loci"][0]
+        self.assertEqual((published["start"], published["end"]), (51, 65))
+        self.assertEqual(published["declared"], {"insert_after": 50})
+        self.assertEqual(effective["inserted_reference"]["id"], "ref-final")
+
     def test_every_option_this_work_added_to_the_schema_has_a_control(self) -> None:
         """**Recorrido completo de opciones configurables, y regla de cierre.**
 
@@ -837,6 +941,7 @@ class RepeatLociUiTests(unittest.TestCase):
             "motif": '"motifs"',
             "motifs": '"motifs"',
             "reference_units": '"reference_units"',
+            "insert_after": '"insert_after"',
             "max_units": '"max_units"',
             "min_purity": '"min_purity"',
             "min_longest_run_units": '"min_longest_run_units"',

@@ -230,6 +230,9 @@
     },
     "repeat_output_budget": {
       "$ref": "#/$defs/effective_repeat_output_budget"
+    },
+    "inserted_reference": {
+      "$ref": "#/$defs/inserted_reference"
     }
   },
   "allOf": [
@@ -2723,6 +2726,42 @@
           "type": "integer",
           "minimum": 1
         },
+        "declared": {
+          "description": "Solo cuando la ejecución inserta algún tracto (DTC-098): lo que el usuario escribió para situar el locus, en el genoma de PARTIDA y en base uno. Entonces start y end son del genoma final. O el tramo de un tracto existente, o el punto tras el que se insertó el tracto.",
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "start",
+                "end"
+              ],
+              "properties": {
+                "start": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "end": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "insert_after"
+              ],
+              "properties": {
+                "insert_after": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          ]
+        },
         "motifs": {
           "type": "array",
           "minItems": 1,
@@ -2740,7 +2779,7 @@
           }
         },
         "reference_units": {
-          "description": "Unidades enteras de cada bloque del tracto que la referencia SIMULADA lleva colocado, en el orden de motifs. Solo aparece en un locus compuesto sobre referencia simulada, y es de donde el juez que regenera la referencia lee los bloques. La correspondencia con motifs y la suma contra el tramo no son expresables en JSON Schema; las sostienen el lector y el juez de Rust.",
+          "description": "Unidades enteras de cada bloque del tracto que el programa construye, en el orden de motifs: en un locus compuesto sobre referencia SIMULADA, el tracto colocado en su tramo; en un locus que INSERTA su tracto en una referencia suministrada (declared.insert_after), el tracto insertado, también con un solo motivo. Es de donde los jueces que regeneran la referencia leen los bloques. La correspondencia con motifs y la suma contra el tramo no son expresables en JSON Schema; las sostienen el lector y el juez de Rust.",
           "type": "array",
           "minItems": 1,
           "items": {
@@ -2774,6 +2813,18 @@
           "motifs": {
             "maxItems": 1
           }
+        },
+        "not": {
+          "required": [
+            "declared"
+          ],
+          "properties": {
+            "declared": {
+              "required": [
+                "insert_after"
+              ]
+            }
+          }
         }
       },
       "then": {
@@ -2782,7 +2833,8 @@
             "reference_units"
           ]
         }
-      }
+      },
+      "description": "Un locus de un solo motivo no publica reference_units, salvo si inserta su tracto (declared.insert_after, DTC-098), donde las unidades son lo único que dice qué se insertó."
     },
     "effective_repeat_admission": {
       "type": "object",
@@ -3020,6 +3072,82 @@
           "type": "integer",
           "minimum": 0,
           "description": "Eventos que NO se aplicaron porque ningun paso viable tenia peso positivo: el tracto llego a su minimo de una unidad completa en la tirada mas larga, o el linaje toco el tope. No es un error, es un resultado biologico legitimo, y es la cifra que distingue un servicio que ignora los eventos sobrantes de uno que los cuenta."
+        }
+      }
+    },
+    "inserted_reference": {
+      "description": "Referencia FINAL de una ejecución que inserta tractos en la referencia suministrada (REQ-REF-37, DTC-098). Es la referencia de toda la simulación: la verdad, el VCF, la matriz de SNV y las lecturas hablan en sus coordenadas, y el start/end de cada locus también. Solo aparece cuando algún locus declara insert_after. Que el catálogo sume la suministrada más las bases insertadas, y que los cambios coincidan con los loci, lo comprueba el lector de Rust: no es expresable en JSON Schema.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source_reference_id",
+        "sequences",
+        "insertions",
+        "fasta_artifact_id",
+        "map_artifact_id",
+        "source_fasta_artifact_id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_reference_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sequences": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/derived_sequence"
+          }
+        },
+        "insertions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "locus_id",
+              "sequence_id",
+              "insert_after",
+              "inserted_bases"
+            ],
+            "properties": {
+              "locus_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sequence_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "insert_after": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Base uno del genoma de partida tras la que entra el tracto."
+              },
+              "inserted_bases": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "fasta_artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "map_artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_fasta_artifact_id": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

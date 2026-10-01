@@ -152,18 +152,24 @@ class RepeatLocusRow:
 
     id: str
     sequence: str
-    start: int
-    end: int
+    # Tramo del tracto en el genoma de partida. Ausente cuando el locus
+    # inserta su tracto (`insert_after`, DTC-098).
+    start: int | None
+    end: int | None
     motifs: list[str]
     alleles: list[RepeatAlleleRow]
     max_units: int | None = None
     min_purity: str | None = None
     min_longest_run_units: int | None = None
     slippage: RepeatSlippageForm | None = None
-    # Unidades de cada bloque del tracto en una referencia simulada, en el
-    # orden de los motivos. Solo en un locus compuesto; quien juzga si el
-    # campo tiene sentido y si cuadra con el tramo es el lector de Rust.
+    # Unidades de cada bloque del tracto que el programa construye, en el
+    # orden de los motivos: en un compuesto sobre referencia simulada, o en un
+    # locus que inserta su tracto. Quien juzga si el campo tiene sentido y si
+    # cuadra con el tramo es el lector de Rust.
     reference_units: list[int] | None = None
+    # Con referencia suministrada, el tracto se inserta justo después de esta
+    # base del genoma de partida (REQ-REF-37, DTC-098). Excluye start y end.
+    insert_after: int | None = None
 
 
 @dataclass(eq=True)
@@ -184,6 +190,8 @@ class ReferenceForm:
     repeat_loci: list[RepeatLocusRow] = field(default_factory=list)
     repeat_admission: RepeatAdmissionForm | None = None
     max_tract_output_bases: int | None = None
+    # Nombre de la referencia final cuando algún locus inserta su tracto.
+    inserted_reference_id: str | None = None
 
 
 @dataclass(eq=True)
@@ -898,8 +906,9 @@ def repeat_locus_editor_rows(loci: Sequence[RepeatLocusRow]) -> list[dict[str, A
             "order": order,
             "id": locus.id,
             "sequence": locus.sequence,
-            "start": locus.start,
-            "end": locus.end,
+            "start": "" if locus.start is None else locus.start,
+            "end": "" if locus.end is None else locus.end,
+            "insert_after": "" if locus.insert_after is None else str(locus.insert_after),
             "motifs": ",".join(locus.motifs),
             "reference_units": (
                 ""
@@ -1032,18 +1041,33 @@ def repeat_loci_from_editor_rows(
                 f"{path}.alleles",
                 "el locus no declara ningún alelo ni pide generarlos",
             )
+        # **O el locus señala un tracto con su tramo, o inserta el suyo**
+        # (DTC-098): con `insert_after` las celdas del tramo van vacías.
+        insert_after = _optional_editor_u64(row.get("insert_after"), f"{path}.insert_after")
+        if insert_after is not None:
+            if _cell_text(row.get("start")) or _cell_text(row.get("end")):
+                raise EditorError(
+                    f"{path}.insert_after",
+                    "un locus que inserta su tracto no declara inicio ni final:"
+                    " el tracto no existe en el genoma de partida",
+                )
+            start = end = None
+        else:
+            start = _checked_positive_u64(
+                editor_integer(row.get("start"), f"{path}.start"), f"{path}.start"
+            )
+            end = _checked_positive_u64(
+                editor_integer(row.get("end"), f"{path}.end"), f"{path}.end"
+            )
         loci.append(
             RepeatLocusRow(
                 id=locus_id,
                 sequence=_non_empty_string(
                     str(row.get("sequence", "")).strip(), f"{path}.sequence"
                 ),
-                start=_checked_positive_u64(
-                    editor_integer(row.get("start"), f"{path}.start"), f"{path}.start"
-                ),
-                end=_checked_positive_u64(
-                    editor_integer(row.get("end"), f"{path}.end"), f"{path}.end"
-                ),
+                start=start,
+                end=end,
+                insert_after=insert_after,
                 motifs=[_repeat_motif(motif, f"{path}.motifs") for motif in motifs],
                 reference_units=_editor_reference_units(
                     row.get("reference_units"), f"{path}.reference_units"
@@ -1081,6 +1105,11 @@ def repeat_loci_from_editor_rows(
                 f"el generador nombra un locus que no existe: {locus_id}",
             )
     return loci
+
+
+def _cell_text(value: Any) -> str:
+    """El texto de una celda, vacío si no hay nada."""
+    return "" if value is None else str(value).strip()
 
 
 def _editor_reference_units(value: Any, path: str) -> list[int] | None:
@@ -1823,6 +1852,9 @@ def _parse_reference(
         if declares_repeats
         else set()
     )
+    # El nombre de la referencia final solo existe con referencia suministrada:
+    # en la simulada no hay nada que insertar (DTC-098).
+    insertion_keys: set[str] = {"inserted_reference_id"} if declares_repeats else set()
     if kind == "simulated":
         _keys(
             table,
@@ -1851,7 +1883,7 @@ def _parse_reference(
     elif kind == "supplied":
         _keys(
             table,
-            allowed=common | {"fasta"} | repeat_keys,
+            allowed=common | {"fasta"} | repeat_keys | insertion_keys,
             required=common | {"fasta"},
             path=path,
         )
@@ -1913,6 +1945,13 @@ def _parse_reference(
             if declares_repeats and "max_tract_output_bases" in table
             else None
         ),
+        inserted_reference_id=(
+            _non_empty_string(
+                table["inserted_reference_id"], f"{path}.inserted_reference_id"
+            )
+            if "inserted_reference_id" in table
+            else None
+        ),
     )
 
 
@@ -1954,6 +1993,7 @@ def _parse_repeat_loci(value: Any, path: str) -> list[RepeatLocusRow]:
                 "sequence",
                 "start",
                 "end",
+                "insert_after",
                 "motif",
                 "motifs",
                 "reference_units",
@@ -1963,9 +2003,21 @@ def _parse_repeat_loci(value: Any, path: str) -> list[RepeatLocusRow]:
                 "slippage",
                 "alleles",
             },
-            required={"id", "sequence", "start", "end"},
+            required={"id", "sequence"},
             path=locus_path,
         )
+        # O tramo, o punto de inserción (DTC-098), como en el lector de Rust.
+        inserting = "insert_after" in locus
+        if inserting and ("start" in locus or "end" in locus):
+            raise EditorError(
+                f"{locus_path}.insert_after",
+                "insert_after excluye start y end: un tracto que se inserta no"
+                " existe en el genoma de partida",
+            )
+        if not inserting:
+            for key in ("start", "end"):
+                if key not in locus:
+                    raise EditorError(f"{locus_path}.{key}", "falta")
         motifs = _parse_repeat_motifs(locus, locus_path)
         slippage = (
             _parse_repeat_slippage(locus["slippage"], f"{locus_path}.slippage")
@@ -1989,8 +2041,15 @@ def _parse_repeat_loci(value: Any, path: str) -> list[RepeatLocusRow]:
             RepeatLocusRow(
                 id=_non_empty_string(locus["id"], f"{locus_path}.id"),
                 sequence=_non_empty_string(locus["sequence"], f"{locus_path}.sequence"),
-                start=_positive_u64(locus["start"], f"{locus_path}.start"),
-                end=_positive_u64(locus["end"], f"{locus_path}.end"),
+                start=(
+                    None if inserting else _positive_u64(locus["start"], f"{locus_path}.start")
+                ),
+                end=None if inserting else _positive_u64(locus["end"], f"{locus_path}.end"),
+                insert_after=(
+                    _positive_u64(locus["insert_after"], f"{locus_path}.insert_after")
+                    if inserting
+                    else None
+                ),
                 motifs=motifs,
                 reference_units=(
                     [
@@ -2365,6 +2424,14 @@ def render_general_toml(form: GeneralForm) -> str:
         if not form.reference.fasta:
             raise EditorError("reference.fasta", "falta para supplied")
         reference.add("fasta", form.reference.fasta)
+        if form.reference.inserted_reference_id:
+            reference.add(
+                "inserted_reference_id",
+                _non_empty_string(
+                    form.reference.inserted_reference_id,
+                    "reference.inserted_reference_id",
+                ),
+            )
     else:
         raise EditorError("reference.kind", "debe ser simulated o supplied")
 
@@ -2813,10 +2880,25 @@ def _render_repeat_loci(form: GeneralForm) -> Any:
         table = tomlkit.table()
         table.add("id", _non_empty_string(locus.id, f"{path}.id"))
         table.add("sequence", _non_empty_string(locus.sequence, f"{path}.sequence"))
-        table.add("start", _checked_positive_u64(locus.start, f"{path}.start"))
-        table.add("end", _checked_positive_u64(locus.end, f"{path}.end"))
-        if locus.start > locus.end:
-            raise EditorError(f"{path}.start", "el inicio no puede pasar del final")
+        if locus.insert_after is not None:
+            if locus.start is not None or locus.end is not None:
+                raise EditorError(
+                    f"{path}.insert_after",
+                    "un locus que inserta su tracto no declara inicio ni final",
+                )
+            table.add(
+                "insert_after",
+                _checked_positive_u64(locus.insert_after, f"{path}.insert_after"),
+            )
+        else:
+            if locus.start is None or locus.end is None:
+                raise EditorError(
+                    f"{path}.start", "el locus declara su tramo o un punto de inserción"
+                )
+            table.add("start", _checked_positive_u64(locus.start, f"{path}.start"))
+            table.add("end", _checked_positive_u64(locus.end, f"{path}.end"))
+            if locus.start > locus.end:
+                raise EditorError(f"{path}.start", "el inicio no puede pasar del final")
         if not locus.motifs:
             raise EditorError(f"{path}.motif", "el locus no declara ningún motivo")
         motifs = [

@@ -199,7 +199,7 @@ pub fn apply_repeat_alleles(
         for (phase, copy_index) in copies {
             let allele_index = draw_repeat_allele_index(
                 root_seed,
-                config.reference_id(),
+                config.simulation_reference_id(),
                 population_id,
                 individual.id(),
                 copy_index,

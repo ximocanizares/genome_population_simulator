@@ -878,7 +878,7 @@ forma exacta.
 | Qué | Por qué no contradice lo cerrado | Decisión |
 |---|---|---|
 | El generador admite **regiones declaradas con su secuencia exacta**, además del relleno al azar | El orden es secuencias y tamaño → regiones declaradas → relleno; con la lista vacía el recorrido es el de siempre | **S-03**, responsable |
-| Una referencia real admite la **inserción de tractos**, y el resultado se publica como referencia derivada con identidad propia | Es la misma maquinaria de reubicación que la reducción ya tenía, con una clase de segmento más | **S-03**, responsable |
+| Una referencia real admite la **inserción de tractos**, y el resultado se publica como referencia derivada con identidad propia | Es la misma **forma de mapa** que la reducción ya publicaba, con una clase de segmento más. *Corregido el 01/10/2026: decía «la misma maquinaria»; el módulo de inserción es una implementación propia, y a diferencia de la reducida, la referencia final es la de toda la simulación* | **S-03**, responsable |
 | Las posiciones que el usuario declara se refieren al **genoma de partida**, y el sistema publica la correspondencia con el final | Sin esa regla, declarar dos inserciones seguidas es ambiguo | **S-03**, responsable |
 
 ### 14.3. Dónde vive cada literal
@@ -908,6 +908,14 @@ que esta sección promete de la lista vacía sigue en pie y ahora lo ancla
 también una huella congelada del FASTA de una ejecución completa, tomada con el commit
 `7dd1fbe`, en `tests/simulated_reference_repeat_tract.rs`. El detalle está en
 la decisión S-03 del plan de microsatélites y en DT-013.
+
+**Segunda corrección del 01/10/2026: la inserción tampoco tenía llamador.**
+`src/reference_tract_insertion.rs` estaba escrito y probado, pero ninguna
+ejecución lo usaba. Desde ese día un locus sobre referencia suministrada puede
+declarar `insert_after`, y la referencia final —con identidad propia, FASTA,
+mapa v2 y sección propia en la configuración efectiva y el manifiesto— es la
+de toda la simulación. El detalle está en REQ-REF-37, en DTC-098 y en el paso
+F1.7.2 del plan de microsatélites, que lo subdivide.
 
 ### 14.4. Pruebas nuevas y su variante defectuosa
 

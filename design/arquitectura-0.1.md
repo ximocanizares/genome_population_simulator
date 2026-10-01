@@ -327,6 +327,25 @@ identidad y clase de secuencia, posición en la concatenación y procedencia. La
 lista y el FASTA canónico derivado son dos proyecciones del mismo resultado; el
 mapa no se reconstruye a posteriori desde nombres físicos.
 
+Una referencia derivada **por inserción de tractos** (REQ-REF-37, DTC-098) es,
+a diferencia de la reducida, **la referencia de la simulación**. La
+configuración resuelve una sola vez el plan de inserción —punto en coordenadas
+de partida y bases del tracto, que salen del motivo y de `reference_units`— y
+traduce con él, antes de leer el FASTA, los intervalos de los demás loci y las
+regiones del generador de la matriz; a partir de ahí ningún consumidor ve
+coordenadas de partida. La preparación valida la copia suministrada, construye
+la final con `reference_tract_insertion` y la entrega a la matriz, los
+individuos, la verdad, el VCF y el evento técnico. Se publican la copia
+suministrada, el FASTA canónico final y el mapa `reference_coordinate_map` v2,
+con segmentos conservados e insertados. El juez independiente rehace el
+genoma final desde la copia suministrada y lo declarado, sin llamar al
+productor, traduce por su cuenta las regiones del generador de la matriz, y
+entrega la final a los jueces que trabajan sobre bases —abanico de
+deslizamiento, matriz y evento técnico—. La verdad y el VCF no se releen: se
+comprueba que sus cabeceras, los fragmentos de la verdad y la sección de loci
+del manifiesto nombran la referencia de la simulación con sus longitudes
+(DTC-098).
+
 El espacio elegible contiene cromosomas y *scaffolds*. Cada secuencia derivada
 conserva exactamente el `sequence_id` y la clase de su fuente; la identidad de
 referencia separa los dos espacios. `reduction_percent` expresa el porcentaje

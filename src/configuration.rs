@@ -226,6 +226,12 @@ pub struct DeclaredReference {
     /// VCF juntas. Solo el documento general v4 puede traerlo. Quien no lo
     /// declara no nota nada: sin tope no hay rechazo.
     pub max_tract_output_bases: Option<Located<u64>>,
+    /// Identificador de la referencia **final** cuando algún locus inserta su
+    /// tracto en una referencia suministrada (REQ-REF-37, DTC-098). Aquí solo
+    /// se lee; quien exige que exista si hay inserciones, que falte si no las
+    /// hay y que no repita el de la suministrada es la resolución de la
+    /// configuración efectiva.
+    pub inserted_reference_id: Option<Located<String>>,
 }
 
 /// Un locus de repetición tal y como lo escribe el usuario.
@@ -239,22 +245,30 @@ pub struct DeclaredReference {
 pub struct DeclaredRepeatLocus {
     pub id: Located<String>,
     pub sequence: Located<String>,
-    /// Base uno, inclusivo.
-    pub start: Located<u64>,
-    /// Base uno, inclusivo.
-    pub end: Located<u64>,
+    /// Base uno, inclusivo, en el genoma de partida. Ausente si y solo si el
+    /// locus inserta su tracto (`insert_after`); el lector lo garantiza.
+    pub start: Option<Located<u64>>,
+    /// Base uno, inclusivo, en el genoma de partida. Ausente si y solo si el
+    /// locus inserta su tracto.
+    pub end: Option<Located<u64>>,
+    /// Punto de inserción del tracto en una referencia **suministrada**: el
+    /// tracto entra justo después de esta base del genoma de partida, en base
+    /// uno (REQ-REF-37, DTC-098). Excluyente con `start`/`end`.
+    pub insert_after: Option<Located<u64>>,
     /// Los motivos del locus, **en orden**. Un locus corriente declara uno con
     /// la clave `motif`; un microsatélite compuesto declara varios con `motifs`,
     /// y entonces cada alelo da su número de unidades por bloque.
     pub motifs: Vec<Located<String>>,
-    /// Unidades **enteras** de cada bloque del tracto que una referencia
-    /// **simulada** lleva colocado, en el orden de `motifs`.
+    /// Unidades **enteras** de cada bloque del tracto que el programa
+    /// construye, en el orden de `motifs`.
     ///
-    /// Solo tiene sentido en un locus compuesto sobre referencia simulada,
-    /// donde es obligatorio: con un solo motivo el tramo ya fija el tracto, y
-    /// con referencia suministrada el tracto se lee del FASTA. Aquí solo se
-    /// lee; quien rechaza el campo donde no hace nada, o una suma que no cuadra
-    /// con el tramo, es la resolución de la configuración efectiva.
+    /// Obligatorio donde es lo único que construye el tracto: en un locus
+    /// compuesto sobre referencia simulada, y en todo locus que inserta su
+    /// tracto (`insert_after`), también de un solo motivo. Con un solo motivo
+    /// y tramo, el tramo ya fija el tracto; con referencia suministrada y
+    /// tracto existente, el tracto se lee del FASTA. Aquí solo se lee; quien
+    /// rechaza el campo donde no hace nada, o una suma que no cuadra con el
+    /// tramo, es la resolución de la configuración efectiva.
     pub reference_units: Option<Vec<Located<u64>>>,
     /// Tope propio del tamaño del tracto, **en unidades** (F6.4.3.1).
     pub max_units: Option<Located<u64>>,

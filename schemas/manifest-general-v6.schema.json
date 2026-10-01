@@ -119,6 +119,9 @@
     },
     "repeat_loci": {
       "$ref": "#/$defs/repeat_loci"
+    },
+    "reference_insertion": {
+      "$ref": "#/$defs/reference_insertion"
     }
   },
   "allOf": [
@@ -1811,6 +1814,84 @@
           "type": "integer",
           "minimum": 0,
           "description": "Eventos que NO se aplicaron porque ningun paso viable tenia peso positivo: el tracto llego a su minimo de una unidad completa en la tirada mas larga, o el linaje toco el tope. No es un error, es un resultado biologico legitimo, y es la cifra que distingue un servicio que ignora los eventos sobrantes de uno que los cuenta."
+        }
+      }
+    },
+    "reference_insertion": {
+      "description": "Referencia FINAL de una ejecución que inserta tractos en la referencia suministrada (REQ-REF-37, REQ-MAN-07, DTC-098): su origen, sus artefactos y los cambios aplicados. La referencia final y la de origen están además en references. Solo aparece cuando algún locus inserta su tracto.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source_reference_id",
+        "state",
+        "fasta_artifact_id",
+        "map_artifact_id",
+        "source_fasta_artifact_id",
+        "map_document_kind",
+        "map_schema_version",
+        "insertions"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/non_empty_id"
+        },
+        "source_reference_id": {
+          "$ref": "#/$defs/non_empty_id"
+        },
+        "state": {
+          "enum": [
+            "complete",
+            "failed"
+          ]
+        },
+        "fasta_artifact_id": {
+          "$ref": "#/$defs/non_empty_id"
+        },
+        "map_artifact_id": {
+          "$ref": "#/$defs/non_empty_id"
+        },
+        "source_fasta_artifact_id": {
+          "$ref": "#/$defs/non_empty_id"
+        },
+        "map_document_kind": {
+          "const": "reference_coordinate_map"
+        },
+        "map_schema_version": {
+          "const": "2"
+        },
+        "insertions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "locus_id",
+              "sequence_id",
+              "insert_after",
+              "inserted_bases"
+            ],
+            "properties": {
+              "locus_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sequence_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "insert_after": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Base uno del genoma de partida tras la que entra el tracto."
+              },
+              "inserted_bases": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
         }
       }
     }

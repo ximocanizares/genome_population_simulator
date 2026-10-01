@@ -58,6 +58,10 @@ use crate::reference_reduction_io::{
     REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
     build_reduced_reference, reduction_map_document, source_for, validate_reduction_map_document,
 };
+use crate::reference_tract_insertion::{
+    COORDINATE_MAP_DOCUMENT_KIND, CoordinateMap, DeclaredInsertion, coordinate_map_document,
+    insert_tracts,
+};
 use crate::results::{
     ArtifactRecord, ConfigurationInputRecord, GeneralManifest, ManifestEventLink,
     ManifestReductionLink, ManifestReferenceLink, PopulationSnvsManifestLink,
@@ -193,6 +197,7 @@ fn execute_validated_config_with_effective_document(
     let mut vcf_outputs = Vec::new();
     let mut event_links: Option<Vec<ManifestEventLink>> = None;
     let mut realized_tract_output = crate::results::RealizedTractOutput::default();
+    let mut inserted_publication: Option<PublishedInsertion> = None;
     let started = (|| -> Result<(), Diagnostic> {
         configuration_input = Some(copy_configuration_input(effective, &mut workspace)?);
         reference_artifact = Some(write_reference(
@@ -209,21 +214,43 @@ fn execute_validated_config_with_effective_document(
             id: effective.reference_id().to_owned(),
             fasta_artifact_id: source_artifact.id.clone(),
         });
+        // **Con inserción, la referencia final se publica junto a la copia
+        // suministrada** (DTC-098), y es la que reciben todos los consumidores
+        // de aquí en adelante.
+        inserted_publication = write_inserted_reference(
+            prepared_reference
+                .as_ref()
+                .ok_or_else(|| internal("execute", "reference already released"))?,
+            &mut workspace,
+        )?;
+        if let Some(inserted) = &inserted_publication {
+            manifest_references.push(ManifestReferenceLink {
+                id: effective.simulation_reference_id().to_owned(),
+                fasta_artifact_id: inserted.fasta.id.clone(),
+            });
+        }
         prepared_reference = Some(load_authoritative_reference(
             effective,
             &workspace,
             source_artifact,
+            inserted_publication
+                .as_ref()
+                .map(|inserted| &inserted.fasta),
             prepared_reference
                 .take()
                 .ok_or_else(|| internal("execute", "reference already released"))?,
         )?);
-        let reference = prepared_reference
+        let prepared = prepared_reference
             .as_ref()
-            .ok_or_else(|| internal("execute", "reference already released"))?
-            .reference();
+            .ok_or_else(|| internal("execute", "reference already released"))?;
+        let reference = prepared.reference();
+        let declared_reference = prepared.declared_reference();
+        let simulation_artifact = inserted_publication
+            .as_ref()
+            .map_or(source_artifact, |inserted| &inserted.fasta);
         population_snvs = publish_prepared_population_snvs(
             prepared_execution.population_snvs.as_ref(),
-            source_artifact,
+            simulation_artifact,
             &mut workspace,
         )?;
         if let (Some(link), Some(initial_individuals)) = (
@@ -235,13 +262,13 @@ fn execute_validated_config_with_effective_document(
         // A partir de aquí la copia recargada es la única autoridad para
         // seleccionar intervalos y materializar bases derivadas.
         let source_fasta = workspace.root().join(&source_artifact.path);
-        let prepared_reductions = prepare_reductions(effective, reference, &source_fasta)?;
+        let prepared_reductions = prepare_reductions(effective, declared_reference, &source_fasta)?;
         manifest_reductions = manifest_reduction_links(effective, &prepared_reductions);
         for reduction in &mut manifest_reductions {
             reduction.source_fasta_artifact_id = Some(source_artifact.id.clone());
         }
         let reference_output = ReferenceOutput {
-            reference,
+            reference: declared_reference,
             fasta: source_artifact,
         };
         for (index, prepared) in prepared_reductions.into_iter().enumerate() {
@@ -330,7 +357,7 @@ fn execute_validated_config_with_effective_document(
             reference,
             prepared_execution.population_snvs.as_ref(),
             prepared_execution.initial_individuals.as_ref(),
-            source_artifact,
+            simulation_artifact,
             configuration_input
                 .as_ref()
                 .ok_or_else(|| internal("execute", "missing configuration artifact"))?,
@@ -359,7 +386,7 @@ fn execute_validated_config_with_effective_document(
                 effective,
                 event,
                 reference,
-                source_artifact,
+                simulation_artifact,
                 prepared_execution.initial_individuals.as_ref(),
             ) {
                 Ok(link) => event_links = Some(vec![link]),
@@ -369,14 +396,23 @@ fn execute_validated_config_with_effective_document(
                 }
             }
         }
-        let effective_document =
-            transform_effective(effective_config_document_with_population_snvs(
+        let mut effective_document = effective_config_document_with_population_snvs(
+            effective,
+            authorizations,
+            reference_output,
+            &reduction_outputs,
+            population_snvs.as_ref(),
+        )?;
+        if let Some(inserted) = &inserted_publication {
+            effective_document["inserted_reference"] = crate::results::inserted_reference_json(
                 effective,
-                authorizations,
-                reference_output,
-                &reduction_outputs,
-                population_snvs.as_ref(),
-            )?);
+                reference,
+                &inserted.fasta,
+                &inserted.map,
+                source_artifact,
+            )?;
+        }
+        let effective_document = transform_effective(effective_document);
         // Ningún artefacto posterior necesita ya las bases de la referencia. Se
         // libera antes de escribir el manifiesto, porque esa escritura dispara
         // la validación física, que relee el FASTA publicado y construye otra
@@ -427,7 +463,17 @@ fn execute_validated_config_with_effective_document(
             diagnostics: &[],
             repeat_loci: repeat_loci.as_ref(),
         };
-        let manifest_bytes = json_document_bytes(&general_manifest_document(&manifest))?;
+        let mut manifest_document = general_manifest_document(&manifest);
+        if let Some(inserted) = &inserted_publication {
+            manifest_document["reference_insertion"] = crate::results::manifest_insertion_json(
+                effective,
+                UnitState::Complete,
+                &inserted.fasta,
+                &inserted.map,
+                source_artifact,
+            )?;
+        }
+        let manifest_bytes = json_document_bytes(&manifest_document)?;
         if let Err(error) = workspace.write_general_manifest(&manifest_bytes) {
             workspace.discard_last_artifact(&effective_record)?;
             return Err(error);
@@ -463,6 +509,14 @@ fn execute_validated_config_with_effective_document(
             } else {
                 Vec::new()
             };
+            // **Con lecturas ya publicadas, la referencia final se conserva con
+            // su mapa** (DTC-098): las lecturas salieron de ella, y el paquete
+            // fallido tiene que poder relacionarla con la suministrada
+            // (REQ-MAN-07). Sin evento no se conserva nada de ella.
+            let failure_insertion = event_links
+                .as_ref()
+                .and(inserted_publication.as_ref())
+                .zip(reference_artifact.as_ref());
             publish_controlled_failure(
                 &mut workspace,
                 execution_id.as_str(),
@@ -471,6 +525,7 @@ fn execute_validated_config_with_effective_document(
                 &manifest_reductions,
                 event_links.as_deref(),
                 &failure_references,
+                failure_insertion,
                 &cause,
             )?;
             workspace.publish()?;
@@ -1704,6 +1759,7 @@ fn publish_controlled_failure(
     reductions: &[ManifestReductionLink],
     events: Option<&[ManifestEventLink]>,
     references: &[ManifestReferenceLink],
+    insertion: Option<(&PublishedInsertion, &ArtifactRecord)>,
     cause: &Diagnostic,
 ) -> Result<(), Diagnostic> {
     let configuration_artifact = workspace
@@ -1735,6 +1791,9 @@ fn publish_controlled_failure(
                 .flatten()
                 .map(|event| event.manifest_artifact_id.clone()),
         );
+        if let Some((inserted, _)) = insertion {
+            retained.insert(inserted.map.id.clone());
+        }
     }
     workspace.retain_only_artifacts(&retained)?;
     let artifacts = workspace.artifacts().to_vec();
@@ -1770,7 +1829,17 @@ fn publish_controlled_failure(
         // si no.
         repeat_loci: repeat_loci.as_ref(),
     };
-    workspace.write_general_manifest(&json_document_bytes(&general_manifest_document(&manifest))?)
+    let mut document = general_manifest_document(&manifest);
+    if let Some((inserted, source_fasta)) = insertion {
+        document["reference_insertion"] = crate::results::manifest_insertion_json(
+            effective,
+            UnitState::Failed,
+            &inserted.fasta,
+            &inserted.map,
+            source_fasta,
+        )?;
+    }
+    workspace.write_general_manifest(&json_document_bytes(&document)?)
 }
 
 struct PreparedPopulationSnvsForExecution {
@@ -1902,7 +1971,10 @@ fn prepared_reference_fasta_digest(
 ) -> Result<String, Diagnostic> {
     match prepared_reference {
         PreparedReference::Supplied(value) => Ok(value.source_identity().digest().to_owned()),
-        PreparedReference::Generated(reference) => {
+        PreparedReference::Generated(reference)
+        | PreparedReference::Inserted {
+            derived: reference, ..
+        } => {
             let mut bytes = Vec::new();
             write_generated_fasta(reference, &mut bytes)?;
             let mut digest = Sha256Writer::default();
@@ -2111,13 +2183,23 @@ fn valid_failure_configuration_copy(
 enum PreparedReference {
     Supplied(ValidatedSuppliedReference),
     Generated(Reference),
+    /// Referencia suministrada con tractos insertados (DTC-098). La
+    /// **simulación** usa la final; la suministrada solo se conserva por su
+    /// catálogo e identidad, sin bases, para publicar su copia y describirla.
+    Inserted {
+        supplied: ValidatedSuppliedReference,
+        derived: Reference,
+        map: CoordinateMap,
+    },
 }
 
 impl PreparedReference {
+    /// La referencia **de la simulación**: la final cuando hay inserción.
     fn reference(&self) -> &Reference {
         match self {
             Self::Supplied(value) => value.reference(),
             Self::Generated(value) => value,
+            Self::Inserted { derived, .. } => derived,
         }
     }
 
@@ -2125,6 +2207,16 @@ impl PreparedReference {
         match self {
             Self::Supplied(value) => value.reference_mut(),
             Self::Generated(value) => value,
+            Self::Inserted { derived, .. } => derived,
+        }
+    }
+
+    /// La referencia **declarada**: la suministrada aunque haya inserción. Es
+    /// la que describe la sección `reference` de la configuración efectiva.
+    fn declared_reference(&self) -> &Reference {
+        match self {
+            Self::Inserted { supplied, .. } => supplied.reference(),
+            _ => self.reference(),
         }
     }
 }
@@ -2475,12 +2567,18 @@ fn prepare_reference_without_repeat_admission(
                 ),
             ))
         }
-        EffectiveReferenceSource::Supplied { original_path } => validate_supplied_fasta(
-            original_path,
-            effective.reference_id(),
-            &sequence_expectations(effective),
-        )
-        .map(PreparedReference::Supplied),
+        EffectiveReferenceSource::Supplied { original_path } => {
+            let supplied = validate_supplied_fasta(
+                original_path,
+                effective.reference_id(),
+                &sequence_expectations(effective),
+            )?;
+            if effective.tract_insertion().is_some() {
+                insert_declared_tracts(effective, supplied)
+            } else {
+                Ok(PreparedReference::Supplied(supplied))
+            }
+        }
         EffectiveReferenceSource::Simulated => {
             let specs = effective
                 .sequences()
@@ -2522,6 +2620,122 @@ fn prepare_reference_without_repeat_admission(
             .map(PreparedReference::Generated)
         }
     }
+}
+
+/// **Construye la referencia final insertando los tractos declarados**
+/// (REQ-REF-37, DTC-098).
+///
+/// Cada punto `insert_after` está en base uno del genoma de partida y dice
+/// tras qué base entra el tracto; el módulo de inserción recibe el punto
+/// interbase en base cero, que es el mismo número: «antes de la base cero `P`»
+/// es «después de la base uno `P`». Todas las posiciones se leen en el genoma
+/// de partida, también la segunda y las siguientes.
+///
+/// Una lista vacía se rechaza aquí: el módulo la aceptaría y produciría una
+/// «derivada» idéntica a la suministrada con otro nombre. La resolución de la
+/// configuración no crea un plan sin puntos, así que esta rama no se alcanza
+/// desde una configuración; se conserva porque es la frontera del módulo.
+///
+/// Después de construirla se sueltan las bases de la suministrada: lo que
+/// queda de ella es su catálogo y su identidad, que es lo único que hace falta
+/// para publicar su copia y describirla.
+fn insert_declared_tracts(
+    effective: &EffectiveConfig,
+    supplied: ValidatedSuppliedReference,
+) -> Result<PreparedReference, Diagnostic> {
+    let plan = effective
+        .tract_insertion()
+        .ok_or_else(|| internal("insert_declared_tracts", "falta el plan de inserción"))?;
+    let insertions = plan
+        .points()
+        .iter()
+        .map(|point| DeclaredInsertion {
+            sequence_id: point.sequence_id(),
+            source_offset: point.insert_after(),
+            bases: point.bases(),
+        })
+        .collect::<Vec<_>>();
+    if insertions.is_empty() {
+        return Err(internal(
+            "insert_declared_tracts",
+            "el plan de inserción no tiene ningún punto",
+        ));
+    }
+    let (derived, map) = insert_tracts(
+        supplied.reference(),
+        plan.derived_reference_id(),
+        &insertions,
+    )?
+    .into_parts();
+    let catalog = reference_without_bases(supplied.reference())?;
+    Ok(PreparedReference::Inserted {
+        supplied: ValidatedSuppliedReference::from_parts(
+            catalog,
+            supplied.source_identity().clone(),
+        ),
+        derived,
+        map,
+    })
+}
+
+/// La misma referencia, con su catálogo y sin sus bases.
+fn reference_without_bases(reference: &Reference) -> Result<Reference, Diagnostic> {
+    let sequences = reference
+        .sequences()
+        .iter()
+        .map(|sequence| {
+            let summary = crate::reference::DnaSequence::summary(
+                sequence.length(),
+                sequence.unknown_base_count(),
+            )
+            .map_err(|error| internal("reference_without_bases", error))?;
+            crate::reference::ReferenceSequence::from_owned(
+                sequence.id().clone(),
+                sequence.header().clone(),
+                sequence.class(),
+                summary,
+            )
+            .map_err(|error| internal("reference_without_bases", error))
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    Reference::new(
+        reference.id().clone(),
+        reference.origin().clone(),
+        sequences,
+    )
+    .map_err(|error| internal("reference_without_bases", error))
+}
+
+/// FASTA y mapa de la referencia final, ya publicados.
+struct PublishedInsertion {
+    fasta: ArtifactRecord,
+    map: ArtifactRecord,
+}
+
+/// Publica el FASTA canónico de la referencia final y su mapa de coordenadas
+/// (DTC-098), con la misma forma de ruta que una reducción.
+fn write_inserted_reference(
+    prepared: &PreparedReference,
+    workspace: &mut ExecutionWorkspace,
+) -> Result<Option<PublishedInsertion>, Diagnostic> {
+    let PreparedReference::Inserted { derived, map, .. } = prepared else {
+        return Ok(None);
+    };
+    let id = derived.id().as_str();
+    let fasta = workspace.write_streamed_artifact(
+        &format!("reference-fasta-{id}"),
+        "reference_fasta",
+        &PathBuf::from(format!("resources/references/{id}.fa")),
+        |file| write_generated_fasta(derived, file),
+    )?;
+    let map_bytes = json_document_bytes(&coordinate_map_document(map)?)?;
+    let map = workspace.write_artifact(
+        &format!("reference-map-{id}"),
+        COORDINATE_MAP_DOCUMENT_KIND,
+        &PathBuf::from(format!("resources/references/{id}.map.json")),
+        &map_bytes,
+    )?;
+    Ok(Some(PublishedInsertion { fasta, map }))
 }
 
 /// El tracto que un locus coloca en una referencia simulada, en base cero.
@@ -2677,13 +2891,33 @@ fn load_authoritative_reference(
     effective: &EffectiveConfig,
     workspace: &ExecutionWorkspace,
     artifact: &ArtifactRecord,
+    inserted_artifact: Option<&ArtifactRecord>,
     prepared: PreparedReference,
 ) -> Result<PreparedReference, Diagnostic> {
     // Ningún brazo necesita la referencia ya preparada, solo su origen. Se
     // libera antes de releer la copia publicada porque, de lo contrario, la
     // preparada y la autoritativa conviven y el pico dobla el genoma.
     let prepared_was_supplied = matches!(prepared, PreparedReference::Supplied(_));
-    drop(prepared);
+    // Consumir la preparada aquí la suelta antes de releer: con inserción solo
+    // sobrevive su mapa, que no lleva bases.
+    let inserted_map = match prepared {
+        PreparedReference::Inserted { map, .. } => Some(map),
+        _ => None,
+    };
+    if let Some(map) = inserted_map {
+        return load_authoritative_inserted_reference(
+            effective,
+            workspace,
+            artifact,
+            inserted_artifact.ok_or_else(|| {
+                internal(
+                    "load_authoritative_reference",
+                    "la referencia final no está publicada",
+                )
+            })?,
+            map,
+        );
+    }
     let mut authoritative = match (effective.reference_source(), prepared_was_supplied) {
         (EffectiveReferenceSource::Supplied { original_path }, true) => {
             let physical_path = workspace.root().join(&artifact.path);
@@ -2757,6 +2991,96 @@ fn load_authoritative_reference(
     Ok(authoritative)
 }
 
+/// Relee las dos copias publicadas de una ejecución con inserción (DTC-098).
+///
+/// La suministrada se relee **sin bases**: basta para comprobar que la copia
+/// es la catalogada y para describirla. La final se relee entera desde su FASTA
+/// publicado, que desde aquí es la única autoridad de la simulación; su huella
+/// se compara con la del catálogo, igual que la de cualquier copia.
+fn load_authoritative_inserted_reference(
+    effective: &EffectiveConfig,
+    workspace: &ExecutionWorkspace,
+    supplied_artifact: &ArtifactRecord,
+    inserted_artifact: &ArtifactRecord,
+    map: CoordinateMap,
+) -> Result<PreparedReference, Diagnostic> {
+    let EffectiveReferenceSource::Supplied { original_path } = effective.reference_source() else {
+        return Err(internal(
+            "load_authoritative_inserted_reference",
+            "origin changed",
+        ));
+    };
+    let plan = effective.tract_insertion().ok_or_else(|| {
+        internal(
+            "load_authoritative_inserted_reference",
+            "falta el plan de inserción",
+        )
+    })?;
+    let supplied_path = workspace.root().join(&supplied_artifact.path);
+    let summary = validate_supplied_fasta_summary(
+        &supplied_path,
+        effective.reference_id(),
+        &sequence_expectations(effective),
+    )?;
+    if summary.source_identity().size_bytes() != supplied_artifact.size_bytes
+        || summary.source_identity().digest() != supplied_artifact.digest
+    {
+        return Err(internal(
+            "load_authoritative_inserted_reference",
+            "cataloged reference changed",
+        ));
+    }
+    let mut catalog = reference_from_summary(
+        &summary,
+        effective.reference_id(),
+        crate::reference::ReferenceOrigin::Supplied {
+            original_path: original_path.clone(),
+        },
+    )?;
+    catalog
+        .bind_authoritative_resource(PathBuf::from(&supplied_artifact.path))
+        .map_err(|error| internal("bind_authoritative_reference", error))?;
+    let derived_path = workspace.root().join(&inserted_artifact.path);
+    let expectations = plan
+        .sequences()
+        .iter()
+        .map(|sequence| SequenceExpectation {
+            id: sequence.id(),
+            class: sequence.class(),
+            length: sequence.length(),
+        })
+        .collect::<Vec<_>>();
+    let parsed =
+        validate_supplied_fasta(&derived_path, plan.derived_reference_id(), &expectations)?;
+    if parsed.source_identity().size_bytes() != inserted_artifact.size_bytes
+        || parsed.source_identity().digest() != inserted_artifact.digest
+    {
+        return Err(internal(
+            "load_authoritative_inserted_reference",
+            "cataloged inserted reference changed",
+        ));
+    }
+    let mut derived = Reference::new(
+        ReferenceId::parse(plan.derived_reference_id(), "execution")?,
+        crate::reference::ReferenceOrigin::TractInsertion {
+            source_reference_id: ReferenceId::parse(effective.reference_id(), "execution")?,
+        },
+        parsed.into_reference().into_sequences(),
+    )
+    .map_err(|error| internal("reload_inserted_reference", error))?;
+    derived
+        .bind_authoritative_resource(PathBuf::from(&inserted_artifact.path))
+        .map_err(|error| internal("bind_authoritative_reference", error))?;
+    Ok(PreparedReference::Inserted {
+        supplied: ValidatedSuppliedReference::from_parts(
+            catalog,
+            summary.source_identity().clone(),
+        ),
+        derived,
+        map,
+    })
+}
+
 fn write_reference(
     effective: &EffectiveConfig,
     prepared: &PreparedReference,
@@ -2769,7 +3093,7 @@ fn write_reference(
     match (effective.reference_source(), prepared) {
         (
             EffectiveReferenceSource::Supplied { original_path },
-            PreparedReference::Supplied(supplied),
+            PreparedReference::Supplied(supplied) | PreparedReference::Inserted { supplied, .. },
         ) => workspace.copy_verified_artifact(
             "reference-fasta",
             "reference_fasta",
@@ -2923,6 +3247,146 @@ mod tests {
     use crate::application::load_and_validate_config;
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// **Un paquete fallido con lecturas conserva la referencia final con su
+    /// mapa y su sección** (DTC-098, REQ-MAN-07). El fallo se provoca justo
+    /// antes del manifiesto, cuando las lecturas ya salieron de la final: el
+    /// paquete fallido las conserva, y con ellas la final; si conservara el
+    /// FASTA sin el mapa ni `reference_insertion`, el manifiesto nombraría una
+    /// referencia derivada sin decir de dónde deriva.
+    #[test]
+    fn a_failed_run_with_reads_keeps_the_final_reference_with_its_map() {
+        let root = std::env::temp_dir().join(format!(
+            "gps-insertion-failure-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("test root");
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let bases = (0..2000)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                char::from(b"ACGT"[(state % 4) as usize])
+            })
+            .collect::<String>();
+        fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
+        let config = root.join("general.toml");
+        fs::write(
+            &config,
+            r#"config_kind = "general"
+schema_version = "4"
+seed = "00000000000000000000000000000000000000000000000000000000000000aa"
+
+[population_snvs]
+mode = "generate"
+
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "weighted_regions"
+outside_weight = 0.0
+substitution_profile = "uniform_snv12_v1"
+
+[[population_snvs.generate.regions]]
+contig = "chr1"
+start = 1500
+end = 1600
+weight = 1.0
+
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+inserted_reference_id = "ref-main-str"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 2000
+
+[[reference.repeat_loci]]
+id = "STR-INS"
+sequence = "chr1"
+insert_after = 1000
+motif = "CAG"
+reference_units = [10]
+[[reference.repeat_loci.alleles]]
+units = 10
+frequency = 1.0
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 1
+individual_ids = ["I1"]
+ploidy = 2
+genotype_model = "hwe"
+
+[technical_event]
+event_id = "reads-main"
+individual_ids = ["I1"]
+target_coverage_wgs = 2
+sequencing_errors = "disabled"
+[[technical_event.libraries]]
+individual_id = "I1"
+i7 = "ACGTACGT"
+i5 = "TGCATGCA"
+"#,
+        )
+        .expect("configuración");
+        let effective = load_and_validate_config(&config).expect("configuración válida");
+        let destination = root.join("result");
+        let error = execute_validated_config_with_effective_document(
+            &effective,
+            &destination,
+            ExecutionAuthorizations::default(),
+            |_| Ok(()),
+            std::convert::identity,
+            |_| {
+                Err(internal(
+                    "test_failure",
+                    "fallo provocado antes del manifiesto",
+                ))
+            },
+        )
+        .expect_err("la ejecución falla");
+        assert!(format!("{error:?}").contains("fallo provocado"));
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(destination.join("manifest.json")).expect("manifiesto fallido"),
+        )
+        .expect("JSON");
+        assert_eq!(manifest["state"], "failed");
+        let insertion = &manifest["reference_insertion"];
+        assert_eq!(insertion["state"], "failed");
+        assert_eq!(insertion["id"], "ref-main-str");
+        let kinds = manifest["artifacts"]
+            .as_array()
+            .expect("artefactos")
+            .iter()
+            .map(|artifact| artifact["id"].as_str().expect("id").to_owned())
+            .collect::<Vec<_>>();
+        assert!(
+            kinds.contains(&"reference-fasta-ref-main-str".to_owned()),
+            "{kinds:?}"
+        );
+        assert!(
+            kinds.contains(&"reference-map-ref-main-str".to_owned()),
+            "{kinds:?}"
+        );
+        assert!(
+            destination
+                .join("resources/references/ref-main-str.map.json")
+                .exists()
+        );
+        fs::remove_dir_all(root).ok();
+    }
 
     #[test]
     fn invalid_effective_document_is_removed_before_failed_fallback_publication() {

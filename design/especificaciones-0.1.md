@@ -1365,7 +1365,9 @@ su asignación por fase está en la matriz de trazabilidad.
   la configuración declara en `reference_units` cuántas unidades enteras lleva
   cada bloque en la referencia, en el orden de sus motivos; es obligatorio con
   referencia simulada, se rechaza en un locus de un solo motivo y con
-  referencia suministrada, y la suma de unidades por longitud de cada motivo
+  referencia suministrada —salvo en un locus que **inserta** su tracto en una
+  referencia suministrada, donde es obligatorio también con un solo motivo
+  (REQ-REF-37)—, y la suma de unidades por longitud de cada motivo
   tiene que ser exactamente la longitud del tramo, o la configuración se
   rechaza antes de simular nombrando el locus, la suma y el tramo. Cada bloque
   se coloca con su motivo repetido, en orden (decisión del responsable,
@@ -1461,6 +1463,24 @@ su asignación por fase está en la matriz de trazabilidad.
   correspondencia entre las coordenadas del genoma de partida y las del final.
   Sin esa regla, declarar dos inserciones seguidas sería ambiguo (decisión
   S-03).
+  **Forma y alcance, decididos por el responsable el 01/10/2026.** La inserción
+  se declara en el propio locus con `insert_after = P`: el tracto entra justo
+  después de la base `P` del genoma de partida, en base uno, como cualquier
+  inserción configurada (REQ-IND-40); por eso `P` va de 1 a la longitud de la
+  secuencia menos uno, y una inserción antes de la primera base o después de
+  la última se rechaza. Un locus que inserta no declara `start` ni `end`, y
+  declara obligatoriamente `reference_units`, también con un solo motivo: las
+  copias enteras de cada bloque que se insertan. La referencia final la nombra
+  el usuario con `inserted_reference_id`, distinto del de la suministrada. Dos
+  inserciones en el mismo punto, una inserción dentro del tracto de otro locus
+  y `insert_after` con referencia simulada se rechazan antes de simular. **La
+  referencia final es la de toda la simulación**, en la misma ejecución: los
+  demás loci, declarados en coordenadas de partida, y las regiones del
+  generador de la matriz de SNV se traducen al genoma final, y la verdad, el
+  VCF, la matriz, las lecturas y los intervalos publicados de los loci hablan
+  en sus coordenadas. En esta primera versión se rechazan junto a una
+  inserción los cambios directos, la matriz de SNV suministrada o reutilizada
+  y la reducción de referencia; la matriz generada se admite.
 
 **Decisión funcional cerrada el 14 de agosto de 2026.** `reduction_percent`
 expresa el porcentaje eliminado, usa el cálculo decimal exacto y el redondeo de
@@ -5573,7 +5593,7 @@ observará el resultado, sin crear obligaciones adicionales.
 | Etapa conceptual | Pregunta que permite seguir el flujo | Fuente normativa | Comprobación principal |
 |---|---|---|---|
 | Admisión | ¿La petición y sus ficheros forman una ejecución inequívoca? | REQ-CONF-01 a REQ-CONF-130, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 | ACE-01, ACE-23, ACE-35, ACE-36, ACE-105, ACE-111, ACE-112 y ACE-116 |
-| Referencias | ¿Qué secuencias y sistemas de coordenadas sostienen la verdad? | REQ-REF-01 a REQ-REF-36 | ACE-02 a ACE-08, ACE-95, ACE-110, ACE-112 y ACE-113 |
+| Referencias | ¿Qué secuencias y sistemas de coordenadas sostienen la verdad? | REQ-REF-01 a REQ-REF-37 | ACE-02 a ACE-08, ACE-95, ACE-110, ACE-112 y ACE-113 |
 | Construcción de individuos | ¿Qué genomas faseados existen antes de observarlos? | REQ-IND-01 a REQ-IND-65, REQ-DIR-01 a REQ-DIR-05 y REQ-MUT-01 a REQ-MUT-15 | ACE-09 a ACE-12, ACE-28 a ACE-32, ACE-79 a ACE-81, ACE-95, ACE-96, ACE-103, ACE-107, ACE-109 a ACE-111 y ACE-116/117 |
 | Inicialización poblacional | ¿Qué población inicial se deriva de las frecuencias y restricciones declaradas? | REQ-EVO-01 a REQ-EVO-52 y REQ-POB-01 a REQ-POB-03 | ACE-11, ACE-13, ACE-26, ACE-88 a ACE-90, ACE-104 y ACE-105 |
 | Evolución | ¿Cómo cambia el estado poblacional entre generaciones? | REQ-EVO-53 a REQ-EVO-78, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 | ACE-13, ACE-24 a ACE-28, ACE-76 a ACE-87 y ACE-117 |
@@ -5604,7 +5624,7 @@ valores, obligatoriedad ni relaciones entre objetos.
 | Grupo de entrada | Finalidad conceptual | Contrato aplicable |
 |---|---|---|
 | Petición y configuración | Identificar la ejecución y resolver los parámetros efectivos | REQ-CONF-01 a REQ-CONF-130, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 |
-| Secuencias y referencias | Establecer las bases y coordenadas sobre las que se construye y compara la verdad | REQ-REF-01 a REQ-REF-36 y las entradas de REQ-DAT-01 a REQ-DAT-73 |
+| Secuencias y referencias | Establecer las bases y coordenadas sobre las que se construye y compara la verdad | REQ-REF-01 a REQ-REF-37 y las entradas de REQ-DAT-01 a REQ-DAT-73 |
 | Individuos, poblaciones y familias | Declarar el material biológico inicial y las relaciones que deben simularse | REQ-IND-01 a REQ-IND-65, REQ-EVO-01 a REQ-EVO-78, REQ-POB-01 a REQ-POB-03 y REQ-CRU-01 a REQ-CRU-45 |
 | Procesos biológicos | Especificar creación, mutación, migración, reproducción, selección y recombinación | REQ-DIR-01 a REQ-DIR-05, REQ-MUT-01 a REQ-MUT-15, REQ-MIG-01 a REQ-MIG-09, REQ-REP-01 a REQ-REP-26, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 |
 | Eventos y condiciones técnicas | Solicitar observaciones, perfiles, artefactos y tratamientos técnicos admitidos | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 |

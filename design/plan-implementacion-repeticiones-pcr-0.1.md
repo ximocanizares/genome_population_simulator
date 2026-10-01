@@ -602,6 +602,36 @@ sostener:
    **referencia derivada con identidad propia**, igual que las reducciones. De
    otro modo los resultados quedarían atribuidos a un genoma que no existe.
 
+> **Corrección del 01/10/2026: el módulo de inserción existía, pero el
+> producto no lo usaba.** `src/reference_tract_insertion.rs` y su mapa v2
+> estaban escritos y probados, pero ninguna ejecución los llamaba, igual que
+> pasó con el generador con regiones. El mismo día el responsable fijó cómo
+> se conecta (REQ-REF-37, ampliado):
+>
+> - **una sola ejecución**: la referencia final es la de toda la simulación.
+>   Esto **no** es lo que hace la reducción, que es un subproducto de
+>   preparación sobre el que nunca se simula; la analogía con la reducción
+>   vale para la identidad y la publicación, no para el flujo;
+> - se declara en el locus con `insert_after = P` —el tracto entra después de
+>   la base `P` de partida, en base uno, con `P` entre 1 y la longitud menos
+>   uno— y `reference_units` obligatorio, también con un solo motivo; sin
+>   `start` ni `end`. El rechazo de `reference_units` con referencia
+>   suministrada se mantiene para los loci de tracto existente, donde el
+>   campo no haría nada, y deja de aplicarse al insertar, donde es lo único
+>   que dice qué se inserta;
+> - el nombre de la referencia final lo pone el usuario
+>   (`inserted_reference_id`);
+> - los otros loci y las regiones del generador de la matriz se traducen;
+>   los cambios directos, la matriz suministrada o reutilizada y la
+>   reducción se rechazan junto a una inserción; dos inserciones en el mismo
+>   punto, o una dentro del tracto de otro locus, también;
+> - todo lo publicado va en coordenadas del genoma final, y la configuración
+>   efectiva guarda además lo declarado;
+> - los sorteos que se siembran con el identificador de la referencia usan el
+>   de la final;
+> - no hay versión de esquema nueva: se completan la general v4, la efectiva
+>   v6 y el manifiesto general v6 por S-26; el mapa v2 no cambia.
+
 ##### S-04 — frecuencias ahora, individuos concretos después
 
 Se **invierte** la recomendación. Por locus se declaran unos pocos alelos con
@@ -1480,6 +1510,49 @@ frecuencias; y **no hay umbral de 50 pb**, sino un tope propio configurable.
     las dos inserciones es la única que lo caza, y una sola inserción **no
     discrimina**, lo que va en la docstring—; una que publique el resultado con
     el identificador del FASTA suministrado.
+  - **Corrección del 01/10/2026: cumplido en el módulo, no en el producto.**
+    Lo de arriba describe `src/reference_tract_insertion.rs`, que existía con
+    sus pruebas y sin un solo llamador. La conexión, con la forma que fijó el
+    responsable ese día (ver la corrección de S-03), se reparte así:
+    - **F1.7.2.1.** Documentos: REQ-REF-19 y REQ-REF-37, esta corrección, la
+      de S-03, la arquitectura (§5.2), DTC-098 y la trazabilidad.
+    - **F1.7.2.2.** Contrato de entrada: `insert_after` en el locus e
+      `inserted_reference_id` en la referencia, en
+      `schemas/config-general-v4.schema.json`, `src/configuration.rs` y
+      `src/adapters.rs`.
+    - **F1.7.2.3.** Resolución y traducción en `src/application.rs`: el plan
+      de inserción, la traducción de los demás loci y de las regiones del
+      generador de la matriz, la regla nueva de `reference_units` y los
+      rechazos de combinaciones.
+    - **F1.7.2.4.** Preparación y publicación en `src/execution.rs` y
+      `src/results.rs`: la referencia final se construye con `insert_tracts`,
+      se publica con su FASTA, su mapa y su sección en la efectiva v6 y en el
+      manifiesto general v6, y es la que reciben la matriz, los individuos,
+      la verdad, el VCF y el evento técnico.
+    - **F1.7.2.5.** Juez independiente en `src/results.rs`: rehace el genoma
+      final desde la copia suministrada y lo declarado **sin** llamar a
+      `insert_tracts`, valida el mapa por su contenido y no solo por su
+      esquema —que admite huecos, intervalos invertidos e identificadores
+      iguales—, comprueba los intervalos publicados, traduce por su cuenta
+      las regiones del generador de la matriz, entrega la final a los jueces
+      que trabajan sobre bases y comprueba que la verdad, el VCF y la sección
+      de loci del manifiesto nombran la referencia de la simulación con sus
+      longitudes; la verdad y el VCF no se releen enteros (DTC-098).
+    - **F1.7.2.6.** Rechazo junto a la reducción, y prueba de que el mapa de
+      una reducción sin inserción no cambia ni un byte.
+    - **F1.7.2.7.** Interfaz: `ui/config_editor.py`, `ui/gps_app.py`.
+    - **F1.7.2.8.** Puertas.
+  - Se comprueba además con, de extremo a extremo: el tracto aparece en su
+    desplazamiento del FASTA final, buscado fuera del productor; la base del
+    final es la de partida desplazada; la verdad, el VCF y el manifiesto
+    nombran la referencia final y su longitud; con dos inserciones el segundo
+    tracto cae donde dice el genoma original; y **una configuración sin
+    inserción publica los mismos bytes que antes**, contra un binario
+    compilado aparte desde la base anterior. **Debe fallar contra:** pasar la
+    suministrada a la verdad o al VCF; conservar el identificador de la
+    suministrada en un consumidor; un juez que compare el mapa consigo mismo;
+    un productor que desplace a la vez, y de forma coherente, el FASTA y el
+    mapa.
 
 - ☐ **F6.4.1.** Modelo de dominio del locus de repetición, puro: intervalo en
   la referencia, motivo A/C/G/T no vacío y sin `N`, **secuencia realizada del

@@ -48,6 +48,34 @@
 # manifiesto registran los mismos loci la rechaza antes, y la misma prueba lo
 # ejecuta y exige ese otro rechazo. Por ella el techo sube de 424 a 425.
 #
+# **El 01/10/2026 `src/results.rs` pasa de 510 a 533 comprobaciones, y el
+# techo de sin disparar se queda en 425.** Entran las del juez de la
+# referencia final por inserción de tractos (DTC-098), todas disparadas por
+# las pruebas de `tests/reference_tract_insertion_run.rs`, medido con esta
+# misma puerta:
+#
+# - cuatro en el juez que rehace el genoma final, el mapa y los intervalos de
+#   los loci (`judge_inserted_reference`);
+# - tres en la comprobación de `inserted_reference` de la configuración
+#   efectiva frente al manifiesto;
+# - seis en la de `reference_insertion` del manifiesto, y una más, en rama
+#   propia, para «una ejecución complete exige que su referencia final esté
+#   complete»;
+# - dos frente al TOML: la inserción y lo declarado de cada locus, y las
+#   regiones del generador de la matriz traducidas por el juez;
+# - siete de nombres: la verdad, el VCF y la sección de loci del manifiesto
+#   tienen que nombrar la referencia de la simulación.
+#
+# Son 4 + 3 + 7 + 2 + 7 = 23. *Corregido tras la revisión adversarial del
+# mismo día*: una versión anterior de esta nota decía «cinco… las quince»
+# cuando eran 4 + 3 + 6 + 1 = 14, y metía la condición del estado complete en
+# la llamada compartida de las seis condiciones antiguas, de modo que esa
+# llamada pasaba a dispararse sin que se ejercitara ninguna de ellas y el
+# techo bajaba en falso a 424. Una decimoquinta del juez, «la copia
+# suministrada se leyó sin sus bases», **no se alcanza**: el juez lee la
+# copia con sus bases siempre que hay inserción, así que es una invariante
+# interna y no cuenta.
+#
 # Medido el 23/09/2026; oráculo y verificador del VCF remedidos el 29/09/2026
 # (168 a 52 y 25 a 22, con el mismo número de comprobaciones); `results.rs` y
 # `event_manifest.rs` medidos por primera vez el 29/09/2026.
@@ -55,5 +83,5 @@
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	98	22
 src/f5_closure.rs	42	5
-src/results.rs	510	425
+src/results.rs	533	425
 src/event_manifest.rs	147	117

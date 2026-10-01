@@ -678,7 +678,7 @@ frequency = 1.0
     assert_eq!(fields, FIELD);
     assert!(detail.contains("locus STR-2"), "{detail}");
     assert!(
-        detail.contains("solo se declara en un locus compuesto"),
+        detail.contains("no se declara en un locus de un solo motivo con tramo"),
         "{detail}"
     );
 }

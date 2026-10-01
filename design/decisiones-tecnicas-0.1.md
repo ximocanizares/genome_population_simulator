@@ -2,7 +2,8 @@
 
 - **Versión:** 0.2
 - **Estado:** F1 cerrado; DTC-089 cierra las decisiones técnicas F5;
-  DTC-094 a DTC-097 cierran el deslizamiento biológico de los microsatélites
+  DTC-094 a DTC-097 cierran el deslizamiento biológico de los microsatélites;
+  DTC-098 conecta la inserción de tractos en una referencia suministrada
 - **Fecha:** 1 de septiembre de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
@@ -2302,3 +2303,66 @@ publicar nada.
 Un escenario que **no** use el generador conserva sus bytes: sin loci de
 repetición el documento no estrena sección ninguna, y con loci declarados lo
 único que cambia es el marcador `origin` que esta decisión exige.
+
+## DTC-098 — La referencia derivada por inserción es la de la simulación
+
+Decisión del responsable del 01/10/2026, que concreta REQ-REF-37 y la decisión
+S-03 del plan de microsatélites.
+
+Un locus sobre referencia **suministrada** puede declarar `insert_after = P`
+(base uno, en coordenadas del genoma de partida, `1 ≤ P ≤ longitud − 1`) con
+`reference_units` obligatorio y sin `start`/`end`; la referencia `[reference]`
+declara entonces `inserted_reference_id`. El tracto de cada locus que inserta
+es su motivo, o sus motivos en orden, repetido tantas veces como digan las
+unidades enteras de cada bloque.
+
+**La referencia final es la de toda la ejecución.** La reducción es un
+subproducto de preparación y nunca se simula sobre ella; la inserción no: la
+matriz de SNV generada, los individuos, la verdad, el VCF, el evento técnico y
+el generador de alelos por deslizamiento reciben la referencia final y su
+FASTA, y los sorteos que se siembran con el identificador de referencia usan el
+de la final. La traducción de coordenadas ocurre **una sola vez**, al resolver
+la configuración: una posición `x` de partida pasa a `x` más la suma de las
+longitudes de los tractos insertados con punto menor que `x` en su secuencia,
+y un intervalo se traduce por sus extremos y se rechaza si un punto de
+inserción cae dentro. Así se traducen los intervalos de los loci con tracto
+existente y las regiones del generador de la matriz.
+
+Se rechazan, antes de simular y nombrando las piezas: dos inserciones en el
+mismo punto, una inserción dentro del tracto de otro locus, `insert_after` con
+referencia simulada, y junto a cualquier inserción los cambios directos (sus
+inserciones y deleciones se declaran en coordenadas vigentes, que no tienen
+traducción sin un segundo modelo de coordenadas), la matriz de SNV
+suministrada o reutilizada (están atadas por huella al genoma de partida) y la
+reducción de referencia (se haría sobre la suministrada, sin el tracto).
+
+**Publicación.** Se publican la copia suministrada, como siempre; el FASTA
+canónico final en `resources/references/<id>.fa`; y el mapa
+`reference_coordinate_map` v2 en `resources/references/<id>.map.json`. La
+configuración efectiva v6 añade la sección opcional `inserted_reference`, y en
+cada locus, cuando hay inserción, el intervalo **final** en `start`/`end` y lo
+declarado en `declared`; el manifiesto general v6 añade el enlace de la final a
+`references` y la sección opcional `reference_insertion` con la referencia de
+origen, los artefactos y los cambios aplicados (REQ-MAN-07). Sin inserciones no
+aparece nada nuevo y los bytes publicados no cambian. No hay versión de esquema
+nueva: las tres versiones están en curso (S-26) y el mapa v2 ya bastaba.
+
+**Juez.** El validador de los recursos publicados rehace el genoma final desde
+la copia suministrada publicada y lo declarado en la configuración efectiva,
+con un empalme propio y sin llamar a `insert_tracts`; lo compara byte a byte
+con el FASTA final; valida el mapa por su contenido, porque su esquema admite
+huecos, intervalos invertidos e identificadores iguales; comprueba cada
+intervalo publicado de los loci, en la efectiva y en el manifiesto; y traduce
+por su cuenta las regiones del generador de la matriz desde las del TOML y
+exige las mismas que recibió el generador. Después, los jueces que ya
+trabajaban sobre las bases de la referencia —el abanico de deslizamiento, la
+matriz de SNV y el evento técnico— reciben la final ya verificada. **La verdad y
+el VCF no se releen**: se comprueba, con una pasada barata, que nombran la
+referencia de la simulación —la cabecera de la verdad con su identificador, su
+huella del contenido y la huella del FASTA; el identificador y la longitud de
+cada fragmento que los lleva; `##reference` y `##contig` del VCF— y que la
+sección de loci del manifiesto también. Lo mismo vale sin inserción, contra la
+suministrada. Corregido el 01/10/2026 tras la revisión adversarial: la primera
+redacción decía que la verdad y el VCF se juzgaban contra la final, y antes de
+esa comprobación de nombres no los leía nadie.
+
