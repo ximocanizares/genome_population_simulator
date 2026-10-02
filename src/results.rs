@@ -57,6 +57,7 @@ use crate::repeat_genotypes::RepeatAlleleDraw;
 use crate::tandem_repeat::{BlockAnnotation, RepeatMotif, TandemRepeatTract};
 use crate::technical_identity::derive_technical_identity_plan;
 use crate::vcf_contract::{TBI_MAXIMUM_POSITION_EXCLUSIVE, VcfIndexKind, VcfOutputMode};
+use crate::vcf_projection::VCF_NORMALIZATION_VERSION;
 use crate::vcf_publication::{
     VCF_ARTIFACT_ID, VCF_ARTIFACT_KIND, VCF_BGZF_ARTIFACT_PATH, VCF_CSI_ARTIFACT_PATH,
     VCF_INDEX_ARTIFACT_ID, VCF_TBI_ARTIFACT_PATH, VCF_TEXT_ARTIFACT_PATH,
@@ -329,10 +330,7 @@ pub fn effective_config_document_with_reductions(
         "reduced_references": reductions.iter().map(reduction_json).collect::<Vec<_>>(),
         "initial_populations": effective_initial_populations_json(config),
         "direct_events": config.direct_events().iter().map(direct_event_json).collect::<Vec<_>>(),
-        "vcf_output": config.vcf_output().map(|mode| match mode {
-            VcfOutputMode::Text => json!({"mode": "text"}),
-            VcfOutputMode::Bgzf => json!({"mode": "bgzf"}),
-        }),
+        "vcf_output": effective_vcf_output_json(config),
     });
     if let Some(event) = config.technical_event() {
         document["technical_event"] = technical_event_json(config, event);
@@ -501,9 +499,26 @@ pub fn validate_published_tract_output_accounting(
     }
 
     let recomputed_truth = recount_truth_tract_bases(truth_path)?;
-    let recomputed_vcf = match vcf_path {
-        None => 0,
-        Some(path) => recount_vcf_tract_bases(path)?,
+    // Los loci tal como el manifiesto los publica, en base uno e inclusivos:
+    // a cada registro de repetición se le atribuye el primero, por posición,
+    // cuyo intervalo contiene.
+    let loci = section
+        .get("loci")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|locus| {
+            Some((
+                locus.get("sequence_id")?.as_str()?.to_owned(),
+                locus.get("start")?.as_u64()?,
+                locus.get("end")?.as_u64()?,
+                locus.get("id")?.as_str()?.to_owned(),
+            ))
+        })
+        .collect::<BTreeSet<_>>();
+    let (recomputed_vcf, recomputed_by_locus) = match vcf_path {
+        None => (0, BTreeMap::new()),
+        Some(path) => recount_vcf_tract_bases(path, &loci, manifest_path)?,
     };
     if recomputed_truth != read("realized_truth_tract_bases")?
         || recomputed_vcf != read("realized_vcf_tract_bases")?
@@ -512,6 +527,61 @@ pub fn validate_published_tract_output_accounting(
             manifest_path,
             "las bases de tracto realizadas no son las que los documentos publicados llevan",
         ));
+    }
+    // **La parte VCF de la cota es lo que el VCF lleva** (DTC-097): se mide al
+    // publicar, de modo que tiene que coincidir con lo que este juez recuenta
+    // sobre los bytes, y la configuración efectiva tiene que decir lo mismo,
+    // en total y sumando por locus.
+    if read("vcf_tract_bases_bound")? != recomputed_vcf {
+        return Err(repeat_section_error(
+            manifest_path,
+            "la parte VCF de la cota no es lo que el VCF publicado lleva",
+        ));
+    }
+    let effective_budget = effective.get("repeat_output_budget");
+    if effective_budget
+        .and_then(|budget| budget.get("vcf_tract_bases_bound"))
+        .and_then(Value::as_u64)
+        != Some(recomputed_vcf)
+    {
+        return Err(effective_error(
+            effective_path,
+            "la configuración efectiva no publica las bases de tracto que el VCF lleva",
+        ));
+    }
+    let per_locus = effective_budget
+        .and_then(|budget| budget.get("per_locus"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|locus| locus.get("vcf_tract_bases_bound").and_then(Value::as_u64))
+        .try_fold(0_u64, |total, bases| {
+            bases.map(|bases| total.saturating_add(bases))
+        });
+    if per_locus != Some(recomputed_vcf) {
+        return Err(effective_error(
+            effective_path,
+            "las bases de tracto del VCF por locus no suman las del VCF publicado",
+        ));
+    }
+    // Y cada locus, lo que llevan **sus** registros: sin esto, atribuir todo
+    // al primer locus de la secuencia conservaría la suma.
+    for locus in effective_budget
+        .and_then(|budget| budget.get("per_locus"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let id = locus.get("id").and_then(Value::as_str).unwrap_or_default();
+        let published = locus.get("vcf_tract_bases_bound").and_then(Value::as_u64);
+        if published != Some(recomputed_by_locus.get(id).copied().unwrap_or(0)) {
+            return Err(effective_error(
+                effective_path,
+                format!(
+                    "las bases de tracto del VCF del locus {id} no son las que llevan sus registros"
+                ),
+            ));
+        }
     }
     let realized = recomputed_truth.saturating_add(recomputed_vcf);
     if realized != read("realized_total_tract_bases")? {
@@ -578,7 +648,11 @@ fn recount_truth_tract_bases(path: &Path) -> Result<u64, Diagnostic> {
 /// Un registro es de repetición si publica el recuento de secuencias
 /// repetidas; sus bases son las de `REF` más las de cada `ALT`, que desde la
 /// decisión S-09 llevan la secuencia completa del alelo.
-fn recount_vcf_tract_bases(path: &Path) -> Result<u64, Diagnostic> {
+fn recount_vcf_tract_bases(
+    path: &Path,
+    loci: &BTreeSet<(String, u64, u64, String)>,
+    manifest_path: &Path,
+) -> Result<(u64, BTreeMap<String, u64>), Diagnostic> {
     let bytes = std::fs::read(path)
         .map_err(|error| manifest_error(path, format!("VCF no legible: {error}")))?;
     let text = if path.extension().is_some_and(|extension| extension == "gz") {
@@ -591,18 +665,36 @@ fn recount_vcf_tract_bases(path: &Path) -> Result<u64, Diagnostic> {
         String::from_utf8(bytes).map_err(|_| manifest_error(path, "VCF no es UTF-8"))?
     };
     let mut total = 0_u64;
+    let mut by_locus = BTreeMap::<String, u64>::new();
     for line in text.lines().filter(|line| !line.starts_with('#')) {
         let fields = line.split('\t').collect::<Vec<_>>();
         let Some(info) = fields.get(7) else { continue };
         if !info.split(';').any(|field| field.starts_with("RN=")) {
             continue;
         }
-        total = total.saturating_add(fields[3].len() as u64);
+        let mut bases = fields[3].len() as u64;
         for alternate in fields[4].split(',') {
-            total = total.saturating_add(alternate.len() as u64);
+            bases = bases.saturating_add(alternate.len() as u64);
         }
+        total = total.saturating_add(bases);
+        let position = fields[1].parse::<u64>().unwrap_or(0);
+        let last = position
+            .saturating_add(fields[3].len() as u64)
+            .saturating_sub(1);
+        // Un registro de repetición contiene siempre el intervalo de su
+        // locus; si no contiene ninguno, el fichero no es el que se publicó.
+        let Some((_, _, _, id)) = loci.iter().find(|(sequence, start, end, _)| {
+            sequence == fields[0] && position <= *start && *end <= last
+        }) else {
+            return Err(repeat_section_error(
+                manifest_path,
+                "un registro de repetición del VCF no contiene el intervalo de ningún locus",
+            ));
+        };
+        let entry = by_locus.entry(id.clone()).or_insert(0);
+        *entry = entry.saturating_add(bases);
     }
-    Ok(total)
+    Ok((total, by_locus))
 }
 
 /// Bases de tracto que los documentos publicados llevan de verdad.
@@ -611,16 +703,63 @@ fn recount_vcf_tract_bases(path: &Path) -> Result<u64, Diagnostic> {
 /// la de la verdad recorriendo el documento ya construido, la del VCF
 /// recorriendo los registros ya agrupados. Ninguna de las dos sabe nada de la
 /// cota.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RealizedTractOutput {
     pub truth_bases: u64,
     pub vcf_bases: u64,
+    /// Las bases del VCF por locus. Desde el 2 de octubre de 2026 son también
+    /// la parte VCF de la cota publicada: se miden, no se estiman (DTC-097).
+    pub vcf_by_locus: Vec<(String, u64)>,
 }
 
 impl RealizedTractOutput {
     #[must_use]
-    pub const fn total_bases(self) -> u64 {
+    pub const fn total_bases(&self) -> u64 {
         self.truth_bases.saturating_add(self.vcf_bases)
+    }
+}
+
+/// Escribe en la configuración efectiva ya construida la parte VCF de la cota
+/// de bases de tracto, **medida** al publicar el VCF (DTC-097).
+///
+/// La configuración la deja a cero, porque antes de construir las copias no
+/// se conoce; esta función la completa con lo que el VCF lleva, por locus y en
+/// total, y rehace el total de la cota. Sin sección de repeticiones no hace
+/// nada.
+pub fn publish_measured_vcf_tract_bases(document: &mut Value, realized: &RealizedTractOutput) {
+    let Some(budget) = document
+        .get_mut("repeat_output_budget")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    let truth = budget
+        .get("truth_tract_bases_bound")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    budget.insert(
+        "vcf_tract_bases_bound".to_owned(),
+        json!(realized.vcf_bases),
+    );
+    budget.insert(
+        "total_tract_bases_bound".to_owned(),
+        json!(truth.saturating_add(realized.vcf_bases)),
+    );
+    if let Some(loci) = budget.get_mut("per_locus").and_then(Value::as_array_mut) {
+        for locus in loci {
+            let measured = locus
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(|id| {
+                    realized
+                        .vcf_by_locus
+                        .iter()
+                        .find(|(locus, _)| locus == id)
+                        .map(|(_, bases)| *bases)
+                })
+                .unwrap_or(0);
+            locus["vcf_tract_bases_bound"] = json!(measured);
+        }
     }
 }
 
@@ -635,15 +774,17 @@ fn repeat_output_budget_json(config: &EffectiveConfig) -> Value {
     let budget = config.repeat_output_budget();
     json!({
         "truth_tract_bases_bound": budget.truth_bases(),
-        "vcf_tract_bases_bound": budget.vcf_bases(),
-        "total_tract_bases_bound": budget.total_bases(),
+        // Se mide al publicar el VCF y lo completa
+        // `publish_measured_vcf_tract_bases`; antes no se conoce.
+        "vcf_tract_bases_bound": 0,
+        "total_tract_bases_bound": budget.truth_bases(),
         "declared_max_tract_output_bases": budget.declared_cap(),
         "truth_copies_per_haplotype_copy":
             crate::application::EffectiveRepeatOutputBudget::TRUTH_COPIES_PER_HAPLOTYPE_COPY,
         "per_locus": budget.per_locus().iter().map(|locus| json!({
             "id": locus.locus_id(),
             "truth_tract_bases_bound": locus.truth_bases(),
-            "vcf_tract_bases_bound": locus.vcf_bases(),
+            "vcf_tract_bases_bound": 0,
         })).collect::<Vec<_>>(),
     })
 }
@@ -799,7 +940,7 @@ fn slippage_json(slippage: &EffectiveRepeatSlippage) -> Value {
 pub fn repeat_loci_manifest_json(
     config: &EffectiveConfig,
     draws: &[RepeatAlleleDraw],
-    realized: RealizedTractOutput,
+    realized: &RealizedTractOutput,
 ) -> Result<Option<Value>, Diagnostic> {
     if config.repeat_loci().is_empty() {
         return Ok(None);
@@ -880,8 +1021,14 @@ pub fn repeat_loci_manifest_json(
         // comprueba que las dos coinciden.
         "tract_output": {
             "truth_tract_bases_bound": config.repeat_output_budget().truth_bases(),
-            "vcf_tract_bases_bound": config.repeat_output_budget().vcf_bases(),
-            "total_tract_bases_bound": config.repeat_output_budget().total_bases(),
+            // La parte del VCF no se estima: es lo que el VCF lleva, medido al
+            // publicarlo (DTC-097). Sin VCF, o si la ejecución falla antes de
+            // escribirlo, es cero.
+            "vcf_tract_bases_bound": realized.vcf_bases,
+            "total_tract_bases_bound": config
+                .repeat_output_budget()
+                .truth_bases()
+                .saturating_add(realized.vcf_bases),
             "realized_truth_tract_bases": realized.truth_bases,
             "realized_vcf_tract_bases": realized.vcf_bases,
             "realized_total_tract_bases": realized.total_bases(),
@@ -1172,7 +1319,11 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
         "references": manifest.references.iter().map(manifest_reference_json).collect::<Vec<_>>(),
         "reference_reductions": manifest.reduced_references.iter().map(manifest_reduction_json).collect::<Vec<_>>(),
         "population_snvs": manifest.population_snvs.map(population_snvs_link_json),
-        "vcf_outputs": manifest.vcf_outputs.iter().map(vcf_output_json).collect::<Vec<_>>(),
+        "vcf_outputs": manifest
+            .vcf_outputs
+            .iter()
+            .map(|link| vcf_output_json(link, manifest.repeat_loci.is_some()))
+            .collect::<Vec<_>>(),
         "authorizations": {
             "allow_empty_snv_matrix": manifest.authorizations.allow_empty_snv_matrix,
             "allow_incompatible_genotypes": manifest.authorizations.allow_incompatible_genotypes,
@@ -1231,8 +1382,30 @@ fn manifest_event_json(link: &ManifestEventLink) -> Value {
     })
 }
 
-fn vcf_output_json(link: &VcfManifestLink) -> Value {
-    json!({
+/// La activación VCF de la configuración efectiva.
+///
+/// La versión 6 publica además la del algoritmo de normalización, que DTC-064
+/// exige registrar; la 4, ya cerrada, no la lleva. Es la única forma de esta
+/// sección, y la usan tanto quien escribe el documento como quien lo
+/// reconstruye desde el TOML para compararlo.
+fn effective_vcf_output_json(config: &EffectiveConfig) -> Value {
+    config.vcf_output().map_or(Value::Null, |mode| {
+        let mode = match mode {
+            VcfOutputMode::Text => "text",
+            VcfOutputMode::Bgzf => "bgzf",
+        };
+        if config.document_version() == DeclaredDocumentVersion::V4 {
+            json!({"mode": mode, "normalization_version": VCF_NORMALIZATION_VERSION})
+        } else {
+            json!({"mode": mode})
+        }
+    })
+}
+
+/// Enlace VCF del manifiesto general. La versión 6 registra la versión del
+/// algoritmo de normalización (DTC-064); la 4, ya cerrada, no.
+fn vcf_output_json(link: &VcfManifestLink, with_normalization_version: bool) -> Value {
+    let mut value = json!({
         "state": link.state.as_str(),
         "reference_id": link.reference_id,
         "samples": link.samples,
@@ -1240,7 +1413,11 @@ fn vcf_output_json(link: &VcfManifestLink) -> Value {
         "vcf_artifact_id": link.vcf_artifact_id,
         "index_kind": link.index_kind.map(|kind| match kind { VcfIndexKind::Tbi => "tbi", VcfIndexKind::Csi => "csi" }),
         "index_artifact_id": link.index_artifact_id,
-    })
+    });
+    if with_normalization_version {
+        value["normalization_version"] = json!(VCF_NORMALIZATION_VERSION);
+    }
+    value
 }
 
 fn population_snvs_link_json(link: &PopulationSnvsManifestLink) -> Value {
@@ -4401,11 +4578,8 @@ fn validate_effective_targets_against_configuration(
             "technical_event efectivo no coincide exactamente con el TOML resuelto",
         ));
     }
-    let expected_vcf = expected.vcf_output().map(|mode| match mode {
-        VcfOutputMode::Text => json!({"mode": "text"}),
-        VcfOutputMode::Bgzf => json!({"mode": "bgzf"}),
-    });
-    if effective.get("vcf_output") != Some(&expected_vcf.unwrap_or(Value::Null)) {
+    let expected_vcf = effective_vcf_output_json(&expected);
+    if effective.get("vcf_output") != Some(&expected_vcf) {
         return Err(effective_error(
             effective_path,
             "vcf_output efectivo no coincide exactamente con el TOML resuelto",
@@ -5919,6 +6093,7 @@ fn parse_general_manifest_bytes_unretagged(
         required_array(object, "vcf_outputs", path)?,
         &catalog,
         &references,
+        schema_version == Some(GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS),
         path,
     )?;
     let reductions = validate_reference_reductions(
@@ -7350,8 +7525,26 @@ fn validate_effective_vcf_output(
     let output = value
         .as_object()
         .ok_or_else(|| effective_error(path, "vcf_output inválido"))?;
-    const FIELDS: [&str; 1] = ["mode"];
-    validate_effective_closed_object(output, &FIELDS, "vcf_output", path)?;
+    // La versión 6 registra la del algoritmo de normalización (DTC-064), y
+    // solo admite la que este programa aplica: un documento que declare otra
+    // describe un VCF que no es el que se publicó.
+    if effective.get("schema_version").and_then(Value::as_str)
+        == Some(EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS)
+    {
+        const FIELDS: [&str; 2] = ["mode", "normalization_version"];
+        validate_effective_closed_object(output, &FIELDS, "vcf_output", path)?;
+        if output.get("normalization_version").and_then(Value::as_str)
+            != Some(VCF_NORMALIZATION_VERSION)
+        {
+            return Err(effective_error(
+                path,
+                "vcf_output.normalization_version no es la versión del algoritmo de normalización VCF",
+            ));
+        }
+    } else {
+        const FIELDS: [&str; 1] = ["mode"];
+        validate_effective_closed_object(output, &FIELDS, "vcf_output", path)?;
+    }
     match output.get("mode").and_then(Value::as_str) {
         Some("text") => Ok(Some(VcfOutputMode::Text)),
         Some("bgzf") => Ok(Some(VcfOutputMode::Bgzf)),
@@ -8898,6 +9091,7 @@ fn validate_vcf_outputs(
     values: &[Value],
     catalog: &BTreeMap<&str, &str>,
     references: &BTreeMap<String, String>,
+    with_normalization_version: bool,
     path: &Path,
 ) -> Result<BTreeSet<String>, Diagnostic> {
     if values.len() > 1 {
@@ -8921,7 +9115,24 @@ fn validate_vcf_outputs(
             "index_kind",
             "index_artifact_id",
         ];
-        validate_closed_object(object, &FIELDS, "vcf_outputs[]", path)?;
+        if with_normalization_version {
+            // La versión 6 registra la del algoritmo de normalización
+            // (DTC-064), obligatoria y solo la que este programa aplica.
+            let mut fields = FIELDS.to_vec();
+            fields.push("normalization_version");
+            validate_closed_object(object, &fields, "vcf_outputs[]", path)?;
+            if object.get("normalization_version").and_then(Value::as_str)
+                != Some(VCF_NORMALIZATION_VERSION)
+            {
+                return Err(manifest_error_for_schema(
+                    path,
+                    "manifest-general-v6.schema.json",
+                    "vcf_outputs[].normalization_version no es la versión del algoritmo de normalización VCF",
+                ));
+            }
+        } else {
+            validate_closed_object(object, &FIELDS, "vcf_outputs[]", path)?;
+        }
         if object.get("state").and_then(Value::as_str) != Some("complete") {
             return Err(manifest_error(path, "un VCF publicado debe estar complete"));
         }

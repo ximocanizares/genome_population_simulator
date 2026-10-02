@@ -1,0 +1,60 @@
+config_kind = "general"
+schema_version = "4"
+seed = "92ec8fbeb10c768f4d2a0bdbbbfafe2cd9cb50dcee41412d7d664d9088755cbb"
+
+[population_snvs]
+mode = "supplied"
+input_path = "snvs.tsv"
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 269
+
+[[reference.repeat_loci]]
+id = "STR-1"
+sequence = "chr1"
+start = 101
+end = 116
+motif = "AT"
+
+[[reference.repeat_loci.alleles]]
+units = 6
+frequency = 0.5
+
+[[reference.repeat_loci.alleles]]
+units = 8
+frequency = 0.5
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 2
+ploidy = 1
+genotype_model = "hwe"
+individual_ids = ["ind-1", "ind-2"]
+
+[vcf_output]
+mode = "text"
+
+[[direct_events]]
+event_id = "e0"
+contig = "chr1"
+individual_id = "ind-2"
+phase = 0
+kind = "deletion"
+start = 96
+end = 99
+
+[[direct_events]]
+event_id = "e1"
+contig = "chr1"
+individual_id = "ind-1"
+phase = 0
+kind = "insertion"
+point = 119
+bases = "TT"

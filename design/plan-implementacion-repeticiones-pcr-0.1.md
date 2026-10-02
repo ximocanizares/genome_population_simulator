@@ -1981,6 +1981,27 @@ frecuencias; y **no hay umbral de 50 pb**, sino un tope propio configurable.
     nuevo —el escenario con alelos largos la caza, porque los bytes escritos la
     rebasarían—; una que lo cuente también cuando no hay loci, que la
     comparación con la línea base caza.
+  - **Corregido el 2 de octubre de 2026, dentro de la misma versión (S-26):
+    la parte VCF ya no se estima, se mide.** Las variantes que pisan un
+    registro de repetición se funden en él (DTC-064) y la estimación sobre lo
+    declarado dejó de ser una cota. La publicación del VCF cuenta, antes de
+    escribirlo, las bases de tracto que va a escribir, y esa cifra se publica
+    donde iba la cota; el tope declarado se aplica, por precaución, sobre la
+    cota de la verdad al admitir, y sobre la verdad **ya realizada** más lo
+    medido al publicar, con un diagnóstico de configuración. Una configuración
+    que `validate` admite puede ser rechazada así por `run`. La cifra
+    publicada puede cambiar en un escenario con loci, aunque no en todos —en
+    la muestra de la segunda revisión, 109 de 474 no cambiaron—; DTC-097 dice
+    por qué. Se comprueba con: los escenarios que la estimación dejaba por
+    debajo de lo escrito publican; una deleción larga que la estimación más
+    amplia rechazaba contra un tope se admite; un tope menor que lo realizado
+    más lo medido se rechaza al publicar, nombrando el tope, la cifra con sus
+    dos sumandos y el locus, y uno igual publica; el juez rechaza una cifra
+    publicada que no sea la que el VCF lleva, en total y locus a locus, en
+    texto y en BGZF. **Debe fallar contra:** volver a estimar; no aplicar el
+    tope al publicar; aplicarlo con la cota de la verdad en lugar de lo
+    realizado; un juez que no compare lo publicado con lo escrito, o que solo
+    compare la suma.
 
 - ☐ **F6.4.9.1.** Interfaz Marimo: declarar loci **con motivo y posición**,
   declarar alelos **con sus interrupciones**, y declarar **frecuencias** por

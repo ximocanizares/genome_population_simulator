@@ -45,6 +45,7 @@ documenta mejor.
 | DT-015 | El validador de la verdad por flujo rechaza toda verdad con alelos de repetición | Baja | 30/09/2026 | Abierta |
 | DT-016 | El tracto de un microsatélite compuesto no se coloca en una referencia simulada | Media | 01/10/2026 | **Cerrada (01/10/2026)** |
 | DT-017 | El juez de los recursos publicados cita el esquema efectivo v4 en sus rechazos aunque el documento sea v6 | Baja | 01/10/2026 | Abierta, corregida para la regeneración de la referencia simulada |
+| DT-018 | Un cambio de base directo seguido de otro de la matriz en la misma copia aborta la ejecución al reconstruir la verdad | **Grave** | 02/10/2026 | Abierta |
 
 ---
 
@@ -1060,3 +1061,45 @@ efectiva con el esquema de la versión declarada, sin tocar los del manifiesto,
 que comparten código de diagnóstico y no deben reetiquetarse con un esquema
 efectivo. No es una línea: hay que separar los dos tipos de rechazo antes de
 reetiquetar.
+
+---
+
+## DT-018. Un cambio de base directo y otro de la matriz en la misma copia abortan la ejecución
+
+**Gravedad: grave.** No publica nada falso, pero **impide simular** casi
+cualquier escenario que combine un cambio de base declarado a mano con la
+matriz de variantes de población: la ejecución termina con un error interno en
+vez de con un paquete.
+
+### Qué pasa
+
+Una copia recibe un cambio de base directo —un evento `snp` de
+`[[direct_events]]`— y, **más adelante en la misma copia**, un cambio de base
+de la matriz de población. La ejecución aborta con `GPS-INTERNAL-001`, en la
+operación de reconstruir la verdad de forma independiente, porque la historia
+de la copia «no se reproduce» (`HistoryDoesNotReplay`).
+
+La causa está en el reproductor de historias del validador de la verdad
+(`src/truth_validation.rs`). Al reproducir los eventos de una copia, los
+cambios de base se añaden a su lista **en el orden de la historia**
+(`truth_validation.rs:762`), y en la historia el de la matriz va antes que el
+directo; después, la lista reconstruida se compara **ordenada tal cual** con
+las piezas vigentes que publica la verdad (`truth_validation.rs:1067`), que van
+por posición. Las dos listas tienen los mismos cambios en distinto orden, y la
+comparación las da por distintas.
+
+### Cómo se reproduce
+
+La segunda revisión adversarial del 2 de octubre de 2026 lo encontró con un
+escenario mínimo: referencia de 360 bases, dos individuos diploides, la matriz
+con dos cambios de base en las posiciones 21 y 200, y un cambio de base directo
+en la posición 180 de la fase 1 de `ind-1`. Aborta con la versión actual y con
+la anterior a la fusión de variantes solapadas del VCF, de modo que **no lo
+introdujo esa fusión**: es previo.
+
+### Qué haría falta para cerrarla
+
+Que el reproductor compare los cambios de base reconstruidos con los vigentes
+por posición, no por orden de llegada, o que los inserte ordenados; y una
+prueba con un cambio directo y uno de la matriz posterior en la misma copia que
+falle contra la variante actual. Queda para un encargo aparte.

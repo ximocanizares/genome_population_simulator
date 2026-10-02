@@ -694,11 +694,15 @@
         "mode",
         "vcf_artifact_id",
         "index_kind",
-        "index_artifact_id"
+        "index_artifact_id",
+        "normalization_version"
       ],
       "properties": {
         "state": {
           "const": "complete"
+        },
+        "normalization_version": {
+          "const": "vcf-small-allele-normalization-v2"
         },
         "reference_id": {
           "$ref": "#/$defs/non_empty_id"
@@ -1721,7 +1725,7 @@
           "$ref": "#/$defs/u64_repeat"
         }
       },
-      "description": "Contabilidad de bases de tracto. La COTA se repite aquí desde la configuración efectiva, donde se calculó sobre lo declarado. Lo REALIZADO se cuenta sobre lo publicado. AVISO: este esquema NO puede comprobar que lo realizado no supere la cota ni que sea lo que los documentos llevan; eso lo hace un juez independiente que recuenta releyendo el truth.jsonl y el VCF, sin tocar ninguna estructura del productor."
+      "description": "Contabilidad de bases de tracto. La COTA se repite aquí desde la configuración efectiva: su parte de la verdad se calculó sobre lo declarado y su parte del VCF es lo que el VCF lleva, medido al publicarlo. Lo REALIZADO se cuenta sobre lo publicado. AVISO: este esquema NO puede comprobar que lo realizado no supere la cota ni que sea lo que los documentos llevan; eso lo hace un juez independiente que recuenta releyendo el truth.jsonl y el VCF, sin tocar ninguna estructura del productor."
     },
     "repeat_slippage": {
       "type": "object",

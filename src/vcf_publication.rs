@@ -4,7 +4,7 @@
 //! reconstruye ni valida semánticamente `truth.jsonl`: esa comparación
 //! independiente es responsabilidad exclusiva de F2.5.6.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::{fs::File, io::BufRead, path::Path};
 
 use crate::diagnostics::Diagnostic;
@@ -19,7 +19,7 @@ use crate::vcf_contract::{
     write_vcf_records,
 };
 use crate::vcf_grouping::group_projected_alleles_from_validated_truth;
-use crate::vcf_projection::project_projected_alleles_from_validated_truth;
+use crate::vcf_projection::{VcfProjectionError, project_projected_alleles_from_validated_truth};
 use crate::vcf_representation::prepare_conditional_vcf_records;
 
 pub const VCF_ARTIFACT_ID: &str = "truth-vcf";
@@ -41,6 +41,122 @@ pub struct VcfPublication {
     /// Bases de secuencia de tracto que el VCF publicado lleva de verdad,
     /// contadas sobre los registros que se acaban de escribir.
     pub tract_bases: u64,
+    /// Las mismas bases, repartidas por locus (DTC-097).
+    pub tract_bases_by_locus: Vec<(String, u64)>,
+}
+
+/// El tope de bases de tracto que el usuario declaró, para aplicarlo sobre lo
+/// que la ejecución **va a publicar**: la verdad ya construida más lo que el
+/// VCF va a escribir.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TractOutputCap {
+    pub cap: u64,
+}
+
+/// Bases de tracto que la verdad lleva, por locus: la vista vigente de cada
+/// copia, su historial y los alelos de cada caso.
+fn truth_tract_bases_by_locus(truth: &TruthDocument) -> BTreeMap<String, u64> {
+    use crate::truth_schema::{TruthAllele, TruthCurrentPiece, TruthHistoryEvent};
+    let mut totals = BTreeMap::<String, u64>::new();
+    let mut add = |locus: &str, bases: &str| {
+        let entry = totals.entry(locus.to_owned()).or_insert(0);
+        *entry = entry.saturating_add(bases.len() as u64);
+    };
+    for record in &truth.records {
+        match record {
+            TruthRecord::HaplotypeCopy(copy) => {
+                for piece in &copy.current_pieces {
+                    if let TruthCurrentPiece::RepeatAllele {
+                        locus_id, bases, ..
+                    } = piece
+                    {
+                        add(locus_id, bases);
+                    }
+                }
+                for event in &copy.history {
+                    if let TruthHistoryEvent::RepeatAllele {
+                        locus_id, bases, ..
+                    } = event
+                    {
+                        add(locus_id, bases);
+                    }
+                }
+            }
+            TruthRecord::Genotype(genotype) => {
+                for allele in &genotype.alleles {
+                    if let TruthAllele::Repeat {
+                        locus_id, bases, ..
+                    } = allele
+                    {
+                        add(locus_id, bases);
+                    }
+                }
+            }
+        }
+    }
+    totals
+}
+
+/// Reparte por locus las bases de tracto de los registros de repetición.
+///
+/// Cada registro se atribuye al locus cuyo intervalo de referencia contiene; la
+/// verdad publica ese intervalo y su identificador en los casos de
+/// repetición. Si un registro contiene varios, se atribuye entero al primero
+/// por posición, de modo que la suma por loci es siempre la del VCF.
+fn tract_bases_by_locus(
+    truth: &TruthDocument,
+    records: &[crate::vcf_grouping::GroupedVcfRecord],
+) -> Result<Vec<(String, u64)>, Diagnostic> {
+    let mut loci = BTreeMap::<(String, u64, u64), String>::new();
+    for record in &truth.records {
+        if let TruthRecord::Genotype(genotype) = record {
+            for allele in &genotype.alleles {
+                if let crate::truth_schema::TruthAllele::Repeat { locus_id, .. } = allele {
+                    loci.insert(
+                        (
+                            genotype.locus.sequence_id.clone(),
+                            genotype.locus.start,
+                            genotype.locus.end,
+                        ),
+                        locus_id.clone(),
+                    );
+                }
+            }
+        }
+    }
+    let mut totals = BTreeMap::<String, u64>::new();
+    for locus in loci.values() {
+        totals.entry(locus.clone()).or_insert(0);
+    }
+    for record in records.iter().filter(|record| {
+        record
+            .alternate_repeats
+            .iter()
+            .any(|sequences| !sequences.is_empty())
+    }) {
+        let end = record.position + record.reference.len() as u64;
+        let locus = loci
+            .iter()
+            .find(|((sequence, start, stop), _)| {
+                *sequence == record.sequence_id && record.position <= *start && *stop <= end
+            })
+            .map(|(_, id)| id)
+            .ok_or_else(|| {
+                vcf_invariant(
+                    "tract_bases_by_locus",
+                    "un registro de repetición no contiene el intervalo de ningún locus",
+                )
+            })?;
+        let bases = record
+            .alternates
+            .iter()
+            .fold(record.reference.len() as u64, |total, alternate| {
+                total.saturating_add(alternate.len() as u64)
+            });
+        let entry = totals.entry(locus.clone()).or_insert(0);
+        *entry = entry.saturating_add(bases);
+    }
+    Ok(totals.into_iter().collect())
 }
 
 /// Bases de tracto de los registros de repetición: su `REF` y cada uno de sus
@@ -80,6 +196,24 @@ pub fn publish_truth_vcf(
     truth: &TruthDocument,
     mode: VcfOutputMode,
 ) -> Result<VcfPublication, Diagnostic> {
+    publish_truth_vcf_within(workspace, reference, truth, mode, None)
+}
+
+/// Como [`publish_truth_vcf`], aplicando antes de escribir nada el tope de
+/// bases de tracto que el usuario declaró (DTC-097).
+///
+/// Las bases de tracto del VCF se **miden** sobre los registros ya agrupados,
+/// que son exactamente los que se van a escribir. Si las de la verdad ya
+/// construida más lo medido superan el tope, se rechaza con un diagnóstico de
+/// configuración que nombra el tope, la cifra y el locus que más aporta, y no
+/// se escribe el VCF.
+pub fn publish_truth_vcf_within(
+    workspace: &mut ExecutionWorkspace,
+    reference: &Reference,
+    truth: &TruthDocument,
+    mode: VcfOutputMode,
+    cap: Option<&TractOutputCap>,
+) -> Result<VcfPublication, Diagnostic> {
     let samples = samples_from_truth(truth);
     // Históricamente los fallos del contrato de cabecera tenían precedencia
     // sobre la comprobación semántica de verdad; se conserva ese diagnóstico.
@@ -95,7 +229,44 @@ pub fn publish_truth_vcf(
         // Mantener el contexto público no retrasa la validación al escritor.
         .map_err(|error| vcf_invariant("project", error.to_string()))?;
     let normalized = project_projected_alleles_from_validated_truth(validated, reference)
-        .map_err(|error| vcf_invariant("project", error.to_string()))?;
+        .map_err(|error| match error {
+            // No es una invariante rota sino un escenario que el VCF no sabe
+            // anotar sin inventar una regla: se le dice a quien lo escribió.
+            VcfProjectionError::UndeclaredCompoundTract {
+                locus_id,
+                sequence_id,
+                start,
+                end,
+            } => Diagnostic::configuration(
+                "GPS-CONF-008",
+                "La configuración contiene una combinación de campos incompatible.",
+            )
+            .with("fields", "reference.repeat_loci,direct_events")
+            .with("locus_id", locus_id.clone())
+            .with(
+                "detail",
+                format!(
+                    "locus {locus_id} ({sequence_id}:{} a {end}): hay que anotar en el VCF sin bloques declarados un alelo de este microsatélite compuesto —una copia que conserva el tracto de la referencia dentro de un registro fundido con una inserción o deleción directa, o dos copias con las mismas bases y anotaciones distintas— y con varios motivos su estructura en bloques no se conoce sin ambigüedad",
+                    start + 1
+                ),
+            ),
+            VcfProjectionError::SeveralTractsInOneRecord { locus_ids } => {
+                Diagnostic::configuration(
+                    "GPS-CONF-008",
+                    "La configuración contiene una combinación de campos incompatible.",
+                )
+                .with("fields", "reference.repeat_loci,direct_events")
+                .with("locus_id", locus_ids.join(","))
+                .with(
+                    "detail",
+                    format!(
+                        "loci {}: una inserción o deleción directa funde en un solo registro VCF varios microsatélites, y la anotación de repetición de un alelo hay que derivarla de sus bases sin saber cuáles son de cada tracto",
+                        locus_ids.join(", ")
+                    ),
+                )
+            }
+            other => vcf_invariant("project", other.to_string()),
+        })?;
     let grouped = group_projected_alleles_from_validated_truth(validated, reference, &normalized)
         .map_err(|error| vcf_invariant("group", error.to_string()))?;
     let conditional = prepare_conditional_vcf_records(grouped)
@@ -106,6 +277,43 @@ pub fn publish_truth_vcf(
     );
 
     let tract_bases = realized_vcf_tract_bases(&conditional.records);
+    let by_locus = tract_bases_by_locus(truth, &conditional.records)?;
+    if let Some(cap) = cap {
+        // Lo que la ejecución publicará de verdad: las bases de tracto que la
+        // verdad ya construida lleva, más las que el VCF va a escribir.
+        let truth_by_locus = truth_tract_bases_by_locus(truth);
+        let truth_bases = truth_by_locus
+            .values()
+            .fold(0_u64, |total, bases| total.saturating_add(*bases));
+        let total = truth_bases.saturating_add(tract_bases);
+        if total > cap.cap {
+            let mut per_locus = truth_by_locus.clone();
+            for (locus, bases) in &by_locus {
+                let entry = per_locus.entry(locus.clone()).or_insert(0);
+                *entry = entry.saturating_add(*bases);
+            }
+            let heaviest = per_locus
+                .iter()
+                .map(|(id, bases)| (*bases, id.as_str()))
+                .max()
+                .map_or_else(
+                    || "ninguno".to_owned(),
+                    |(bases, id)| format!("{id} con {bases} bases"),
+                );
+            return Err(Diagnostic::configuration(
+                "GPS-CONF-008",
+                "La configuración contiene una combinación de campos incompatible.",
+            )
+            .with("fields", "reference.max_tract_output_bases")
+            .with(
+                "detail",
+                format!(
+                    "el tope declarado de bases de tracto es {} y la ejecución publicaría {total}: {truth_bases} en la verdad más {tract_bases} medidas en el VCF que se iba a escribir; el locus que más aporta es {heaviest}",
+                    cap.cap
+                ),
+            ));
+        }
+    }
 
     let (relative_path, vcf) = match mode {
         VcfOutputMode::Text => {
@@ -191,6 +399,7 @@ pub fn publish_truth_vcf(
         reference_id: reference.id().as_str().to_owned(),
         samples,
         tract_bases,
+        tract_bases_by_locus: by_locus,
     })
 }
 

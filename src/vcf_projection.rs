@@ -5,7 +5,8 @@
 //! `truth.jsonl` ya estructurada, reconstruye los alelos finales desde sus
 //! piezas vigentes y devuelve una entrada por copia y alelo alternativo.
 
-use std::collections::BTreeMap;
+use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::reference::{Reference, ReferenceSequence};
 use crate::truth_schema::{
@@ -13,8 +14,13 @@ use crate::truth_schema::{
 };
 use crate::truth_validation::{TruthValidationError, ValidatedTruthForVcf, validate_truth_for_vcf};
 
-/// Versión estable del algoritmo interno de DTC-064.
-pub const VCF_NORMALIZATION_VERSION: &str = "vcf-small-allele-normalization-v1";
+/// Versión del algoritmo interno de DTC-064.
+///
+/// La `v2` es la del 2 de octubre de 2026: funde en un registro las variantes
+/// de copias distintas que se solapan. La configuración efectiva v6 y el
+/// manifiesto general v6 la publican y sus lectores rechazan cualquier otra.
+/// La `v1` existió solo como esta constante: no se publicó nunca.
+pub const VCF_NORMALIZATION_VERSION: &str = "vcf-small-allele-normalization-v2";
 
 /// Alelo alternativo de una copia, listo para que F2.5.3 lo agrupe.
 ///
@@ -58,8 +64,12 @@ pub(crate) struct ProjectedAllele<'truth> {
     pub(crate) source_start: u64,
     pub(crate) source_end: u64,
     pub(crate) copy: &'truth CopyIdentity,
-    /// Igual que en [`NormalizedAllele::repeat_blocks`], pero prestado.
-    pub(crate) repeat_blocks: Vec<&'truth TruthRepeatBlock>,
+    /// Igual que en [`NormalizedAllele::repeat_blocks`], pero prestado cuando
+    /// el bloque es el que la verdad declara. Solo es propio el que describe el
+    /// tracto de la referencia, para una copia que lo conserva dentro de un
+    /// registro fundido, y el derivado de las bases cuando dos copias con las
+    /// mismas bases traen anotaciones distintas (DTC-064).
+    pub(crate) repeat_blocks: Vec<Cow<'truth, TruthRepeatBlock>>,
 }
 
 #[derive(Clone, Debug)]
@@ -136,7 +146,11 @@ impl<'truth> ProjectedAllele<'truth> {
             source_start: self.source_start,
             source_end: self.source_end,
             copy: self.copy.to_owned(),
-            repeat_blocks: self.repeat_blocks.into_iter().cloned().collect(),
+            repeat_blocks: self
+                .repeat_blocks
+                .into_iter()
+                .map(Cow::into_owned)
+                .collect(),
         }
     }
 }
@@ -241,6 +255,37 @@ pub enum VcfProjectionError {
         position: u64,
     },
     CoordinateOverflow,
+    /// Dos alelos de una misma copia se solapan dentro de un registro fundido.
+    ///
+    /// La normalización por copia ya funde los cambios solapados de una copia
+    /// en un solo alelo, de modo que esto es una invariante rota, no una
+    /// entrada del usuario.
+    OverlappingCopyAlleles {
+        copy: CopyIdentity,
+    },
+    /// Hay que anotar sin bloques declarados un `ALT` de un microsatélite
+    /// **compuesto**: una copia que conserva el tracto de la referencia, o dos
+    /// copias con las mismas bases y anotaciones distintas.
+    ///
+    /// Con varios motivos la estructura en bloques no puede derivarse sin una
+    /// regla que nadie ha fijado. Se rechaza en vez de inventarla.
+    UndeclaredCompoundTract {
+        locus_id: String,
+        sequence_id: String,
+        start: u64,
+        end: u64,
+    },
+    /// Hay que derivar de sus bases la anotación de un `ALT` en un registro
+    /// que contiene **varios** tractos: no se sabe qué bases son de cuál.
+    SeveralTractsInOneRecord {
+        locus_ids: Vec<String>,
+    },
+    /// El tracto de un registro fundido no está entero dentro del registro.
+    TractOutsideFusedRecord {
+        sequence_id: String,
+        start: u64,
+        end: u64,
+    },
 }
 
 impl std::fmt::Display for VcfProjectionError {
@@ -322,9 +367,48 @@ pub(crate) fn project_projected_alleles_from_validated_truth<'truth>(
             }
         })?;
         let components = merge_overlapping(spans);
-        for path in paths.iter().filter(|path| path.sequence_id == sequence_id) {
-            projected.extend(normalize_path_components(path, sequence, &components)?);
+        let sequence_paths = paths
+            .iter()
+            .filter(|path| path.sequence_id == sequence_id)
+            .collect::<Vec<_>>();
+        let realized_tracts = sequence_paths
+            .iter()
+            .flat_map(|path| path.replaced_tracts())
+            .map(|(start, end, _)| ReferenceSpan { start, end })
+            .collect::<Vec<_>>();
+        let mut alleles = Vec::new();
+        for path in &sequence_paths {
+            alleles.extend(normalize_path_components(
+                path,
+                sequence,
+                &components,
+                &realized_tracts,
+            )?);
         }
+        // El identificador de cada locus, por su intervalo, para que un
+        // rechazo lo nombre: la verdad lo publica en sus casos de repetición.
+        let loci = truth
+            .records
+            .iter()
+            .filter_map(|record| match record {
+                TruthRecord::Genotype(genotype) if genotype.locus.sequence_id == sequence_id => {
+                    genotype.alleles.iter().find_map(|allele| match allele {
+                        crate::truth_schema::TruthAllele::Repeat { locus_id, .. } => Some((
+                            (genotype.locus.start, genotype.locus.end),
+                            locus_id.as_str(),
+                        )),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+            .collect::<BTreeMap<_, _>>();
+        projected.extend(fuse_overlapping_alleles(
+            alleles,
+            sequence,
+            &sequence_paths,
+            &loci,
+        )?);
     }
 
     projected.sort_by(|left, right| {
@@ -511,6 +595,25 @@ impl<'truth> CopyPath<'truth> {
         start: u64,
         end: u64,
     ) -> Result<Vec<u8>, VcfProjectionError> {
+        self.materialize_window_from(sequence, start, end, start)
+    }
+
+    /// Como [`Self::materialize_window`], pero solo copia las inserciones
+    /// cuyo punto está en `[insertions_from, end]`.
+    ///
+    /// **Cada inserción pertenece a una sola ventana.** Al anclar un *indel*,
+    /// la ventana crece una base por la izquierda, y con la condición de
+    /// siempre arrastraba la inserción que la copia tuviera justo en ese
+    /// punto, que ya pertenece a la ventana de su propio componente: la
+    /// inserción salía dos veces en el VCF. Quien ancla pasa aquí el inicio
+    /// del componente, no el del ancla.
+    fn materialize_window_from(
+        &self,
+        sequence: &ReferenceSequence,
+        start: u64,
+        end: u64,
+        insertions_from: u64,
+    ) -> Result<Vec<u8>, VcfProjectionError> {
         let mut output = Vec::new();
         for piece in &self.pieces {
             match piece {
@@ -542,7 +645,9 @@ impl<'truth> CopyPath<'truth> {
                         }
                     }
                 }
-                PathPiece::Inserted { anchor, bases } if start <= *anchor && *anchor <= end => {
+                PathPiece::Inserted { anchor, bases }
+                    if insertions_from <= *anchor && *anchor <= end =>
+                {
                     output.extend_from_slice(bases.as_bytes());
                 }
                 // El tracto se copia entero o no se copia: la ventana procede
@@ -573,7 +678,7 @@ impl<'truth> CopyPath<'truth> {
     /// orden que las bases del alelo. La condición de intersección es la misma
     /// que usa [`Self::materialize_window`], que además rechaza una ventana que
     /// partiera un tracto por la mitad: aquí no puede colarse media anotación.
-    fn repeat_blocks_in(&self, start: u64, end: u64) -> Vec<&'truth TruthRepeatBlock> {
+    fn repeat_blocks_in(&self, start: u64, end: u64) -> Vec<Cow<'truth, TruthRepeatBlock>> {
         self.pieces
             .iter()
             .filter_map(|piece| match piece {
@@ -586,7 +691,29 @@ impl<'truth> CopyPath<'truth> {
                 _ => None,
             })
             .flatten()
+            .map(Cow::Borrowed)
             .collect()
+    }
+
+    /// Inicio del tracto realizado de esta copia que contiene la base
+    /// `position`, si lo hay.
+    fn replaced_piece_start_containing(&self, position: u64) -> Option<u64> {
+        self.pieces.iter().find_map(|piece| match piece {
+            PathPiece::Replaced { start, end, .. } if *start <= position && position < *end => {
+                Some(*start)
+            }
+            _ => None,
+        })
+    }
+
+    /// Tractos realizados de esta copia: intervalo de referencia y bloques.
+    fn replaced_tracts(&self) -> impl Iterator<Item = (u64, u64, &'truth [TruthRepeatBlock])> {
+        self.pieces.iter().filter_map(|piece| match piece {
+            PathPiece::Replaced {
+                start, end, blocks, ..
+            } => Some((*start, *end, *blocks)),
+            _ => None,
+        })
     }
 
     fn direct_insertion_at(&self, anchor: u64) -> Option<&'truth str> {
@@ -652,16 +779,28 @@ fn normalize_path_components<'truth>(
     path: &CopyPath<'truth>,
     sequence: &ReferenceSequence,
     initial: &[ReferenceSpan],
+    realized_tracts: &[ReferenceSpan],
 ) -> Result<Vec<ProjectedAllele<'truth>>, VcfProjectionError> {
     let mut components = initial.to_vec();
     loop {
         let normalized = components
             .iter()
             .copied()
-            .map(|span| normalize_path_window(path, sequence, span).map(|allele| (span, allele)))
+            .map(|span| {
+                let free = normalize_path_window(path, sequence, span, 0)?;
+                match free
+                    .as_ref()
+                    .and_then(|allele| left_alignment_floor(realized_tracts, span, allele.position))
+                {
+                    Some(floor) => normalize_path_window(path, sequence, span, floor),
+                    None => Ok(free),
+                }
+                .map(|allele| (span, allele))
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let mut collisions = normalized_ref_collisions(&normalized)?;
         collisions.extend(normalization_traversal_closures(&normalized, &components)?);
+        collisions.extend(changed_component_collisions(&normalized)?);
         if collisions.is_empty() {
             return Ok(normalized
                 .into_iter()
@@ -676,6 +815,45 @@ fn normalize_path_components<'truth>(
         }
         components = merge_normalized_collisions(components, &collisions);
     }
+}
+
+/// Componentes que un alelo pisa y en los que **esta misma copia** tiene alelo.
+///
+/// Es la regla que el oráculo semántico ya aplicaba y el productor no: un
+/// alelo alineado a la izquierda puede acabar con su `REF` encima de otro
+/// componente de la copia sin llegar a atravesarlo entero ni a chocar con el
+/// `REF` de su alelo, que puede estar en otro sitio. Una inserción desplazada
+/// así dejaba atrás un cambio de base de la propia copia y el registro fundido
+/// lo perdía. Un componente en el que la copia conserva la referencia no la
+/// obliga a nada: el registro ya describe esas bases como de referencia.
+///
+/// Los componentes están ordenados y no se solapan, de modo que los que un
+/// intervalo pisa son un tramo contiguo que se localiza por búsqueda binaria.
+fn changed_component_collisions(
+    normalized: &[(ReferenceSpan, Option<ProjectedAllele<'_>>)],
+) -> Result<Vec<Vec<ReferenceSpan>>, VcfProjectionError> {
+    let mut collisions = Vec::new();
+    for (index, (span, allele)) in normalized.iter().enumerate() {
+        let Some(allele) = allele else {
+            continue;
+        };
+        let interval = vcf_interval(allele)?;
+        let upper = normalized.partition_point(|(other, _)| other.start < interval.end);
+        for other_index in (0..upper).rev() {
+            let (other, other_allele) = &normalized[other_index];
+            if other.end <= interval.start && other.start < other.end {
+                break;
+            }
+            if other_index != index
+                && other_allele.is_some()
+                && interval.start < other.end
+                && other.start < interval.end
+            {
+                collisions.push(vec![*span, *other]);
+            }
+        }
+    }
+    Ok(collisions)
 }
 
 /// Devuelve los cierres que un alelo debe absorber porque quedaron atravesados
@@ -873,15 +1051,48 @@ impl DisjointComponents {
     }
 }
 
+/// El límite con el que hay que repetir la alineación de un alelo que empieza
+/// en `span` y que, alineado libre, quedó en `position`; `None` si no hace
+/// falta.
+///
+/// **Un alelo no se queda a medias dentro de un microsatélite que alguna copia
+/// realiza** (DTC-064, decidido el 2 de octubre de 2026): si la alineación
+/// libre **acabaría dentro** del tracto, se repite con el límite en su última
+/// base, y el alelo se funde con el registro de repetición. Si lo **cruza
+/// entero**, se le deja cruzarlo: la representación es la de siempre y
+/// coincide con la del algoritmo anterior. Un tracto que ninguna copia realiza
+/// no tiene registro de repetición y no limita nada.
+///
+/// «Acabaría dentro» se mide en la **primera base que cambia**, que en una
+/// indel es la siguiente a su ancla: por eso basta `position + 1`. Una deleción
+/// que se alinea justo hasta el principio del tracto deja el ancla fuera, en
+/// la base anterior, pero se come las primeras bases del tracto; sin limitarla,
+/// la copia que realiza el tracto se anotaba con más bases de repetición de las
+/// que su `ALT` lleva (segunda revisión del 2 de octubre de 2026).
+fn left_alignment_floor(
+    realized_tracts: &[ReferenceSpan],
+    span: ReferenceSpan,
+    position: u64,
+) -> Option<u64> {
+    realized_tracts
+        .iter()
+        .filter(|tract| {
+            tract.end <= span.start && tract.start <= position && position + 1 < tract.end
+        })
+        .map(|tract| tract.end - 1)
+        .max()
+}
+
 fn normalize_path_window<'truth>(
     path: &CopyPath<'truth>,
     sequence: &ReferenceSequence,
     span: ReferenceSpan,
+    floor: u64,
 ) -> Result<Option<ProjectedAllele<'truth>>, VcfProjectionError> {
     if span.start == span.end
         && let Some(bases) = path.direct_insertion_at(span.start)
     {
-        return normalize_direct_insertion(path, sequence, span, bases).map(Some);
+        return normalize_direct_insertion(path, sequence, span, bases, floor).map(Some);
     }
     let reference_bases = sequence
         .sequence()
@@ -898,17 +1109,29 @@ fn normalize_path_window<'truth>(
         return Ok(None);
     }
     if reference.is_empty() || alternate.is_empty() {
-        start = start
+        let anchor = start
             .checked_sub(1)
             .ok_or_else(|| VcfProjectionError::CannotAnchor {
                 sequence_id: path.sequence_id.to_owned(),
                 position: span.start,
             })?;
+        // **Un ancla dentro de un tracto realizado arrastra el tracto entero.**
+        //
+        // La base que precede a una deleción situada justo detrás de un
+        // microsatélite es la última del tracto, y en esta copia esa base no
+        // es la de la referencia: el tracto se sustituyó entero. Anclar ahí
+        // partía el tracto por la mitad y la ejecución abortaba con un error
+        // interno. La ventana se amplía hasta el inicio del tracto, de modo
+        // que el alelo es el tracto realizado seguido del cambio, igual que
+        // ya ocurre con una inserción en ese mismo borde (DTC-064).
+        start = path
+            .replaced_piece_start_containing(anchor)
+            .unwrap_or(anchor);
         reference = reference_bases[usize::try_from(start)
             .map_err(|_| VcfProjectionError::CoordinateOverflow)?
             ..usize::try_from(end).map_err(|_| VcfProjectionError::CoordinateOverflow)?]
             .to_vec();
-        alternate = path.materialize_window(sequence, start, end)?;
+        alternate = path.materialize_window_from(sequence, start, end, span.start)?;
     }
 
     // **Los registros de repetición no se recortan.**
@@ -926,11 +1149,20 @@ fn normalize_path_window<'truth>(
     // anotación es verdadera, y es además una de las dos formas que el propio
     // estándar ofrece —la de «reportar la secuencia completa de todos los
     // alelos del locus en un único registro»—.
-    let repeat_blocks = path.repeat_blocks_in(span.start, span.end);
+    // Se miden en la ventana efectiva, no en el componente: la ventana solo
+    // difiere del componente por el ancla, y un ancla que cae en un tracto
+    // amplía la ventana hasta él.
+    let repeat_blocks = path.repeat_blocks_in(start, end);
     if repeat_blocks.is_empty() {
         trim_common(&mut start, &mut reference, &mut alternate);
         if reference.len() != alternate.len() {
-            left_align(reference_bases, &mut start, &mut reference, &mut alternate);
+            left_align(
+                reference_bases,
+                floor,
+                &mut start,
+                &mut reference,
+                &mut alternate,
+            );
         }
     }
     Ok(Some(ProjectedAllele {
@@ -954,6 +1186,7 @@ fn normalize_direct_insertion<'truth>(
     sequence: &ReferenceSequence,
     span: ReferenceSpan,
     bases: &'truth str,
+    floor: u64,
 ) -> Result<ProjectedAllele<'truth>, VcfProjectionError> {
     let mut position =
         span.start
@@ -977,7 +1210,7 @@ fn normalize_direct_insertion<'truth>(
         .as_bytes()
         .last()
         .expect("validated direct insertion has bases");
-    while position > 0 && anchor == last {
+    while position > floor && anchor == last {
         position -= 1;
         anchor = reference_bases
             [usize::try_from(position).map_err(|_| VcfProjectionError::CoordinateOverflow)?];
@@ -1010,6 +1243,648 @@ fn normalize_direct_insertion<'truth>(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Fusión de variantes solapadas entre copias distintas (DTC-064)
+//
+// La normalización de arriba recorta y alinea **cada copia por separado**. Dos
+// copias que cambian el mismo tramo de referencia salían así como registros
+// distintos que se pisaban —una deleción en una copia y un cambio de base, en
+// otra, dentro de lo borrado—, y en el registro del cambio de base la copia con
+// la deleción aparecía con el alelo de la referencia en una base que no tiene.
+//
+// **Definición.** Dos alelos se solapan si sus intervalos de `REF` en el VCF,
+// `[POS, POS+len(REF))` con la base de ancla incluida, comparten al menos una
+// base de referencia. La relación se cierra por transitividad. Lo que solo es
+// adyacente no se funde. Un grupo cuyos alelos comparten todos `POS` sigue
+// siendo el registro multialélico de siempre y no se toca aquí.
+//
+// **Construcción.** El registro fundido cubre la unión de los intervalos de
+// sus alelos. El alelo de cada copia sobre esa unión se obtiene **aplicando a
+// la referencia sus propios alelos normalizados**, que ya describen la copia
+// entera; no se relee la copia, de modo que el registro y los demás registros
+// de la misma copia no pueden contarse dos veces. Después se recorta y alinea
+// a la izquierda **el registro entero**, como lo hace `bcftools norm` con un
+// registro multialélico. Si el registro contiene un microsatélite hereda su
+// excepción: no se recorta ni se alinea. Que el tracto aparezca entero en el
+// alelo de toda copia lo garantiza `left_alignment_floor`: ningún alelo se
+// alinea hacia dentro de un tracto que alguna copia realiza.
+//
+// Un registro alineado a la izquierda puede llegar a pisar otro; entonces los
+// dos grupos se funden y se reconstruyen, hasta que ningún registro pisa otro.
+// ---------------------------------------------------------------------------
+
+/// Intervalo `[POS, POS+len(REF))` que el alelo ocupa en el VCF.
+fn vcf_interval(allele: &ProjectedAllele<'_>) -> Result<ReferenceSpan, VcfProjectionError> {
+    let length = u64::try_from(allele.reference.len())
+        .map_err(|_| VcfProjectionError::CoordinateOverflow)?;
+    Ok(ReferenceSpan {
+        start: allele.position,
+        end: allele
+            .position
+            .checked_add(length)
+            .ok_or(VcfProjectionError::CoordinateOverflow)?,
+    })
+}
+
+/// Comparten al menos una base. Los intervalos VCF nunca están vacíos.
+fn shares_a_base(left: ReferenceSpan, right: ReferenceSpan) -> bool {
+    left.start < right.end && right.start < left.end
+}
+
+fn span_union(left: ReferenceSpan, right: ReferenceSpan) -> ReferenceSpan {
+    ReferenceSpan {
+        start: left.start.min(right.start),
+        end: left.end.max(right.end),
+    }
+}
+
+/// Resultado de construir un grupo de alelos solapados.
+enum BuiltGroup<'truth> {
+    /// Todos los alelos comparten `POS`: el agrupador los integra como
+    /// siempre, en un registro multialélico. Es el caso sin solapamiento entre
+    /// copias, y por eso no cambia ni un byte.
+    Unchanged { interval: ReferenceSpan },
+    /// Registro fundido: un alelo por copia distinta de la referencia, todos
+    /// con el mismo `POS` y el mismo `REF`. Sin intervalo si ninguna copia
+    /// difiere de la referencia sobre el tramo.
+    Fused {
+        interval: Option<ReferenceSpan>,
+        alleles: Vec<ProjectedAllele<'truth>>,
+    },
+}
+
+impl BuiltGroup<'_> {
+    fn interval(&self) -> Option<ReferenceSpan> {
+        match self {
+            Self::Unchanged { interval } => Some(*interval),
+            Self::Fused { interval, .. } => *interval,
+        }
+    }
+}
+
+fn fuse_overlapping_alleles<'truth>(
+    alleles: Vec<ProjectedAllele<'truth>>,
+    sequence: &ReferenceSequence,
+    paths: &[&CopyPath<'truth>],
+    loci: &BTreeMap<(u64, u64), &'truth str>,
+) -> Result<Vec<ProjectedAllele<'truth>>, VcfProjectionError> {
+    if alleles.is_empty() {
+        return Ok(alleles);
+    }
+    let intervals = alleles
+        .iter()
+        .map(vcf_interval)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut order = (0..alleles.len()).collect::<Vec<_>>();
+    order.sort_by_key(|index| (intervals[*index].start, intervals[*index].end));
+    let mut groups = Vec::<Vec<usize>>::new();
+    let mut group_end = 0_u64;
+    for index in order {
+        match groups.last_mut() {
+            Some(group) if intervals[index].start < group_end => {
+                group.push(index);
+                group_end = group_end.max(intervals[index].end);
+            }
+            _ => {
+                groups.push(vec![index]);
+                group_end = intervals[index].end;
+            }
+        }
+    }
+
+    loop {
+        let built = groups
+            .iter()
+            .map(|group| build_fusion_group(group, &alleles, &intervals, sequence, paths, loci))
+            .collect::<Result<Vec<_>, _>>()?;
+        // **El punto fijo no se ha visto actuar, y se cree inalcanzable**,
+        // dicho sin adornos (revisión del 2 de octubre de 2026, mutante R02):
+        // un registro fundido solo puede pisar a otro si al normalizarlo
+        // entero se desplaza a la izquierda más allá de sus alelos, y para eso
+        // todos sus alelos tendrían que acabar en la misma base. El alelo de
+        // la copia que llega al final del registro ya está alineado por su
+        // cuenta, de modo que su última base difiere de la de `REF`; y el
+        // alelo que se detiene en un tracto sin diferir se funde con el
+        // registro de repetición, que no se normaliza. Se conserva porque es
+        // lo que la definición de DTC-064 exige si esa premisa fallara.
+        if let Some(merged) = merge_colliding_groups(&groups, &built) {
+            groups = merged;
+            continue;
+        }
+        let mut slots = alleles.into_iter().map(Some).collect::<Vec<_>>();
+        let mut output = Vec::with_capacity(slots.len());
+        for (group, built) in groups.iter().zip(built) {
+            match built {
+                BuiltGroup::Unchanged { .. } => {
+                    output.extend(group.iter().filter_map(|index| slots[*index].take()));
+                }
+                BuiltGroup::Fused { alleles, .. } => output.extend(alleles),
+            }
+        }
+        return Ok(output);
+    }
+}
+
+/// Une los grupos cuyos registros construidos se pisan. `None` si ninguno lo
+/// hace, que es el punto fijo.
+fn merge_colliding_groups(
+    groups: &[Vec<usize>],
+    built: &[BuiltGroup<'_>],
+) -> Option<Vec<Vec<usize>>> {
+    let mut order = (0..groups.len())
+        .filter_map(|index| built[index].interval().map(|span| (span, index)))
+        .collect::<Vec<_>>();
+    order.sort_by_key(|(span, index)| (span.start, span.end, *index));
+    let mut merged = Vec::<(ReferenceSpan, Vec<usize>)>::new();
+    let mut collided = false;
+    for (span, index) in order {
+        match merged.last_mut() {
+            Some((current, members)) if shares_a_base(*current, span) => {
+                *current = span_union(*current, span);
+                members.extend(groups[index].iter().copied());
+                collided = true;
+            }
+            _ => merged.push((span, groups[index].clone())),
+        }
+    }
+    if !collided {
+        return None;
+    }
+    // Los grupos sin registro no pisan nada y se conservan tal cual.
+    let mut result = merged
+        .into_iter()
+        .map(|(_, members)| members)
+        .collect::<Vec<_>>();
+    result.extend(
+        (0..groups.len())
+            .filter(|index| built[*index].interval().is_none())
+            .map(|index| groups[index].clone()),
+    );
+    Some(result)
+}
+
+fn build_fusion_group<'truth>(
+    group: &[usize],
+    alleles: &[ProjectedAllele<'truth>],
+    intervals: &[ReferenceSpan],
+    sequence: &ReferenceSequence,
+    paths: &[&CopyPath<'truth>],
+    loci: &BTreeMap<(u64, u64), &'truth str>,
+) -> Result<BuiltGroup<'truth>, VcfProjectionError> {
+    let first = &alleles[group[0]];
+    let contains_tract = group
+        .iter()
+        .any(|index| !alleles[*index].repeat_blocks.is_empty());
+    // Un grupo que comparte `POS` es el registro multialélico de siempre. Si
+    // lleva un tracto pasa igualmente por aquí, para poder resolver dos copias
+    // con las mismas bases y anotaciones distintas; el registro que sale es el
+    // mismo que el agrupador construiría.
+    if !contains_tract
+        && group
+            .iter()
+            .all(|index| alleles[*index].position == first.position)
+    {
+        let interval = group
+            .iter()
+            .map(|index| intervals[*index])
+            .reduce(span_union)
+            .expect("a group is never empty");
+        return Ok(BuiltGroup::Unchanged { interval });
+    }
+
+    let mut window = group
+        .iter()
+        .map(|index| intervals[*index])
+        .reduce(span_union)
+        .expect("a group is never empty");
+    // **Un alelo que cruzó un tracto entero al alinearse lleva el registro
+    // hasta el final de su tramo original** (DTC-064, exploración final del 2
+    // de octubre de 2026): escrito delante de un tracto del registro, con su
+    // tramo original acabando detrás de él. Queda escrito dentro del tracto
+    // aunque la copia lo lleve detrás; si el registro acabara con el tracto, el
+    // `ALT` de esa copia tendría menos bases de repetición de las que su
+    // anotación, por posición, cuenta. Hasta el final del tramo original, el
+    // `ALT` lleva el tracto entero de la copia. Un alelo que no cruzó ningún
+    // tracto no ensancha nada.
+    if contains_tract {
+        let realized = paths
+            .iter()
+            .flat_map(|path| path.replaced_tracts())
+            .map(|(start, end, _)| (start, end))
+            .collect::<BTreeSet<_>>();
+        let inside = window;
+        for index in group {
+            let allele = &alleles[*index];
+            let crossed = realized.iter().any(|(start, end)| {
+                inside.start <= *start
+                    && *end <= inside.end
+                    && allele.position < *start
+                    && *end < allele.source_end
+            });
+            if crossed {
+                window.end = window.end.max(allele.source_end);
+            }
+        }
+    }
+    let bases = sequence
+        .sequence()
+        .as_bytes()
+        .map_err(|_| VcfProjectionError::BasesNotMaterialized)?;
+    let slice = |span: ReferenceSpan| -> Result<&[u8], VcfProjectionError> {
+        let start =
+            usize::try_from(span.start).map_err(|_| VcfProjectionError::CoordinateOverflow)?;
+        let end = usize::try_from(span.end).map_err(|_| VcfProjectionError::CoordinateOverflow)?;
+        bases
+            .get(start..end)
+            .ok_or(VcfProjectionError::CoordinateOverflow)
+    };
+    let reference = slice(window)?.to_vec();
+
+    let mut by_copy = BTreeMap::<&'truth CopyIdentity, Vec<&ProjectedAllele<'truth>>>::new();
+    for index in group {
+        let allele = &alleles[*index];
+        by_copy.entry(allele.copy).or_default().push(allele);
+    }
+    let mut spliced = Vec::<(&'truth CopyIdentity, Vec<u8>, ReferenceSpan)>::new();
+    for (copy, mut members) in by_copy {
+        members.sort_by_key(|allele| allele.position);
+        let mut sequence_bases = Vec::with_capacity(reference.len());
+        let mut cursor = window.start;
+        let mut source = ReferenceSpan {
+            start: members[0].source_start,
+            end: members[0].source_end,
+        };
+        for member in &members {
+            if member.position < cursor {
+                return Err(VcfProjectionError::OverlappingCopyAlleles { copy: copy.clone() });
+            }
+            sequence_bases.extend_from_slice(slice(ReferenceSpan {
+                start: cursor,
+                end: member.position,
+            })?);
+            sequence_bases.extend(member.alternate_with_suffix("").materialize().into_bytes());
+            cursor = vcf_interval(member)?.end;
+            source = span_union(
+                source,
+                ReferenceSpan {
+                    start: member.source_start,
+                    end: member.source_end,
+                },
+            );
+        }
+        sequence_bases.extend_from_slice(slice(ReferenceSpan {
+            start: cursor,
+            end: window.end,
+        })?);
+        if sequence_bases != reference {
+            spliced.push((copy, sequence_bases, source));
+        }
+    }
+    if spliced.is_empty() {
+        return Ok(BuiltGroup::Fused {
+            interval: None,
+            alleles: Vec::new(),
+        });
+    }
+
+    let mut position = window.start;
+    let mut record = std::iter::once(reference)
+        .chain(spliced.iter().map(|(_, bases, _)| bases.clone()))
+        .collect::<Vec<_>>();
+    if !contains_tract {
+        normalize_record_jointly(bases, &mut position, &mut record).map_err(|()| {
+            VcfProjectionError::CannotAnchor {
+                sequence_id: first.sequence_id.to_owned(),
+                position: window.start,
+            }
+        })?;
+    }
+    let reference = record[0].clone();
+    let interval = ReferenceSpan {
+        start: position,
+        end: position
+            .checked_add(
+                u64::try_from(reference.len())
+                    .map_err(|_| VcfProjectionError::CoordinateOverflow)?,
+            )
+            .ok_or(VcfProjectionError::CoordinateOverflow)?,
+    };
+    let tracts = if contains_tract {
+        tracts_in(paths, window, first.sequence_id)?
+    } else {
+        Vec::new()
+    };
+    let carriers = spliced.iter().map(|(copy, _, _)| *copy).collect::<Vec<_>>();
+    let annotations = if contains_tract {
+        annotate_tract_alleles(
+            paths,
+            &carriers,
+            &record[1..],
+            &TractRecord {
+                sequence_id: first.sequence_id,
+                position,
+                reference: &reference,
+                tracts: &tracts,
+                loci,
+            },
+        )?
+    } else {
+        vec![Vec::new(); carriers.len()]
+    };
+    let reference_text = String::from_utf8(reference).expect("reference alphabet is UTF-8 DNA");
+    let mut fused = Vec::with_capacity(spliced.len());
+    for (((copy, _, source), alternate), repeat_blocks) in spliced
+        .into_iter()
+        .zip(record.into_iter().skip(1))
+        .zip(annotations)
+    {
+        fused.push(ProjectedAllele {
+            sequence_id: first.sequence_id,
+            position,
+            reference: reference_text.clone(),
+            alternate: ProjectedAlternate::Owned(
+                String::from_utf8(alternate).expect("truth alphabet is UTF-8 DNA"),
+            ),
+            source_start: source.start,
+            source_end: source.end,
+            copy,
+            repeat_blocks,
+        });
+    }
+    Ok(BuiltGroup::Fused {
+        interval: Some(interval),
+        alleles: fused,
+    })
+}
+
+/// Recorte y alineación a la izquierda de un registro **entero**.
+///
+/// `record[0]` es `REF` y los demás, los `ALT`. Es la normalización de un
+/// registro multialélico que hace `bcftools norm`: mientras todos los alelos
+/// acaben en la misma base se quita esa base; si alguno queda vacío se
+/// antepone a todos la base de referencia anterior; y al final se quita el
+/// prefijo común mientras todos conserven al menos dos bases. Falla solo si
+/// habría que anteponer una base antes de la primera de la secuencia.
+fn normalize_record_jointly(
+    reference_bases: &[u8],
+    position: &mut u64,
+    record: &mut [Vec<u8>],
+) -> Result<(), ()> {
+    loop {
+        let mut changed = false;
+        if record.iter().all(|allele| !allele.is_empty()) {
+            let last = record[0].last().copied();
+            if record.iter().all(|allele| allele.last().copied() == last) {
+                for allele in record.iter_mut() {
+                    allele.pop();
+                }
+                changed = true;
+            }
+        }
+        if record.iter().any(Vec::is_empty) {
+            if *position == 0 {
+                return Err(());
+            }
+            *position -= 1;
+            let base = reference_bases[usize::try_from(*position).map_err(|_| ())?];
+            for allele in record.iter_mut() {
+                allele.insert(0, base);
+            }
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
+    while record.iter().all(|allele| allele.len() >= 2) {
+        let first = record[0][0];
+        if !record.iter().all(|allele| allele[0] == first) {
+            break;
+        }
+        for allele in record.iter_mut() {
+            allele.remove(0);
+        }
+        *position += 1;
+    }
+    Ok(())
+}
+
+/// Un tracto realizado por alguna copia dentro de un registro fundido.
+struct FusedTract<'truth> {
+    start: u64,
+    end: u64,
+    /// Bloques de todas las copias que lo realizan, para decidir si el locus
+    /// es de un solo motivo.
+    declared: Vec<&'truth [TruthRepeatBlock]>,
+}
+
+fn tracts_in<'truth>(
+    paths: &[&CopyPath<'truth>],
+    window: ReferenceSpan,
+    sequence_id: &str,
+) -> Result<Vec<FusedTract<'truth>>, VcfProjectionError> {
+    let mut tracts = BTreeMap::<(u64, u64), Vec<&'truth [TruthRepeatBlock]>>::new();
+    for path in paths {
+        for (start, end, blocks) in path.replaced_tracts() {
+            if start < window.end && window.start < end {
+                if start < window.start || window.end < end {
+                    return Err(VcfProjectionError::TractOutsideFusedRecord {
+                        sequence_id: sequence_id.to_owned(),
+                        start,
+                        end,
+                    });
+                }
+                tracts.entry((start, end)).or_default().push(blocks);
+            }
+        }
+    }
+    Ok(tracts
+        .into_iter()
+        .map(|((start, end), declared)| FusedTract {
+            start,
+            end,
+            declared,
+        })
+        .collect())
+}
+
+/// Anotación de repetición de cada `ALT` de un registro que contiene tractos.
+///
+/// Dos reglas, de DTC-064:
+///
+/// 1. **Por posición, tracto a tracto.** Por cada tracto del registro, la copia
+///    que lo realiza lleva los bloques que la verdad declara, y la que conserva
+///    el de la referencia —la regla del microsatélite invadido garantiza que le
+///    llega intacto— lleva la estructura en bloques del tracto de la
+///    referencia, con todas sus bases (decisión del 2 de octubre de 2026). Se
+///    anota lo que la copia lleva en el sitio del tracto, no lo que sobra del
+///    `ALT`: un cambio de base o una inserción del flanco no son repetición.
+/// 2. **Dos copias con las mismas bases y anotaciones distintas** reciben las
+///    dos la anotación derivada de esas bases (ver [`derive_tract_blocks`]),
+///    porque una anotación describe lo que está escrito. Cuando las
+///    anotaciones coinciden no se toca nada.
+///
+/// La estructura en bloques del tracto de la referencia solo se conoce con un
+/// motivo: con un locus compuesto se rechaza con un diagnóstico que nombra el
+/// locus.
+fn annotate_tract_alleles<'truth>(
+    paths: &[&CopyPath<'truth>],
+    carriers: &[&'truth CopyIdentity],
+    alternates: &[Vec<u8>],
+    record: &TractRecord<'_, 'truth>,
+) -> Result<Vec<Vec<Cow<'truth, TruthRepeatBlock>>>, VcfProjectionError> {
+    let mut annotations = Vec::with_capacity(carriers.len());
+    for copy in carriers {
+        let path = paths.iter().find(|path| path.identity == *copy);
+        let mut blocks = Vec::new();
+        for tract in record.tracts {
+            let declared = path.and_then(|path| {
+                path.replaced_tracts()
+                    .find(|(start, end, _)| *start == tract.start && *end == tract.end)
+                    .map(|(_, _, blocks)| blocks)
+            });
+            match declared {
+                Some(declared) => blocks.extend(declared.iter().map(Cow::Borrowed)),
+                None => blocks.extend(reference_tract_blocks(tract, record)?),
+            }
+        }
+        annotations.push(blocks);
+    }
+    let conflicting = (0..alternates.len())
+        .filter(|index| {
+            (0..alternates.len()).any(|other| {
+                alternates[other] == alternates[*index] && annotations[other] != annotations[*index]
+            })
+        })
+        .collect::<Vec<_>>();
+    for index in conflicting {
+        annotations[index] = derive_tract_blocks(&alternates[index], record)?;
+    }
+    Ok(annotations)
+}
+
+/// Lo que hace falta del registro para derivar una anotación de sus bases.
+struct TractRecord<'record, 'truth> {
+    sequence_id: &'record str,
+    position: u64,
+    reference: &'record [u8],
+    tracts: &'record [FusedTract<'truth>],
+    loci: &'record BTreeMap<(u64, u64), &'truth str>,
+}
+
+/// El único motivo de un tracto, o el rechazo del compuesto.
+fn tract_motif<'tract>(
+    tract: &'tract FusedTract<'_>,
+    record: &TractRecord<'_, '_>,
+) -> Result<&'tract str, VcfProjectionError> {
+    let compound = || VcfProjectionError::UndeclaredCompoundTract {
+        locus_id: record
+            .loci
+            .get(&(tract.start, tract.end))
+            .map_or_else(|| "desconocido".to_owned(), |id| (*id).to_owned()),
+        sequence_id: record.sequence_id.to_owned(),
+        start: tract.start,
+        end: tract.end,
+    };
+    let mut motifs = tract
+        .declared
+        .iter()
+        .flat_map(|blocks| blocks.iter())
+        .map(|block| block.motif.as_str());
+    let Some(motif) = motifs.next() else {
+        return Err(compound());
+    };
+    if motifs.any(|other| other != motif) {
+        return Err(compound());
+    }
+    Ok(motif)
+}
+
+/// La estructura en bloques del **tracto de la referencia**, por posición: con
+/// un solo motivo, un bloque con todas las bases del tracto.
+fn reference_tract_blocks<'truth>(
+    tract: &FusedTract<'truth>,
+    record: &TractRecord<'_, 'truth>,
+) -> Result<Vec<Cow<'truth, TruthRepeatBlock>>, VcfProjectionError> {
+    let motif = tract_motif(tract, record)?;
+    Ok(vec![Cow::Owned(TruthRepeatBlock {
+        motif: motif.to_owned(),
+        bases: tract.end - tract.start,
+    })])
+}
+
+/// Bloque de repetición **derivado de las bases** de un `ALT` (DTC-064), solo
+/// para dos copias con las mismas bases y anotaciones distintas.
+///
+/// Se quita del `ALT` lo que coincide con la referencia por delante —como
+/// mucho las bases del registro que preceden al tracto— y después lo que
+/// coincide con ella por detrás —como mucho las que lo siguen—. En lo que
+/// queda, el modelo de `tandem_repeat` descompone las copias completas del
+/// motivo, de izquierda a derecha, y el bloque va **de la primera a la última
+/// copia completa**: solo las bases que de verdad repiten el motivo, con sus
+/// interrupciones interiores, y nunca un cambio de base o una inserción que
+/// sobre a los lados. Sin ninguna copia completa, el `ALT` no lleva secuencia
+/// repetida.
+///
+/// **El recorte por delante no lo distingue ninguna prueba**, dicho sin
+/// adornos (mutante «no recortar el prefijo», 2 de octubre de 2026): como el
+/// bloque empieza en la primera copia completa del motivo, el recorte solo
+/// cambia algo si las bases del registro anteriores al tracto contienen una
+/// copia del motivo separada de él, y ningún escenario de conflicto de las
+/// baterías lo reúne.
+fn derive_tract_blocks<'truth>(
+    alternate: &[u8],
+    record: &TractRecord<'_, 'truth>,
+) -> Result<Vec<Cow<'truth, TruthRepeatBlock>>, VcfProjectionError> {
+    let locus = |tract: &FusedTract<'_>| {
+        record
+            .loci
+            .get(&(tract.start, tract.end))
+            .map_or_else(|| "desconocido".to_owned(), |id| (*id).to_owned())
+    };
+    let [tract] = record.tracts else {
+        return Err(VcfProjectionError::SeveralTractsInOneRecord {
+            locus_ids: record.tracts.iter().map(locus).collect(),
+        });
+    };
+    let motif = tract_motif(tract, record)?;
+    let before = usize::try_from(tract.start - record.position)
+        .map_err(|_| VcfProjectionError::CoordinateOverflow)?;
+    let after = usize::try_from(record.position + record.reference.len() as u64 - tract.end)
+        .map_err(|_| VcfProjectionError::CoordinateOverflow)?;
+    let prefix = alternate
+        .iter()
+        .zip(record.reference)
+        .take_while(|(left, right)| left == right)
+        .count()
+        .min(before);
+    let suffix = alternate[prefix..]
+        .iter()
+        .rev()
+        .zip(record.reference[prefix..].iter().rev())
+        .take_while(|(left, right)| left == right)
+        .count()
+        .min(after);
+    let middle = &alternate[prefix..alternate.len() - suffix];
+    let Ok(motif_model) = crate::tandem_repeat::RepeatMotif::new(motif.as_bytes()) else {
+        return Err(VcfProjectionError::CoordinateOverflow);
+    };
+    let Ok(observed) = crate::tandem_repeat::TandemRepeatTract::new(motif_model, middle) else {
+        // Un ALT con bases fuera del alfabeto del tracto no puede salir de una
+        // verdad validada.
+        return Err(VcfProjectionError::CoordinateOverflow);
+    };
+    let runs = observed.annotation().runs();
+    let (Some(first), Some(last)) = (runs.first(), runs.last()) else {
+        return Ok(Vec::new());
+    };
+    let end = last.start() + last.units() * motif.len() as u64;
+    Ok(vec![Cow::Owned(TruthRepeatBlock {
+        motif: motif.to_owned(),
+        bases: end - first.start(),
+    })])
+}
+
 fn trim_common(position: &mut u64, reference: &mut Vec<u8>, alternate: &mut Vec<u8>) {
     while reference.len() > 1 && alternate.len() > 1 && reference.last() == alternate.last() {
         reference.pop();
@@ -1024,11 +1899,12 @@ fn trim_common(position: &mut u64, reference: &mut Vec<u8>, alternate: &mut Vec<
 
 fn left_align(
     reference_sequence: &[u8],
+    floor: u64,
     position: &mut u64,
     reference: &mut Vec<u8>,
     alternate: &mut Vec<u8>,
 ) {
-    while *position > 0 && reference.last() == alternate.last() {
+    while *position > floor && reference.last() == alternate.last() {
         *position -= 1;
         let base = reference_sequence[usize::try_from(*position).expect("reference fits usize")];
         reference.insert(0, base);
@@ -1564,6 +2440,7 @@ mod tests {
                             end: point,
                         },
                         bases,
+                        0,
                     )
                     .expect("compact normalization");
 
@@ -1573,6 +2450,7 @@ mod tests {
                     expected_alternate.extend_from_slice(bases.as_bytes());
                     left_align(
                         &reference_bases,
+                        0,
                         &mut expected_position,
                         &mut expected_reference,
                         &mut expected_alternate,

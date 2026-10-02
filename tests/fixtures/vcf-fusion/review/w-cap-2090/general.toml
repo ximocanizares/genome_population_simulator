@@ -1,0 +1,52 @@
+config_kind = "general"
+schema_version = "4"
+seed = "5555555555555555555555555555555555555555555555555555555555555555"
+
+[population_snvs]
+mode = "supplied"
+input_path = "snvs.tsv"
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+max_tract_output_bases = 2090
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 3100
+
+[[reference.repeat_loci]]
+id = "STR-1"
+sequence = "chr1"
+start = 101
+end = 200
+motif = "CA"
+
+[[reference.repeat_loci.alleles]]
+units = 50
+frequency = 0.5
+
+[[reference.repeat_loci.alleles]]
+units = 45
+frequency = 0.5
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 3
+ploidy = 2
+genotype_model = "hwe"
+individual_ids = ["ind-1", "ind-2", "ind-3"]
+
+[vcf_output]
+mode = "text"
+
+[[direct_events]]
+event_id = "e0"
+contig = "chr1"
+individual_id = "ind-1"
+phase = 0
+kind = "deletion"
+start = 2500
+end = 2502

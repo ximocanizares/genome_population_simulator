@@ -489,7 +489,11 @@ versionado por DTC-064: reconstruye primero cada alelo final, amplía los cambio
 solapados al intervalo de referencia común necesario, recorta contexto común
 sin perder el anclaje, alinea a la izquierda contra la referencia y ordena por
 catálogo de secuencias y coordenada. En F2 agrupa todos los alelos compatibles
-en un único registro multialélico por `CHROM+POS`, sin descomponerlo. El
+en un único registro multialélico por `CHROM+POS`, sin descomponerlo. Las
+variantes de copias distintas cuyos intervalos `REF` comparten una base se
+funden antes, en la proyección, en un único registro complejo que cubre su
+tramo común (DTC-064); el agrupador recibe ya un alelo por copia con el mismo
+`POS` y el mismo `REF`. El
 materializador no invoca `bcftools`; las pruebas lo usan como oráculo externo.
 La excepción para varios BND relacionados, incluso en una misma posición, se
 reserva a SV/translocaciones futuras y no relaja la cardinalidad de SNP e

@@ -977,27 +977,29 @@ fn the_external_normalizer_only_trims_the_repeat_record_without_changing_its_all
     fs::remove_dir_all(&root).ok();
 }
 
-/// **El oráculo rechaza una verdad en la que dos copias llevan el mismo tracto
-/// con descomposiciones en bloques distintas.**
+/// **Dos copias que llevan el mismo tracto con descomposiciones en bloques
+/// distintas reciben la anotación derivada de sus bases.**
 ///
-/// *Por qué existe esta prueba:* es la gemela, en el oráculo, de la guarda del
-/// agrupador. La producción no construye esa verdad —los alelos de un locus
-/// comparten su lista de motivos—, de modo que sin alimentarla a mano la
-/// guarda podría desaparecer entera sin que nada lo notara.
+/// *Por qué existe esta prueba:* hasta el 2 de octubre de 2026 el oráculo
+/// rechazaba esa verdad y el productor abortaba; desde entonces la anotación
+/// de ese ALT se deriva de sus bases, porque una anotación describe lo que
+/// está escrito (DTC-064). La producción no construye esta verdad —los alelos
+/// de un locus comparten su lista de motivos—, de modo que hay que operarla a
+/// mano.
 ///
 /// *Cómo se construye:* se publica un escenario real, se toma un individuo
 /// **homocigoto** —sus dos copias llevan el mismo tracto— y a una de ellas se
 /// le cambia la descomposición por otra equivalente: las mismas bases
 /// repartidas en dos bloques en vez de uno. El caso genotípico cataloga el
 /// alelo nuevo y su portador se repunta, de modo que la verdad sigue siendo
-/// **reconstruible**; lo único que cambia es que dos copias llegan al mismo
-/// `ALT` con anotaciones distintas.
+/// **reconstruible**.
 ///
-/// *Qué la hace discriminante:* lleva su control. La misma verdad **sin** la
-/// cirugía se acepta, de modo que el rechazo no puede venir de que el oráculo
-/// rechace cualquier verdad manipulada.
+/// *Qué la hace discriminante:* el VCF publicado se acepta con la verdad
+/// operada porque su anotación es la derivada, y el mismo VCF con la
+/// descomposición de la cirugía —dos secuencias repetidas para ese ALT— se
+/// rechaza.
 #[test]
-fn the_oracle_rejects_two_copies_carrying_the_same_tract_with_different_blocks() {
+fn two_copies_carrying_the_same_tract_with_different_blocks_are_annotated_from_their_bases() {
     use genome_population_simulator::truth_schema::{
         AlleleCarrier, GenotypeCaseKind, TruthAllele, TruthCurrentPiece, TruthHistoryEvent,
         TruthRecord, TruthRepeatBlock,
@@ -1117,16 +1119,53 @@ fn the_oracle_rejects_two_copies_carrying_the_same_tract_with_different_blocks()
         genotype.allele_dosages.push(1);
     }
 
-    let error = validate_vcf_against_truth(
+    // Desde el 2 de octubre de 2026 (DTC-064) la anotación de ese ALT se
+    // deriva de sus bases: un bloque de `CA` con todas ellas, que es lo que el
+    // VCF publicado ya lleva. El VCF se acepta con la verdad intacta y con la
+    // operada, y uno que anote ese ALT con la descomposición de la cirugía se
+    // rechaza: el oráculo no elige una de las dos anotaciones declaradas.
+    let vcf = vcf_text(&destination);
+    for (label, truth) in [("intacta", &truth), ("operada", &surgical)] {
+        validate_vcf_against_truth(
+            reference.reference(),
+            truth,
+            &mut std::io::Cursor::new(vcf.as_bytes()),
+        )
+        .unwrap_or_else(|error| panic!("verdad {label}: {error:?}"));
+    }
+    let record = repeat_record(&vcf);
+    let line = vcf
+        .lines()
+        .find(|line| line.starts_with(&format!("chr1\t{}\t", record.position)))
+        .expect("la línea del registro de repetición")
+        .to_owned();
+    let index = record
+        .alternates
+        .iter()
+        .position(|alternate| *alternate == bases)
+        .expect("el ALT de la copia homocigota");
+    let mut counts = integers(&record, "RN");
+    counts[index] = 2;
+    let split_line = line.replacen(
+        &format!("RN={}", record.info["RN"]),
+        &format!(
+            "RN={}",
+            counts
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        1,
+    );
+    assert_ne!(split_line, line, "control: la anotación cambió");
+    let split_vcf = vcf.replace(&line, &split_line);
+    validate_vcf_against_truth(
         reference.reference(),
         &surgical,
-        &mut std::io::Cursor::new(Vec::new()),
+        &mut std::io::Cursor::new(split_vcf.as_bytes()),
     )
-    .expect_err("dos copias no pueden dar el mismo ALT con tractos distintos");
-    assert!(
-        format!("{error:?}").contains("dos copias dan el mismo ALT con tractos distintos"),
-        "el rechazo tiene que ser el de la guarda, no otro: {error:?}"
-    );
+    .expect_err("la descomposición declarada por una sola copia no es la anotación del ALT");
     fs::remove_dir_all(&root).ok();
 }
 

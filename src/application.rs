@@ -251,10 +251,18 @@ impl RepeatFrequencyNormalization {
 ///   enumera los alelos **distintos** del caso, a lo sumo la ploidía por
 ///   individuo, que sumada sobre los individuos no pasa del número de copias.
 ///   De ahí `3 * copias * alelo más largo` por locus.
-/// - **VCF.** Un locus produce como mucho un registro con el tracto de la
-///   referencia en `REF` y cada alelo declarado distinto en un `ALT`, cada uno
-///   con su secuencia completa. De ahí `bases del tracto de referencia + suma
-///   de las longitudes de los alelos distintos`.
+/// - **VCF.** **No se estima: se mide** (DTC-097, decidido el 2 de octubre
+///   de 2026). Las variantes que pisan un registro de repetición se funden en
+///   él (DTC-064) y lo ensanchan y le añaden `ALT` de maneras que ninguna
+///   fórmula sobre lo declarado acotaba: la que había se quedaba corta. La
+///   publicación del VCF cuenta, antes de escribir nada, las bases de tracto
+///   que va a escribir, y esa cifra es la que se publica en lugar de la cota;
+///   el tope declarado se aplica entonces a la verdad ya **realizada** más
+///   esa cifra. Aquí, antes de materializar a nadie, solo se conoce la cota de
+///   la verdad, y el tope se le aplica ya **por precaución**: es una cota
+///   superior, y una ejecución que la supere podría caber, porque lo
+///   realizado suele quedar por debajo. A la inversa, una configuración que
+///   `validate` admite puede ser rechazada por `run` al publicar el VCF.
 ///
 /// # Por qué es superior y no exacta, y por qué eso está bien
 ///
@@ -269,12 +277,11 @@ pub struct EffectiveRepeatOutputBudget {
     declared_cap: Option<u64>,
 }
 
-/// Lo que un locus concreto aporta a la cota.
+/// Lo que un locus concreto aporta a la cota de la verdad.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RepeatLocusOutputBound {
     locus_id: String,
     truth_bases: u64,
-    vcf_bases: u64,
 }
 
 impl RepeatLocusOutputBound {
@@ -286,16 +293,6 @@ impl RepeatLocusOutputBound {
     #[must_use]
     pub const fn truth_bases(&self) -> u64 {
         self.truth_bases
-    }
-
-    #[must_use]
-    pub const fn vcf_bases(&self) -> u64 {
-        self.vcf_bases
-    }
-
-    #[must_use]
-    pub const fn total_bases(&self) -> u64 {
-        self.truth_bases.saturating_add(self.vcf_bases)
     }
 }
 
@@ -321,16 +318,11 @@ impl EffectiveRepeatOutputBudget {
             .fold(0, |total, locus| total.saturating_add(locus.truth_bases))
     }
 
-    #[must_use]
-    pub fn vcf_bases(&self) -> u64 {
-        self.per_locus
-            .iter()
-            .fold(0, |total, locus| total.saturating_add(locus.vcf_bases))
-    }
-
+    /// La parte de la verdad, que es todo lo que se conoce antes de
+    /// materializar a nadie: el VCF se mide al publicarlo.
     #[must_use]
     pub fn total_bases(&self) -> u64 {
-        self.truth_bases().saturating_add(self.vcf_bases())
+        self.truth_bases()
     }
 
     /// El locus que más aporta, que es lo que un rechazo tiene que nombrar
@@ -339,8 +331,8 @@ impl EffectiveRepeatOutputBudget {
     #[must_use]
     pub fn heaviest_locus(&self) -> Option<&RepeatLocusOutputBound> {
         self.per_locus.iter().max_by(|left, right| {
-            left.total_bases()
-                .cmp(&right.total_bases())
+            left.truth_bases
+                .cmp(&right.truth_bases)
                 .then_with(|| left.locus_id.cmp(&right.locus_id))
         })
     }
@@ -1705,7 +1697,7 @@ impl EffectiveConfig {
         {
             let heaviest = resolved.repeat_output_budget.heaviest_locus().map_or_else(
                 || "ninguno".to_owned(),
-                |locus| format!("{} con {} bases", locus.locus_id(), locus.total_bases()),
+                |locus| format!("{} con {} bases", locus.locus_id(), locus.truth_bases()),
             );
             return Err(Diagnostic::configuration(
                 "GPS-CONF-008",
@@ -1716,8 +1708,8 @@ impl EffectiveConfig {
             .with(
                 "detail",
                 format!(
-                    "los alelos generados por deslizamiento elevan la cota a {} bases y el tope \
-declarado es {cap}; el locus que más aporta es {heaviest}",
+                    "los alelos generados por deslizamiento elevan la cota de bases de tracto de la \
+verdad a {} y el tope declarado es {cap}; el locus que más aporta es {heaviest}",
                     resolved.repeat_output_budget.total_bases()
                 ),
             ));
@@ -3244,13 +3236,13 @@ fn repeat_output_budget(
     {
         let heaviest = budget.heaviest_locus().map_or_else(
             || "ninguno".to_owned(),
-            |locus| format!("{} con {} bases", locus.locus_id(), locus.total_bases()),
+            |locus| format!("{} con {} bases", locus.locus_id(), locus.truth_bases()),
         );
         return Err(config_error(
             general,
             "reference.max_tract_output_bases",
             format!(
-                "la cota de bases de tracto publicadas es {} y el tope declarado es {cap}; el locus que más aporta es {heaviest}",
+                "solo la verdad publicaría hasta {} bases de tracto y el tope declarado es {cap}; el locus que más aporta es {heaviest}",
                 budget.total_bases()
             ),
         ));
@@ -5454,21 +5446,11 @@ fn recompute_repeat_output_budget(
             .map(|allele| allele.tract().length())
             .max()
             .unwrap_or(0);
-        let interval = locus.declaration().interval();
-        let reference_tract = interval.end().saturating_sub(interval.start());
-        let mut distinct = BTreeSet::new();
-        let mut vcf_bases = reference_tract;
-        for allele in locus.alleles() {
-            if distinct.insert(allele.tract().as_text()) {
-                vcf_bases = vcf_bases.saturating_add(allele.tract().length());
-            }
-        }
         per_locus.push(RepeatLocusOutputBound {
             locus_id: locus.id().to_owned(),
             truth_bases: EffectiveRepeatOutputBudget::TRUTH_COPIES_PER_HAPLOTYPE_COPY
                 .saturating_mul(copies)
                 .saturating_mul(longest),
-            vcf_bases,
         });
     }
     EffectiveRepeatOutputBudget {

@@ -1,0 +1,91 @@
+config_kind = "general"
+schema_version = "4"
+seed = "5663a89236a2463ed18b9c601506ca14dd344e31c125b3ab90154d07fdd36c9e"
+
+[population_snvs]
+mode = "supplied"
+input_path = "snvs.tsv"
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 420
+
+[[reference.repeat_loci]]
+id = "STR-1"
+sequence = "chr1"
+start = 201
+end = 220
+motif = "AG"
+
+[[reference.repeat_loci.alleles]]
+units = 8
+frequency = 0.333333
+
+[[reference.repeat_loci.alleles]]
+units = 9
+frequency = 0.333333
+
+[[reference.repeat_loci.alleles]]
+units = 10
+frequency = 0.333334
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 4
+ploidy = 2
+genotype_model = "hwe"
+individual_ids = ["ind-1", "ind-2", "ind-3", "ind-4"]
+
+[vcf_output]
+mode = "text"
+
+[[direct_events]]
+event_id = "e0"
+contig = "chr1"
+individual_id = "ind-4"
+phase = 1
+kind = "insertion"
+point = 220
+bases = "AG"
+
+[[direct_events]]
+event_id = "e1"
+contig = "chr1"
+individual_id = "ind-2"
+phase = 0
+kind = "deletion"
+start = 220
+end = 224
+
+[[direct_events]]
+event_id = "e2"
+contig = "chr1"
+individual_id = "ind-3"
+phase = 0
+kind = "deletion"
+start = 227
+end = 230
+
+[[direct_events]]
+event_id = "e3"
+contig = "chr1"
+individual_id = "ind-4"
+phase = 0
+kind = "insertion"
+point = 196
+bases = "GGC"
+
+[[direct_events]]
+event_id = "e4"
+contig = "chr1"
+individual_id = "ind-1"
+phase = 0
+kind = "insertion"
+point = 221
+bases = "CTC"

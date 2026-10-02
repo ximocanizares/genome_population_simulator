@@ -1,0 +1,19 @@
+##fileformat=VCFv4.5
+##INFO=<ID=GPS_CASE,Number=.,Type=String,Description="Canonical truth case identifiers contributing an ALT allele">
+##INFO=<ID=RN,Number=A,Type=Integer,Description="Total number of repeat sequences in this allele">
+##INFO=<ID=RUS,Number=.,Type=String,Description="Repeat unit sequence of the corresponding repeat sequence">
+##INFO=<ID=RUL,Number=.,Type=Integer,Description="Repeat unit length of the corresponding repeat sequence">
+##INFO=<ID=RUC,Number=.,Type=Float,Description="Repeat unit count of corresponding repeat sequence">
+##INFO=<ID=RB,Number=.,Type=Integer,Description="Total number of bases in the corresponding repeat sequence">
+##FILTER=<ID=PASS,Description="All filters passed">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##contig=<ID=chr1,length=269>
+##reference=ref-main
+##gps_execution_id=RUN_DG6DQTGVF5BYHW753WYOMBQAUE
+##gps_qual=.
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	ind-1	ind-2
+chr1	20	.	T	A	.	PASS	GPS_CASE=CASE_736e140c34ff37abe84aec01754cfc7e8afb0950ddf23f7c8b937c948d4	GT	0	1
+chr1	96	.	TGCC	T	.	PASS	GPS_CASE=CASE_957d4de06b8fbcc4ee42ae762eea9c149bc54b0259203078cfd71b79a06	GT	0	1
+chr1	100	.	G	GAT	.	PASS	GPS_CASE=CASE_1ea98444227da38d8321772d3b83147ba711ac3537a6cd5cb4c9a5960e7,CASE_6bf0605dabbb29e0663a70da1c924e30fc5e685e77716b55f5683410a3a	GT	1	0
+chr1	101	.	ATATATATATATATAT	ATATATATATAT	.	PASS	GPS_CASE=CASE_b779572a6c070638565b3bb79ea7176414bcaab47d3becde1ef76a1fa4d;RN=1;RUS=AT;RUL=2;RUC=6;RB=12	GT	0	1
+chr1	117	.	T	A	.	PASS	GPS_CASE=CASE_5527a5de086d5e09ac50ff73bbff344abd43e7ea0630d87c2d0b2079656	GT	0	1

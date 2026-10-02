@@ -4298,7 +4298,11 @@ suele necesitar dos registros BND relacionados.
 - **REQ-VER-44.** Cuando un mismo locus tenga varios alelos alternativos que el
   VCF pueda representar sin pérdida, deben reunirse en un único registro
   multialélico. `GT` debe conservar para cada muestra la ploidía, la dosis y la
-  fase de esos alelos después de la normalización.
+  fase de esos alelos después de la normalización. Las variantes de copias
+  distintas que se solapan en la referencia forman un mismo locus: se reúnen en
+  un único registro cuyo `ALT` es el alelo final completo de cada copia sobre
+  el tramo común, de modo que ninguna copia aparezca con un alelo que no tiene
+  (DTC-064).
 - **REQ-VER-45.** Si los alelos de un locus no pueden reunirse en un único
   registro normalizado sin pérdida, el sistema debe aplicar la representación
   VCF válida y el complemento de verdad exigido por REQ-VER-24 a REQ-VER-26. En

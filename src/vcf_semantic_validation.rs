@@ -6,6 +6,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
+
+use sha2::{Digest, Sha256};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
@@ -107,6 +109,8 @@ pub fn validate_vcf_against_truth(
     let mut samples = None;
     let mut seen = BTreeSet::new();
     let mut previous = None;
+    let mut covered = None::<(String, u64, u64)>;
+    let mut rebuilt = rebuild_states(reference, truth, &expected_samples);
     let mut vcf_45 = false;
     let mut reference_declarations = 0_u8;
     let mut execution_declarations = 0_u8;
@@ -276,6 +280,31 @@ pub fn validate_vcf_against_truth(
             .ok()
             .filter(|position| *position > 0)
             .ok_or_else(|| vcf_reject(line_number, "POS debe ser un entero positivo"))?;
+        // **Dos registros que se pisan son un error del productor** (DTC-064),
+        // igual que dos con el mismo `CHROM+POS`. Se juzga sobre el fichero,
+        // antes de buscar el registro esperado, y sin pasar por la fusión de
+        // este oráculo: así también lo caza si productor y oráculo dejaran de
+        // fundir a la vez. Un registro con el mismo `POS` o anterior lo juzgan
+        // las guardas de duplicado y de orden de más abajo.
+        let reference_end = (position - 1).saturating_add(fields[3].len() as u64);
+        if let Some((chrom, previous_position, previous_end)) = &covered
+            && chrom == fields[0]
+            && position > *previous_position
+            && position - 1 < *previous_end
+        {
+            return vcf_error(
+                line_number,
+                "el intervalo REF del registro pisa el de un registro anterior",
+            );
+        }
+        covered = match covered.take() {
+            Some((chrom, previous_position, previous_end)) if chrom == fields[0] => Some((
+                chrom,
+                previous_position.max(position),
+                previous_end.max(reference_end),
+            )),
+            _ => Some((fields[0].to_owned(), position, reference_end)),
+        };
         let key = (fields[0].to_owned(), position);
         let Some(expected_record) = expected.get(&key) else {
             return vcf_error(line_number, "registro CHROM+POS ausente de la verdad");
@@ -320,6 +349,40 @@ pub fn validate_vcf_against_truth(
                 line_number,
                 "GPS_CASE no es la unión canónica de los casos fuente ALT",
             );
+        }
+        // La reconstrucción de cada copia avanza con lo que el registro
+        // **dice**, antes de compararlo con lo esperado: es la comprobación
+        // que no depende de que este oráculo derive bien los registros.
+        if let Some(sequence) = rebuilt.get_mut(fields[0]) {
+            // El REF ya se ató al FASTA unas líneas más arriba, de modo que la
+            // posición cabe en la secuencia; y los registros llegan ordenados
+            // y sin pisarse —lo exigen las guardas de arriba—, de modo que el
+            // hueco desde el anterior nunca es negativo.
+            let start = (position - 1) as usize;
+            let gap = &sequence.bases[sequence.cursor..start];
+            let alternates = fields[4].split(',').collect::<Vec<_>>();
+            for copy in &mut sequence.copies {
+                let Some(text) = fields[9 + copy.sample].split('|').nth(copy.phase) else {
+                    return vcf_error(
+                        line_number,
+                        "GT no trae un alelo para cada fase de la copia",
+                    );
+                };
+                let Ok(index) = text.parse::<usize>() else {
+                    return vcf_error(line_number, "GT trae un alelo que no es un índice");
+                };
+                let allele = if index == 0 {
+                    fields[3]
+                } else if let Some(alternate) = alternates.get(index - 1) {
+                    alternate
+                } else {
+                    return vcf_error(line_number, "GT nombra un ALT que el registro no tiene");
+                };
+                copy.hasher.update(gap);
+                copy.hasher.update(allele.as_bytes());
+                copy.length += (gap.len() + allele.len()) as u64;
+            }
+            sequence.cursor = start + fields[3].len();
         }
         for (sample, observed) in samples.iter().zip(&fields[9..]) {
             let expected_gt = expected_gt(expected_record, sample)?;
@@ -379,6 +442,198 @@ pub fn validate_vcf_against_truth(
     }
     if seen.len() != expected.len() {
         return vcf_error(line_number, "faltan registros VCF que exige la verdad");
+    }
+    compare_rebuilt_copies(
+        &truth_copy_digests(reference, truth),
+        finish_rebuild(rebuilt),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// La reconstrucción de cada copia desde el VCF
+//
+// Todo lo anterior compara el VCF con los registros que **este oráculo**
+// deriva de la verdad. Si el oráculo y el productor compartieran un error de
+// derivación —ocurrió dos veces: una inserción contada dos veces en el borde
+// de una ventana, y una copia anotada con la referencia en una base que había
+// borrado—, el VCF falso coincidiría con lo esperado y pasaría. Esto no
+// deriva nada: aplica el `GT` de cada registro sobre la referencia, rehace
+// cada copia y la compara con la que describen las piezas de `truth.jsonl`.
+// Se compara por SHA-256 y longitud para no tener dos copias de cada genoma
+// en memoria.
+// ---------------------------------------------------------------------------
+
+struct RebuiltCopy {
+    sample: usize,
+    phase: usize,
+    individual: String,
+    hasher: Sha256,
+    length: u64,
+}
+
+struct RebuiltSequence<'reference> {
+    bases: &'reference [u8],
+    cursor: usize,
+    copies: Vec<RebuiltCopy>,
+}
+
+/// Las bases de cada secuencia del FASTA. Una referencia sin bases ya la ha
+/// rechazado la derivación de lo esperado antes de llegar aquí.
+fn sequence_bases(reference: &Reference) -> BTreeMap<&str, &[u8]> {
+    reference
+        .sequences()
+        .iter()
+        .filter_map(|sequence| {
+            sequence
+                .sequence()
+                .as_bytes()
+                .ok()
+                .map(|bases| (sequence.id().as_str(), bases))
+        })
+        .collect()
+}
+
+/// El estado inicial de la reconstrucción: una copia por individuo y fase en
+/// cada secuencia, en el orden de las muestras de la cabecera.
+fn rebuild_states<'reference>(
+    reference: &'reference Reference,
+    truth: &TruthDocument,
+    samples: &[String],
+) -> BTreeMap<String, RebuiltSequence<'reference>> {
+    let mut phases = BTreeMap::<(String, String), usize>::new();
+    for record in &truth.records {
+        if let TruthRecord::HaplotypeCopy(copy) = record {
+            *phases
+                .entry((
+                    copy.identity.sequence_id.clone(),
+                    copy.identity.individual_id.clone(),
+                ))
+                .or_default() += 1;
+        }
+    }
+    sequence_bases(reference)
+        .into_iter()
+        .map(|(id, bases)| {
+            let id = id.to_owned();
+            let copies = samples
+                .iter()
+                .enumerate()
+                .flat_map(|(sample, individual)| {
+                    let count = phases
+                        .get(&(id.clone(), individual.clone()))
+                        .copied()
+                        .unwrap_or(0);
+                    (0..count).map(move |phase| RebuiltCopy {
+                        sample,
+                        phase,
+                        individual: individual.clone(),
+                        hasher: Sha256::new(),
+                        length: 0,
+                    })
+                })
+                .collect();
+            (
+                id,
+                RebuiltSequence {
+                    bases,
+                    cursor: 0,
+                    copies,
+                },
+            )
+        })
+        .collect()
+}
+
+type CopyDigests = BTreeMap<(String, String, usize), ([u8; 32], u64)>;
+
+/// Cierra la reconstrucción con la cola de cada secuencia tras su último
+/// registro.
+fn finish_rebuild(rebuilt: BTreeMap<String, RebuiltSequence<'_>>) -> CopyDigests {
+    let mut digests = CopyDigests::new();
+    for (sequence_id, state) in rebuilt {
+        let tail = &state.bases[state.cursor..];
+        for mut copy in state.copies {
+            copy.hasher.update(tail);
+            copy.length += tail.len() as u64;
+            digests.insert(
+                (sequence_id.clone(), copy.individual, copy.phase),
+                (copy.hasher.finalize().into(), copy.length),
+            );
+        }
+    }
+    digests
+}
+
+/// Cada copia tal como la describen las piezas de `truth.jsonl`.
+fn truth_copy_digests(reference: &Reference, truth: &TruthDocument) -> CopyDigests {
+    let all_bases = sequence_bases(reference);
+    let mut digests = CopyDigests::new();
+    for record in &truth.records {
+        let TruthRecord::HaplotypeCopy(copy) = record else {
+            continue;
+        };
+        let Some(bases) = all_bases.get(copy.identity.sequence_id.as_str()) else {
+            continue;
+        };
+        let mut hasher = Sha256::new();
+        let mut length = 0_u64;
+        for piece in &copy.current_pieces {
+            match piece {
+                TruthCurrentPiece::Source { source, snps } => {
+                    // La verdad ya se validó y reconstruyó entera antes de
+                    // abrir el VCF: los intervalos y los cambios de base caben
+                    // en la referencia.
+                    let mut cursor = source.start as usize;
+                    let mut ordered = snps.iter().collect::<Vec<_>>();
+                    ordered.sort_by_key(|snp| snp.position);
+                    for snp in ordered {
+                        let at = snp.position as usize;
+                        hasher.update(&bases[cursor..at]);
+                        hasher.update(snp.alternate.as_bytes());
+                        cursor = at + 1;
+                    }
+                    hasher.update(&bases[cursor..source.end as usize]);
+                    length += source.end - source.start;
+                }
+                TruthCurrentPiece::Inserted {
+                    bases: inserted, ..
+                } => {
+                    hasher.update(inserted.as_bytes());
+                    length += inserted.len() as u64;
+                }
+                TruthCurrentPiece::RepeatAllele { bases: tract, .. } => {
+                    hasher.update(tract.as_bytes());
+                    length += tract.len() as u64;
+                }
+            }
+        }
+        digests.insert(
+            (
+                copy.identity.sequence_id.clone(),
+                copy.identity.individual_id.clone(),
+                usize::from(copy.phase),
+            ),
+            (hasher.finalize().into(), length),
+        );
+    }
+    digests
+}
+
+/// **El VCF tiene que describir exactamente cada copia de la verdad.**
+fn compare_rebuilt_copies(
+    expected: &CopyDigests,
+    rebuilt: CopyDigests,
+) -> Result<(), VcfSemanticValidationError> {
+    for (copy, digest) in expected {
+        if rebuilt.get(copy) != Some(digest) {
+            return vcf_error(
+                0,
+                format!(
+                    "la copia {} fase {} de {} que describe el VCF no es la de la verdad",
+                    copy.1, copy.2, copy.0
+                ),
+            );
+        }
     }
     Ok(())
 }
@@ -445,19 +700,49 @@ fn expected_records(
             // en el FASTA unas líneas más arriba.
             .ok_or_else(|| oracle_error("secuencia FASTA ausente durante composición"))?;
         let components = merge_oracle_spans(changes);
-        for (_, path) in paths
+        let sequence_bases = sequence
+            .sequence()
+            .as_bytes()
+            .map_err(|_| bases_not_materialized())?;
+        let sequence_paths = paths
             .iter()
             .filter(|(_, path)| path.sequence_id == sequence_id)
-        {
-            alleles.extend(normalize_oracle_components(
+            .map(|(_, path)| path)
+            .collect::<Vec<_>>();
+        // Los tractos que alguna copia realiza, con sus bloques, en el orden
+        // de la secuencia. Son los únicos que tienen registro de repetición.
+        let realized = sequence_paths
+            .iter()
+            .flat_map(|path| path.pieces.iter())
+            .filter_map(|piece| match piece {
+                OraclePiece::Replaced {
+                    start, end, blocks, ..
+                } => Some((
+                    OracleSpan {
+                        start: *start,
+                        end: *end,
+                    },
+                    blocks,
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let tract_spans = realized.iter().map(|(span, _)| *span).collect::<Vec<_>>();
+        let mut sequence_alleles = Vec::new();
+        for path in &sequence_paths {
+            sequence_alleles.extend(normalize_oracle_components(
                 path,
-                sequence
-                    .sequence()
-                    .as_bytes()
-                    .map_err(|_| bases_not_materialized())?,
+                sequence_bases,
                 &components,
+                &tract_spans,
             )?);
         }
+        alleles.extend(oracle_fuse(
+            sequence_alleles,
+            sequence_bases,
+            &sequence_paths,
+            &realized,
+        )?);
     }
     let mut by_record = BTreeMap::<(String, u64), Vec<OracleAllele>>::new();
     for allele in alleles {
@@ -499,14 +784,13 @@ fn expected_records(
                     allele.alternate,
                     &common_reference[allele.reference.len()..]
                 );
-                if let Some(previous) =
-                    repeats_by_alternate.insert(alternate.clone(), allele.repeat_blocks.clone())
-                    && previous != allele.repeat_blocks
-                {
-                    return Err(oracle_error(
-                        "dos copias dan el mismo ALT con tractos distintos",
-                    ));
-                }
+                // Dos copias con el mismo ALT traen siempre la misma
+                // anotación: la reconstrucción del registro ya da a las dos la
+                // derivada de sus bases cuando la verdad les declara otras
+                // (DTC-064), de modo que aquí no queda nada que decidir.
+                repeats_by_alternate
+                    .entry(alternate.clone())
+                    .or_insert_with(|| allele.repeat_blocks.clone());
                 if let Some(previous) = per_copy.insert(
                     allele.copy.clone(),
                     OracleCarrier {
@@ -790,6 +1074,19 @@ impl OraclePath {
         out
     }
     fn window(&self, start: u64, end: u64) -> Result<Vec<u8>, VcfSemanticValidationError> {
+        self.window_from(start, end, start)
+    }
+
+    /// La ventana, copiando solo las inserciones con punto en
+    /// `[insertions_from, end]`: al anclar, la base que la ventana gana por la
+    /// izquierda no trae consigo la inserción de ese punto, que es de la
+    /// ventana de su propio componente (DTC-064).
+    fn window_from(
+        &self,
+        start: u64,
+        end: u64,
+        insertions_from: u64,
+    ) -> Result<Vec<u8>, VcfSemanticValidationError> {
         let mut out = Vec::new();
         for piece in &self.pieces {
             match piece {
@@ -805,7 +1102,9 @@ impl OraclePath {
                         .map_err(|_| oracle_error("coordenada window demasiado grande"))?;
                     out.extend_from_slice(&bases[from..to]);
                 }
-                OraclePiece::Inserted { anchor, bases } if start <= *anchor && *anchor <= end => {
+                OraclePiece::Inserted { anchor, bases }
+                    if insertions_from <= *anchor && *anchor <= end =>
+                {
                     out.extend_from_slice(bases)
                 }
                 OraclePiece::Replaced {
@@ -830,13 +1129,36 @@ fn normalize_oracle_components(
     path: &OraclePath,
     reference: &[u8],
     initial: &[OracleSpan],
+    tracts: &[OracleSpan],
 ) -> Result<Vec<OracleAllele>, VcfSemanticValidationError> {
     let mut components = initial.to_vec();
     loop {
         let normalized = components
             .iter()
             .copied()
-            .map(|span| oracle_normalize_window(path, reference, span).map(|value| (span, value)))
+            .map(|span| {
+                // DTC-064: el alelo se alinea libre; solo si acabaría **dentro**
+                // de un tracto realizado se repite con el límite en su última
+                // base. El que cruza el tracto entero lo cruza. «Dentro» se
+                // mide en la primera base que cambia, la siguiente al ancla.
+                let free = oracle_normalize_window(path, reference, span, 0)?;
+                let mut floor = 0_u64;
+                if let Some(allele) = &free {
+                    for tract in tracts {
+                        if tract.end <= span.start
+                            && tract.start <= allele.position
+                            && allele.position + 1 < tract.end
+                        {
+                            floor = floor.max(tract.end - 1);
+                        }
+                    }
+                }
+                if floor == 0 {
+                    Ok((span, free))
+                } else {
+                    oracle_normalize_window(path, reference, span, floor).map(|value| (span, value))
+                }
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let mut merge = Vec::new();
         for (index, (span, allele)) in normalized.iter().enumerate() {
@@ -852,7 +1174,28 @@ fn normalize_oracle_components(
                 if other_index == index {
                     continue;
                 }
-                if (allele.position < other.end && other.start < end)
+                // Solo choca con un componente en el que **esta** copia tiene
+                // alelo: un tramo que la copia conserva como la referencia no
+                // la obliga a nada. Importa desde DTC-064, porque un alelo
+                // anclado en la última base de un tracto que otra copia
+                // realiza pisa ese componente sin que esta copia lo cambie, y
+                // fundirlo aquí lo dejaría alinearse hacia dentro del tracto.
+                // El componente atravesado al alinear sí se absorbe siempre.
+                // Y choca también con el alelo de otro componente de la copia
+                // cuyo `REF` pisa el suyo, aunque los componentes no se toquen.
+                let other_reference_overlaps =
+                    normalized[other_index]
+                        .1
+                        .as_ref()
+                        .is_some_and(|other_allele| {
+                            other_allele.position < end
+                                && allele.position
+                                    < other_allele.position + other_allele.reference.len() as u64
+                        });
+                if (normalized[other_index].1.is_some()
+                    && allele.position < other.end
+                    && other.start < end)
+                    || other_reference_overlaps
                     || (traversed.start <= other.start && other.end <= traversed.end)
                 {
                     merge.push((*span, *other));
@@ -882,10 +1225,401 @@ fn normalize_oracle_components(
     }
 }
 
+/// Intervalo `[POS, POS+len(REF))` de un alelo del oráculo, ancla incluida.
+fn oracle_vcf_span(allele: &OracleAllele) -> OracleSpan {
+    OracleSpan {
+        start: allele.position,
+        end: allele.position + allele.reference.len() as u64,
+    }
+}
+
+/// Funde los alelos de copias distintas que se pisan, **por su cuenta**.
+///
+/// Es la regla de DTC-064 escrita otra vez, sin mirar la del productor: dos
+/// alelos se pisan si sus intervalos VCF, ancla incluida, comparten una base,
+/// y se funden por transitividad. Un borrador cuyos alelos comparten `POS` se
+/// deja como está, porque el agrupador por `CHROM+POS` ya los integra. Un
+/// borrador con varias posiciones se reconstruye sobre la unión de sus
+/// intervalos, aplicando a la referencia los alelos de cada copia, y después
+/// se normaliza como un registro entero salvo que lleve un tracto. Se repite
+/// hasta que ningún borrador pisa a otro, porque la alineación puede llevar un
+/// registro fundido encima de su vecino.
+fn oracle_fuse(
+    alleles: Vec<OracleAllele>,
+    reference: &[u8],
+    paths: &[&OraclePath],
+    realized: &[(OracleSpan, &Vec<TruthRepeatBlock>)],
+) -> Result<Vec<OracleAllele>, VcfSemanticValidationError> {
+    // Borradores iniciales: los alelos cuyos intervalos se encadenan.
+    let mut sorted = alleles;
+    sorted.sort_by_key(|allele| (allele.position, oracle_vcf_span(allele).end));
+    let mut drafts = Vec::<Vec<OracleAllele>>::new();
+    let mut reach = 0_u64;
+    for allele in sorted {
+        let span = oracle_vcf_span(&allele);
+        match drafts.last_mut() {
+            Some(draft) if span.start < reach => {
+                reach = reach.max(span.end);
+                draft.push(allele);
+            }
+            _ => {
+                reach = span.end;
+                drafts.push(vec![allele]);
+            }
+        }
+    }
+    loop {
+        let mut built = Vec::with_capacity(drafts.len());
+        for draft in &drafts {
+            built.push(oracle_build_draft(draft, reference, paths, realized)?);
+        }
+        // Los registros construidos que se pisan forman componentes; si todos
+        // son de un solo borrador, es el punto fijo.
+        let mut published = built
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (span, _))| span.map(|span| (span, index)))
+            .collect::<Vec<_>>();
+        published.sort();
+        let mut components = Vec::<Vec<usize>>::new();
+        let mut reach = 0_u64;
+        for (span, index) in published {
+            match components.last_mut() {
+                Some(component) if span.start < reach => {
+                    reach = reach.max(span.end);
+                    component.push(index);
+                }
+                _ => {
+                    reach = span.end;
+                    components.push(vec![index]);
+                }
+            }
+        }
+        if components.iter().all(|component| component.len() == 1) {
+            return Ok(built.into_iter().flat_map(|(_, alleles)| alleles).collect());
+        }
+        let mut taken = drafts.into_iter().map(Some).collect::<Vec<_>>();
+        let mut next = Vec::new();
+        for component in components {
+            next.push(
+                component
+                    .iter()
+                    .filter_map(|index| taken[*index].take())
+                    .flatten()
+                    .collect::<Vec<_>>(),
+            );
+        }
+        // Un borrador que no publica nada no pisa a nadie y sigue igual.
+        next.extend(taken.into_iter().flatten());
+        drafts = next;
+    }
+}
+
+/// Construye un borrador: su intervalo publicado, si publica algo, y los
+/// alelos que aporta.
+fn oracle_build_draft(
+    draft: &[OracleAllele],
+    reference: &[u8],
+    paths: &[&OraclePath],
+    realized: &[(OracleSpan, &Vec<TruthRepeatBlock>)],
+) -> Result<(Option<OracleSpan>, Vec<OracleAllele>), VcfSemanticValidationError> {
+    let position = draft[0].position;
+    let has_tract = draft.iter().any(|allele| !allele.repeat_blocks.is_empty());
+    // Un borrador con tracto se reconstruye siempre, aunque comparta `POS`,
+    // para resolver dos copias con las mismas bases y anotaciones distintas.
+    if !has_tract && draft.iter().all(|allele| allele.position == position) {
+        let end = draft
+            .iter()
+            .map(|allele| oracle_vcf_span(allele).end)
+            .max()
+            .unwrap_or(position);
+        return Ok((
+            Some(OracleSpan {
+                start: position,
+                end,
+            }),
+            draft.to_vec(),
+        ));
+    }
+    let start = draft
+        .iter()
+        .map(|allele| allele.position)
+        .min()
+        .unwrap_or(0);
+    let mut end = draft
+        .iter()
+        .map(|allele| oracle_vcf_span(allele).end)
+        .max()
+        .unwrap_or(0);
+    // DTC-064: el alelo que cruzó entero al alinearse un tracto realizado
+    // del registro lleva el registro hasta el final de su tramo original, para
+    // que el `ALT` de su copia lleve el tracto entero.
+    if has_tract {
+        let inside_end = end;
+        for allele in draft {
+            let crossed = realized.iter().any(|(span, _)| {
+                start <= span.start
+                    && span.end <= inside_end
+                    && allele.position < span.start
+                    && span.end < allele.source.end
+            });
+            if crossed {
+                end = end.max(allele.source.end);
+            }
+        }
+    }
+    // Los tramos que se rebanan salen de intervalos de alelos ya reconstruidos
+    // contra esta misma referencia, de modo que siempre caben en ella.
+    let window = |from: u64, to: u64| &reference[from as usize..to as usize];
+    let mut copies = BTreeMap::<CopyIdentity, Vec<&OracleAllele>>::new();
+    for allele in draft {
+        copies.entry(allele.copy.clone()).or_default().push(allele);
+    }
+    let reference_window = window(start, end).to_vec();
+    let mut carriers = Vec::<(CopyIdentity, Vec<u8>, OracleSpan)>::new();
+    for (copy, mut own) in copies {
+        own.sort_by_key(|allele| allele.position);
+        let mut bases = Vec::new();
+        let mut at = start;
+        let mut source = own[0].source;
+        for allele in own {
+            if allele.position < at {
+                return Err(oracle_error("dos alelos de una copia se pisan"));
+            }
+            bases.extend_from_slice(window(at, allele.position));
+            bases.extend_from_slice(allele.alternate.as_bytes());
+            at = oracle_vcf_span(allele).end;
+            source = OracleSpan {
+                start: source.start.min(allele.source.start),
+                end: source.end.max(allele.source.end),
+            };
+        }
+        bases.extend_from_slice(window(at, end));
+        if bases != reference_window {
+            carriers.push((copy, bases, source));
+        }
+    }
+    if carriers.is_empty() {
+        return Ok((None, Vec::new()));
+    }
+
+    let mut published_start = start;
+    let mut alleles = vec![reference_window];
+    alleles.extend(carriers.iter().map(|(_, bases, _)| bases.clone()));
+    if !has_tract {
+        // Normalización de un registro multialélico: se quita la última base
+        // común; si un alelo se vacía, se antepone la base anterior de la
+        // referencia a todos; y al final se quita la primera base común
+        // mientras todos conserven dos.
+        loop {
+            if alleles.iter().any(Vec::is_empty) {
+                if published_start == 0 {
+                    return Err(oracle_error("registro fundido sin ancla izquierda"));
+                }
+                published_start -= 1;
+                let base = reference[published_start as usize];
+                for allele in &mut alleles {
+                    allele.insert(0, base);
+                }
+            } else if alleles
+                .iter()
+                .all(|allele| allele.last() == alleles[0].last())
+            {
+                for allele in &mut alleles {
+                    allele.pop();
+                }
+            } else {
+                break;
+            }
+        }
+        while alleles.iter().all(|allele| allele.len() > 1)
+            && alleles.iter().all(|allele| allele[0] == alleles[0][0])
+        {
+            for allele in &mut alleles {
+                allele.remove(0);
+            }
+            published_start += 1;
+        }
+    }
+    let published_reference = alleles[0].clone();
+    let published = OracleSpan {
+        start: published_start,
+        end: published_start + published_reference.len() as u64,
+    };
+    let tracts = if has_tract {
+        realized
+            .iter()
+            .filter(|(span, _)| span.start < end && start < span.end)
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    if tracts
+        .iter()
+        .any(|(span, _)| span.start < start || end < span.end)
+    {
+        return Err(oracle_error("el registro fundido parte un tracto"));
+    }
+    let mut distinct_tracts = Vec::<OracleSpan>::new();
+    for (span, _) in &tracts {
+        if !distinct_tracts.contains(span) {
+            distinct_tracts.push(*span);
+        }
+    }
+    distinct_tracts.sort();
+    // La anotación de cada ALT, por posición y tracto a tracto (DTC-064): la
+    // declarada si la copia realiza el tracto; si conserva el de la
+    // referencia, un bloque de su motivo con todas las bases del tracto. Y la
+    // derivada de las bases si otra copia con las mismas bases trae otra.
+    let alternates = alleles[1..].to_vec();
+    let mut annotations = Vec::with_capacity(carriers.len());
+    for (copy, _, _) in &carriers {
+        let path = paths.iter().find(|path| path.identity == *copy);
+        let mut blocks = Vec::new();
+        for tract in &distinct_tracts {
+            let own = path.and_then(|path| {
+                path.pieces.iter().find_map(|piece| match piece {
+                    OraclePiece::Replaced {
+                        start, end, blocks, ..
+                    } if *start == tract.start && *end == tract.end => Some(blocks),
+                    _ => None,
+                })
+            });
+            if let Some(own) = own {
+                blocks.extend(own.iter().cloned());
+                continue;
+            }
+            let motifs = tracts
+                .iter()
+                .filter(|(span, _)| span == tract)
+                .flat_map(|(_, declared)| declared.iter().map(|block| block.motif.as_str()))
+                .collect::<BTreeSet<_>>();
+            let [motif] = motifs.into_iter().collect::<Vec<_>>()[..] else {
+                return Err(oracle_error(
+                    "una copia conserva un tracto compuesto dentro de un registro fundido",
+                ));
+            };
+            blocks.push(TruthRepeatBlock {
+                motif: motif.to_owned(),
+                bases: tract.end - tract.start,
+            });
+        }
+        annotations.push(blocks);
+    }
+    let mut derive = Vec::new();
+    for (index, alternate) in alternates.iter().enumerate() {
+        if alternates
+            .iter()
+            .zip(&annotations)
+            .any(|(other, blocks)| other == alternate && *blocks != annotations[index])
+        {
+            derive.push(index);
+        }
+    }
+    for index in derive {
+        annotations[index] = oracle_derived_blocks(
+            &alternates[index],
+            &published_reference,
+            published_start,
+            &distinct_tracts,
+            &tracts,
+        )?;
+    }
+    let mut output = Vec::with_capacity(carriers.len());
+    for (((copy, _, source), alternate), repeat_blocks) in
+        carriers.into_iter().zip(alternates).zip(annotations)
+    {
+        output.push(OracleAllele {
+            sequence_id: draft[0].sequence_id.clone(),
+            position: published_start,
+            // Las bases salen del FASTA y de las piezas de la verdad, que son
+            // ADN en ASCII: la conversión no puede perder nada.
+            reference: String::from_utf8_lossy(&published_reference).into_owned(),
+            alternate: String::from_utf8_lossy(&alternate).into_owned(),
+            source,
+            copy,
+            repeat_blocks,
+        });
+    }
+    Ok((Some(published), output))
+}
+
+/// La anotación de un ALT **derivada de sus bases** (DTC-064), escrita aquí
+/// por su cuenta, solo para dos copias con las mismas bases y anotaciones
+/// distintas.
+///
+/// Se descuentan las bases del ALT que coinciden con el REF del registro por
+/// delante —como mucho las que el registro tiene antes del tracto— y por
+/// detrás —como mucho las que tiene después—. En lo que queda se buscan las
+/// copias completas del motivo de izquierda a derecha, sin solapar, y el
+/// bloque va de la primera a la última: solo lo que de verdad repite el
+/// motivo. Solo hay regla con un tracto y un motivo.
+fn oracle_derived_blocks(
+    alternate: &[u8],
+    record_reference: &[u8],
+    record_start: u64,
+    tracts: &[OracleSpan],
+    realized: &[&(OracleSpan, &Vec<TruthRepeatBlock>)],
+) -> Result<Vec<TruthRepeatBlock>, VcfSemanticValidationError> {
+    let [tract] = tracts else {
+        return Err(oracle_error(
+            "hay que derivar la anotación de un ALT en un registro con varios tractos",
+        ));
+    };
+    let motifs = realized
+        .iter()
+        .filter(|(span, _)| span == tract)
+        .flat_map(|(_, blocks)| blocks.iter().map(|block| block.motif.as_str()))
+        .collect::<BTreeSet<_>>();
+    let [motif] = motifs.into_iter().collect::<Vec<_>>()[..] else {
+        return Err(oracle_error(
+            "hay que derivar la anotación de un ALT de un tracto compuesto",
+        ));
+    };
+    let room_before = (tract.start - record_start) as usize;
+    let room_after = (record_start + record_reference.len() as u64 - tract.end) as usize;
+    let mut lead = 0;
+    while lead < room_before && lead < alternate.len() && alternate[lead] == record_reference[lead]
+    {
+        lead += 1;
+    }
+    let mut trail = 0;
+    while trail < room_after
+        && lead + trail < alternate.len()
+        && lead + trail < record_reference.len()
+        && alternate[alternate.len() - 1 - trail]
+            == record_reference[record_reference.len() - 1 - trail]
+    {
+        trail += 1;
+    }
+    let middle = &alternate[lead..alternate.len() - trail];
+    let unit = motif.as_bytes();
+    let mut first = None;
+    let mut last_end = 0;
+    let mut at = 0;
+    while at + unit.len() <= middle.len() {
+        if &middle[at..at + unit.len()] == unit {
+            first.get_or_insert(at);
+            at += unit.len();
+            last_end = at;
+        } else {
+            at += 1;
+        }
+    }
+    Ok(match first {
+        None => Vec::new(),
+        Some(first) => vec![TruthRepeatBlock {
+            motif: motif.to_owned(),
+            bases: (last_end - first) as u64,
+        }],
+    })
+}
+
 fn oracle_normalize_window(
     path: &OraclePath,
     reference_bases: &[u8],
     span: OracleSpan,
+    floor: u64,
 ) -> Result<Option<OracleAllele>, VcfSemanticValidationError> {
     let mut start = span.start;
     let end = span.end;
@@ -901,11 +1635,26 @@ fn oracle_normalize_window(
         start = start
             .checked_sub(1)
             .ok_or_else(|| oracle_error("indel sin ancla izquierda"))?;
+        // DTC-064: si el ancla es una base de un tracto que **esta** copia
+        // realiza, la ventana arranca donde arranca el tracto. Anclar dentro
+        // lo partiría, y la base de ancla no es la de la referencia.
+        for piece in &path.pieces {
+            if let OraclePiece::Replaced {
+                start: left,
+                end: right,
+                ..
+            } = piece
+                && *left <= start
+                && start < *right
+            {
+                start = *left;
+            }
+        }
         reference = reference_bases[usize::try_from(start)
             .map_err(|_| oracle_error("inicio fuera de rango"))?
             ..usize::try_from(end).map_err(|_| oracle_error("fin fuera de rango"))?]
             .to_vec();
-        alternate = path.window(start, end)?;
+        alternate = path.window_from(start, end, span.start)?;
     }
     // **El registro de repetición no se recorta**, igual que en el productor y
     // por la misma razón: la decisión S-09 manda publicar la secuencia
@@ -913,7 +1662,9 @@ fn oracle_normalize_window(
     // registros. El oráculo aplica la regla por su cuenta —esta es su copia,
     // no la del productor—, que es lo que hace que la comparación signifique
     // algo.
-    let repeat_blocks = path.repeats_in(span.start, span.end);
+    let repeat_blocks = path.repeats_in(start, end);
+    // `floor` es la posición más a la izquierda a la que puede llegar la
+    // alineación: cero, o la última base de un tracto en el que acabaría.
     if repeat_blocks.is_empty() {
         while reference.len() > 1 && alternate.len() > 1 && reference.last() == alternate.last() {
             reference.pop();
@@ -925,7 +1676,7 @@ fn oracle_normalize_window(
             start += 1;
         }
         while reference.len() != alternate.len()
-            && start > 0
+            && start > floor
             && reference.last() == alternate.last()
         {
             start -= 1;
@@ -1583,10 +2334,10 @@ fn vcf_error<T>(line: u64, detail: impl Into<String>) -> Result<T, VcfSemanticVa
 #[cfg(test)]
 mod tests {
     use super::{
-        ExpectedRecord, OraclePath, OraclePiece, OracleSpan, VcfSemanticValidationError,
-        expected_gt, expected_records, merge_oracle_spans, oracle_normalize_window, oracle_path,
-        oracular_sequence, validate_oracle_phases, validate_reference_allele,
-        validate_tandem_repeat_info,
+        ExpectedRecord, OracleAllele, OraclePath, OraclePiece, OracleSpan,
+        VcfSemanticValidationError, expected_gt, expected_records, merge_oracle_spans,
+        oracle_build_draft, oracle_normalize_window, oracle_path, oracular_sequence,
+        validate_oracle_phases, validate_reference_allele, validate_tandem_repeat_info,
     };
     use crate::identity::{ReferenceId, SequenceId};
     use crate::reference::{
@@ -1672,6 +2423,140 @@ mod tests {
             VcfSemanticValidationError::Vcf { detail, .. } => detail.clone(),
             other => panic!("se esperaba un rechazo del contrato VCF y llegó {other:?}"),
         }
+    }
+
+    fn draft_allele(copy: u8, position: u64, reference: &str, alternate: &str) -> OracleAllele {
+        OracleAllele {
+            sequence_id: "chr1".to_owned(),
+            position,
+            reference: reference.to_owned(),
+            alternate: alternate.to_owned(),
+            source: OracleSpan {
+                start: position,
+                end: position + reference.len() as u64,
+            },
+            copy: identity(copy),
+            repeat_blocks: Vec::new(),
+        }
+    }
+
+    /// **Las guardas internas del registro fundido (DTC-064).**
+    ///
+    /// *Quién caza antes, y por eso esta prueba es unitaria.* Ninguna verdad
+    /// las alcanza de extremo a extremo, porque cada una vigila una premisa que
+    /// la reconstrucción del propio oráculo ya garantiza:
+    ///
+    /// - **dos alelos de una copia que se pisan**: la normalización por copia
+    ///   funde antes los alelos solapados de una misma copia;
+    /// - **un registro que habría que anclar antes de la primera base**: la
+    ///   normalización por copia ya rechaza el *indel* sin ancla izquierda;
+    /// - **un tracto que el registro fundido parte**: un tracto realizado es el
+    ///   alelo de su copia, y ese alelo pisa el registro y entra en él entero;
+    /// - **una anotación que habría que derivar de las bases con varios tractos
+    ///   en el registro**: hacen falta dos microsatélites en un mismo registro
+    ///   fundido y, además, dos copias con las mismas bases y anotaciones
+    ///   distintas; ningún escenario de la batería lo hace, y se llama aquí
+    ///   directamente a la derivación. El productor tiene su propio rechazo
+    ///   con diagnóstico para ese caso.
+    ///
+    /// Se llama directamente al constructor con la única entrada que cada
+    /// guarda puede rechazar, y se exige su motivo. El control fija que dos
+    /// alelos de copias distintas sin nada de eso se funden sin error.
+    #[test]
+    fn the_fused_record_builder_refuses_what_its_own_reconstruction_never_produces() {
+        let control = oracle_build_draft(
+            &[draft_allele(0, 1, "CG", "C"), draft_allele(1, 2, "G", "T")],
+            b"ACGTACGT",
+            &[],
+            &[],
+        )
+        .expect("control: dos copias distintas se funden");
+        assert_eq!(control.0, Some(OracleSpan { start: 1, end: 3 }));
+        assert_eq!(control.1.len(), 2);
+
+        let overlapping = oracle_build_draft(
+            &[draft_allele(0, 1, "CG", "C"), draft_allele(0, 2, "G", "T")],
+            b"ACGTACGT",
+            &[],
+            &[],
+        )
+        .expect_err("una copia no puede llevar dos alelos que se pisan");
+        assert_eq!(detail(&overlapping), "dos alelos de una copia se pisan");
+
+        // Las dos copias borran un `CA` del `ACAC` inicial: el registro se
+        // vacía al recortarlo y habría que anclarlo antes de la base 0.
+        let unanchored = oracle_build_draft(
+            &[
+                draft_allele(0, 0, "ACA", "A"),
+                draft_allele(1, 1, "CAC", "C"),
+            ],
+            b"ACACGTGT",
+            &[],
+            &[],
+        )
+        .expect_err("no hay base anterior a la primera");
+        assert_eq!(detail(&unanchored), "registro fundido sin ancla izquierda");
+
+        let block = vec![TruthRepeatBlock {
+            motif: "CG".to_owned(),
+            bases: 2,
+        }];
+        let mut with_tract = draft_allele(0, 1, "CG", "C");
+        with_tract.repeat_blocks = block.clone();
+        let cut = oracle_build_draft(
+            &[with_tract.clone(), draft_allele(1, 2, "G", "T")],
+            b"ACGTACGT",
+            &[],
+            &[(OracleSpan { start: 2, end: 6 }, &block)],
+        )
+        .expect_err("el registro no puede partir un tracto");
+        assert_eq!(detail(&cut), "el registro fundido parte un tracto");
+
+        let tracts = [
+            (OracleSpan { start: 1, end: 3 }, &block),
+            (OracleSpan { start: 4, end: 6 }, &block),
+        ];
+        let several = super::oracle_derived_blocks(
+            b"ATTTACGT",
+            b"ACGTACGT",
+            0,
+            &[tracts[0].0, tracts[1].0],
+            &tracts.iter().collect::<Vec<_>>(),
+        )
+        .expect_err("con dos tractos no se sabe qué bases son de cuál");
+        assert_eq!(
+            detail(&several),
+            "hay que derivar la anotación de un ALT en un registro con varios tractos"
+        );
+    }
+
+    /// **La comparación final de cada copia rechaza la que no coincide.**
+    ///
+    /// *Por qué es unitaria, dicho sin adornos.* De extremo a extremo no se
+    /// alcanza con un oráculo correcto: un VCF que supera todas las demás
+    /// comprobaciones coincide con los registros que este oráculo deriva, y si
+    /// la derivación es correcta esos registros describen las copias. Esta
+    /// guarda existe para el día en que productor y oráculo compartan un error
+    /// de derivación, que ya ocurrió dos veces; lo que demuestra que caza ese
+    /// caso es el mutante que reintroduce uno de ellos en los dos. Aquí se fija
+    /// que una huella distinta, o una copia ausente, se rechaza, y que las
+    /// mismas huellas se aceptan.
+    #[test]
+    fn the_rebuilt_copies_must_be_the_truth_copies() {
+        let key = ("chr1".to_owned(), "IND_01".to_owned(), 0_usize);
+        let expected = super::CopyDigests::from([(key.clone(), ([7_u8; 32], 8))]);
+        super::compare_rebuilt_copies(&expected, expected.clone())
+            .expect("control: las mismas huellas se aceptan");
+        let wrong = super::CopyDigests::from([(key, ([8_u8; 32], 8))]);
+        let error = super::compare_rebuilt_copies(&expected, wrong)
+            .expect_err("una copia con otra huella se rechaza");
+        assert_eq!(
+            detail(&error),
+            "la copia IND_01 fase 0 de chr1 que describe el VCF no es la de la verdad"
+        );
+        let error = super::compare_rebuilt_copies(&expected, super::CopyDigests::new())
+            .expect_err("una copia que el VCF no describe se rechaza");
+        assert!(detail(&error).contains("no es la de la verdad"));
     }
 
     /// **La columna REF está atada al genoma real, no a la derivación.**
@@ -1963,16 +2848,17 @@ mod tests {
             ],
         };
         let path = inserted_at(0);
-        let error = oracle_normalize_window(&path, reference, OracleSpan { start: 0, end: 0 })
+        let error = oracle_normalize_window(&path, reference, OracleSpan { start: 0, end: 0 }, 0)
             .expect_err("una inserción en la posición cero no tiene ancla");
         assert_eq!(detail(&error), "indel sin ancla izquierda");
 
         // Control positivo: la misma inserción una base más allá sí normaliza,
         // y lo hace anclando en la base anterior.
         let anchored = inserted_at(1);
-        let allele = oracle_normalize_window(&anchored, reference, OracleSpan { start: 1, end: 1 })
-            .expect("con ancla sí normaliza")
-            .expect("hay alelo");
+        let allele =
+            oracle_normalize_window(&anchored, reference, OracleSpan { start: 1, end: 1 }, 0)
+                .expect("con ancla sí normaliza")
+                .expect("hay alelo");
         assert_eq!(allele.position, 0);
         assert_eq!(allele.reference, "A");
         assert_eq!(allele.alternate, "ATT");
@@ -2121,11 +3007,13 @@ mod tests {
                 ];
             }
         }
+        // Desde el 2 de octubre de 2026 la anotación de ese ALT se deriva de
+        // sus bases (DTC-064), y con dos motivos no hay regla: se rechaza.
         let error = expected_records(&reference, &contradictory)
-            .expect_err("el mismo ALT con dos descomposiciones");
+            .expect_err("el mismo ALT con dos descomposiciones de motivos distintos");
         assert_eq!(
             detail(&error),
-            "dos copias dan el mismo ALT con tractos distintos"
+            "hay que derivar la anotación de un ALT de un tracto compuesto"
         );
 
         // La **misma copia** declarada dos veces con contenidos que no

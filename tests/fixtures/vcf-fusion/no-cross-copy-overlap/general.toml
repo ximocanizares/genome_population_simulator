@@ -1,0 +1,113 @@
+config_kind = "general"
+schema_version = "4"
+seed = "5555555555555555555555555555555555555555555555555555555555555555"
+
+[population_snvs]
+mode = "supplied"
+input_path = "snvs.tsv"
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 3000
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 3
+ploidy = 2
+genotype_model = "hwe"
+individual_ids = ["ind-1", "ind-2", "ind-3"]
+
+[vcf_output]
+mode = "text"
+
+[[direct_events]]
+event_id = "e0"
+contig = "chr1"
+individual_id = "ind-2"
+phase = 0
+kind = "deletion"
+start = 1246
+end = 1253
+
+[[direct_events]]
+event_id = "e1"
+contig = "chr1"
+individual_id = "ind-1"
+phase = 0
+kind = "snp"
+position_1based = 1300
+ref = "T"
+alt = "G"
+
+[[direct_events]]
+event_id = "e2"
+contig = "chr1"
+individual_id = "ind-3"
+phase = 1
+kind = "snp"
+position_1based = 1500
+ref = "A"
+alt = "G"
+
+[[direct_events]]
+event_id = "e3"
+contig = "chr1"
+individual_id = "ind-1"
+phase = 1
+kind = "insertion"
+point = 1700
+bases = "TTGA"
+
+[[direct_events]]
+event_id = "e4"
+contig = "chr1"
+individual_id = "ind-2"
+phase = 1
+kind = "snp"
+position_1based = 1246
+ref = "C"
+alt = "A"
+
+[[direct_events]]
+event_id = "e5"
+contig = "chr1"
+individual_id = "ind-3"
+phase = 0
+kind = "insertion"
+point = 1246
+bases = "GG"
+
+[[direct_events]]
+event_id = "e6"
+contig = "chr1"
+individual_id = "ind-1"
+phase = 0
+kind = "deletion"
+start = 2000
+end = 2004
+
+[[direct_events]]
+event_id = "e7"
+contig = "chr1"
+individual_id = "ind-3"
+phase = 1
+kind = "snp"
+position_1based = 2005
+ref = "A"
+alt = "G"
+
+[[direct_events]]
+event_id = "e8"
+contig = "chr1"
+individual_id = "ind-2"
+phase = 0
+kind = "snp"
+position_1based = 1301
+ref = "C"
+alt = "G"

@@ -1,0 +1,11 @@
+##fileformat=VCFv4.5
+##INFO=<ID=GPS_CASE,Number=.,Type=String,Description="Canonical truth case identifiers contributing an ALT allele">
+##FILTER=<ID=PASS,Description="All filters passed">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##contig=<ID=chr1,length=409>
+##reference=ref-main
+##gps_execution_id=RUN_S3XKAZ47NLCS6PU3RY7Z2JPIR4
+##gps_qual=.
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	ind-1	ind-2
+chr1	20	.	C	A	.	PASS	GPS_CASE=CASE_736e140c34ff37abe84aec01754cfc7e8afb0950ddf23f7c8b937c948d4	GT	0	1
+chr1	197	.	CAGCATT	C,CAGCATTCA	.	PASS	GPS_CASE=CASE_8bb301c2845f84609330dd7ee54c825a273c18a1e7d393becc213383b7b,CASE_d748d2f569f792223cd158f6c3fefaa87e2e9fa2f4028c64f9204098bac,CASE_fb151825e2eec6e396d2eed16e731d15c290cfe3b0d8920f5eca65794aa	GT	2	1

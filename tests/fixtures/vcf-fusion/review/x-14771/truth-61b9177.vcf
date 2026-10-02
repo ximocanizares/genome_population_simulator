@@ -1,0 +1,19 @@
+##fileformat=VCFv4.5
+##INFO=<ID=GPS_CASE,Number=.,Type=String,Description="Canonical truth case identifiers contributing an ALT allele">
+##INFO=<ID=RN,Number=A,Type=Integer,Description="Total number of repeat sequences in this allele">
+##INFO=<ID=RUS,Number=.,Type=String,Description="Repeat unit sequence of the corresponding repeat sequence">
+##INFO=<ID=RUL,Number=.,Type=Integer,Description="Repeat unit length of the corresponding repeat sequence">
+##INFO=<ID=RUC,Number=.,Type=Float,Description="Repeat unit count of corresponding repeat sequence">
+##INFO=<ID=RB,Number=.,Type=Integer,Description="Total number of bases in the corresponding repeat sequence">
+##FILTER=<ID=PASS,Description="All filters passed">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##contig=<ID=chr1,length=272>
+##reference=ref-main
+##gps_execution_id=RUN_SXB2O5RMXIOHBDU5OOMEBTGFWI
+##gps_qual=.
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	ind-1	ind-2	ind-3	ind-4
+chr1	20	.	T	A	.	PASS	GPS_CASE=CASE_5dc52b96e1d1d7acf0a09c72edc3efdf325bc426b276050986b0f4516ab,CASE_732c4819152909441e02f062b8328f4dc7c12ec42e0441fa7b33214c89c,CASE_736e140c34ff37abe84aec01754cfc7e8afb0950ddf23f7c8b937c948d4	GT	0|0|0|0	0|1|1|0	1|0|1|0	1|0|1|1
+chr1	95	.	A	T	.	PASS	GPS_CASE=CASE_b94361a0c0cd8d97f236d107242592487899d2fd415f2b55c4da2337c7a	GT	0|0|0|0	0|0|0|0	0|0|0|0	0|0|0|1
+chr1	100	.	T	TA	.	PASS	GPS_CASE=CASE_3d0ecf1b4265d85e2954d2b57fd35d162a93b465e2945db8626a73205aa	GT	0|1|0|0	0|0|0|0	0|0|0|0	0|0|0|0
+chr1	101	.	AAAAAAAAAAAAAAAAAA	AAAAAAAAAAAAAA,AAAAAAAAAAAAAAA,TCTAAAAAAAAAAAAAAA	.	PASS	GPS_CASE=CASE_06d55bc8c46844fe2d80219af73ec1dabc95704814bc0c262b792645adf,CASE_224bc4a85b483daefa5b510ad4bbb370d6a4bbbef0aed4fbadba6b0372e,CASE_25f17f3fe83aeb31abba5ca85779d4aaf0ff550bf593559f9af910477cf,CASE_84544dc38af57805cf6f69c7c985bb9036a21b87559c19ace537ed90ede,CASE_fd360969a7867cedfda5a4b7f6a0fc10414b39dd048f09c72af2f317620;RN=1,1,1;RUS=A,A,A;RUL=1,1,1;RUC=14,15,15;RB=14,15,15	GT	1|0|0|2	2|3|2|1	0|1|0|0	1|0|1|2
+chr1	121	.	A	C	.	PASS	GPS_CASE=CASE_01af794afe670c0789c8aa03a52cd4cb322f7bd0b38a3e59e3660adcbbb,CASE_642ad25c31c32666d96c44802fb7ac0a5287278f47528607279120d1729,CASE_d033801dbb5ffc85b8f8eeeab2c17641371956c0bbfc9f0e2b5c8a57669,CASE_e6b750592874cb56cbc240982800c1a76b91e07b833dc0cbe92087cfe79	GT	0|0|1|1	0|0|1|1	1|0|0|0	1|1|1|0

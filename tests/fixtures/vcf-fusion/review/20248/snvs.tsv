@@ -1,0 +1,5 @@
+contig	position	ref	alt	population_id	alt_af
+chr1	21	C	G	P1	0.8
+chr1	148	A	C	P1	0.8
+chr1	176	G	C	P1	0.8
+chr1	189	A	C	P1	0.5

@@ -107,7 +107,8 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "mode"
+            "mode",
+            "normalization_version"
           ],
           "properties": {
             "mode": {
@@ -115,6 +116,9 @@
                 "text",
                 "bgzf"
               ]
+            },
+            "normalization_version": {
+              "const": "vcf-small-allele-normalization-v2"
             }
           }
         }
@@ -2963,7 +2967,7 @@
           }
         }
       },
-      "description": "Cota SUPERIOR de bases de secuencia de tracto que la ejecución llegará a publicar, calculada sobre lo DECLARADO —alelos, longitudes, individuos y ploidía— antes de materializar a nadie. La verdad publica el tracto de cada copia en TRES sitios: su vista vigente, su historial y el caso genotípico; de ahí el factor. Lo realizado será casi siempre MENOR, porque una copia que saque el alelo de la referencia no publica nada y un alelo que no le toque a nadie no produce ALT: esa diferencia es correcta y no hay que igualarla."
+      "description": "Bases de secuencia de tracto que la ejecución publica, en dos partes de naturaleza distinta (DTC-097). La parte de la VERDAD es una cota SUPERIOR calculada sobre lo declarado —alelos, longitudes, individuos y ploidía— antes de materializar a nadie: la verdad publica el tracto de cada copia en TRES sitios, su vista vigente, su historial y el caso genotípico, y de ahí el factor; lo realizado será casi siempre MENOR, y esa diferencia es correcta. La parte del VCF NO es una cota: es lo que el VCF publicado lleva, MEDIDO al publicarlo, antes de escribirlo; por eso el total de este bloque puede quedar por debajo de lo que la ejecución publica de verdad. El tope declarado se aplica dos veces: al admitir, por precaución, sobre la cota de la verdad sola, y al publicar el VCF, sobre la verdad ya REALIZADA más lo medido en el VCF; una configuración que validate acepta puede ser rechazada así por run."
     },
     "technical_insert_length": {
       "type": "object",

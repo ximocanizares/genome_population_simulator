@@ -1,0 +1,102 @@
+config_kind = "general"
+schema_version = "4"
+seed = "ff74289f56679de6cdd7defac33c5c8dd6dc89bad2d977d6050b601120a27933"
+
+[population_snvs]
+mode = "supplied"
+input_path = "snvs.tsv"
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 334
+
+[[reference.repeat_loci]]
+id = "STR-chr1-1"
+sequence = "chr1"
+start = 151
+end = 170
+motif = "CA"
+
+[[reference.repeat_loci.alleles]]
+units = 10
+frequency = 0.5
+
+[[reference.repeat_loci.alleles]]
+units = 9
+frequency = 0.5
+
+[[reference.repeat_loci]]
+id = "STR-chr1-2"
+sequence = "chr1"
+start = 177
+end = 184
+motif = "CA"
+
+[[reference.repeat_loci.alleles]]
+units = 4
+frequency = 0.5
+
+[[reference.repeat_loci.alleles]]
+sequence = "CACACACAGACACACA"
+frequency = 0.5
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 2
+ploidy = 2
+genotype_model = "hwe"
+individual_ids = ["ind-1", "ind-2"]
+
+[vcf_output]
+mode = "text"
+
+[[direct_events]]
+event_id = "chr1-e1"
+contig = "chr1"
+individual_id = "ind-1"
+phase = 1
+kind = "deletion"
+start = 171
+end = 174
+
+[[direct_events]]
+event_id = "chr1-e3"
+contig = "chr1"
+individual_id = "ind-2"
+phase = 1
+kind = "deletion"
+start = 187
+end = 188
+
+[[direct_events]]
+event_id = "chr1-e4"
+contig = "chr1"
+individual_id = "ind-2"
+phase = 1
+kind = "deletion"
+start = 184
+end = 187
+
+[[direct_events]]
+event_id = "chr1-e5"
+contig = "chr1"
+individual_id = "ind-1"
+phase = 0
+kind = "deletion"
+start = 170
+end = 173
+
+[[direct_events]]
+event_id = "chr1-e6"
+contig = "chr1"
+individual_id = "ind-2"
+phase = 1
+kind = "insertion"
+point = 175
+bases = "GT"

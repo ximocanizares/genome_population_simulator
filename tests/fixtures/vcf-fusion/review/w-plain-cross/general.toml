@@ -1,0 +1,55 @@
+config_kind = "general"
+schema_version = "4"
+seed = "5555555555555555555555555555555555555555555555555555555555555555"
+
+[population_snvs]
+mode = "supplied"
+input_path = "snvs.tsv"
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 409
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 2
+ploidy = 1
+genotype_model = "hwe"
+individual_ids = ["ind-1", "ind-2"]
+
+[vcf_output]
+mode = "text"
+
+[[direct_events]]
+event_id = "e0"
+contig = "chr1"
+individual_id = "ind-2"
+phase = 0
+kind = "deletion"
+start = 197
+end = 203
+
+[[direct_events]]
+event_id = "e1"
+contig = "chr1"
+individual_id = "ind-1"
+phase = 0
+kind = "snp"
+position_1based = 203
+ref = "T"
+alt = "A"
+
+[[direct_events]]
+event_id = "e2"
+contig = "chr1"
+individual_id = "ind-1"
+phase = 0
+kind = "insertion"
+point = 204
+bases = "TC"

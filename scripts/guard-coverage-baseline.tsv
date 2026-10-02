@@ -76,12 +76,68 @@
 # copia con sus bases siempre que hay inserción, así que es una invariante
 # interna y no cuenta.
 #
+# **El 02/10/2026 `src/vcf_semantic_validation.rs` pasa de 98 a 104
+# comprobaciones y `src/results.rs` de 533 a 535; los dos techos de sin
+# disparar no se mueven (22 y 425).** Entran con la fusión de variantes
+# solapadas entre copias (DTC-064), medido con esta misma puerta:
+#
+# - en el oráculo VCF, seis: la guarda que rechaza un registro cuyo `REF` pisa
+#   el de otro, la del locus compuesto que una copia conserva dentro de un
+#   registro fundido —las dos de extremo a extremo, en
+#   `tests/vcf_overlap_fusion.rs`— y cuatro guardas internas del constructor
+#   del registro fundido, que ninguna verdad alcanza y dispara la prueba
+#   unitaria `the_fused_record_builder_refuses_what_its_own_reconstruction_never_produces`;
+# - en `results.rs`, dos: los lectores de la configuración efectiva v6 y del
+#   manifiesto general v6 rechazan una versión del algoritmo de normalización
+#   que no sea la vigente, y las dispara
+#   `the_normalization_version_is_published_and_any_other_is_refused`.
+#
+# **Corregido el 02/10/2026 tras la revisión adversarial de la fusión: el
+# oráculo VCF pasa de 104 a 107 y `src/results.rs` de 535 a 537; los techos
+# siguen en 22 y 425.** En el oráculo entran cinco y salen dos:
+#
+# - entran las tres lecturas del `GT` con que el oráculo reconstruye cada
+#   copia —falta una fase, el alelo no es un índice, nombra un ALT que no
+#   existe—, que dispara `the_oracle_rejects_the_former_separate_records_and_a_reference_call_on_the_deleted_copy`;
+#   la comparación final de cada copia reconstruida con la de la verdad, que
+#   de extremo a extremo solo se alcanza si productor y oráculo comparten un
+#   error de derivación y la dispara la prueba unitaria
+#   `the_rebuilt_copies_must_be_the_truth_copies`; y la anotación derivada con
+#   varios tractos en un registro, que dispara
+#   `the_fused_record_builder_refuses_what_its_own_reconstruction_never_produces`;
+# - salen «el alelo de una copia que conserva el tracto no lo contiene», que
+#   dejó de tener sentido cuando la anotación de esa copia dejó de copiarse de
+#   la verdad, y «dos copias dan el mismo ALT con tractos
+#   distintos», porque desde el 02/10/2026 esas dos copias reciben la
+#   anotación derivada de sus bases.
+#
+# En `results.rs` entran los dos rechazos del juez de la contabilidad sobre la
+# configuración efectiva cuando la parte VCF de la cota, que ahora se mide, no
+# es lo que el VCF lleva: en total y sumando por locus. El tercero, sobre el
+# manifiesto, usa una constructora que esta puerta no vigila (DT-001). Los
+# dispara `the_judge_rejects_a_tampered_accounting`, que exige su motivo.
+#
+# **Corregido el 02/10/2026 tras la segunda revisión adversarial: el oráculo
+# VCF pasa de 107 a 108 y `src/results.rs` de 537 a 538; los techos siguen en
+# 22 y 425.** En el oráculo, la copia que conserva el tracto de la referencia
+# se anota ahora por posición, y el rechazo del locus compuesto se separa en
+# dos: el de esa copia, «una copia conserva un tracto compuesto dentro de un
+# registro fundido», y el de la anotación derivada de las bases, «hay que
+# derivar la anotación de un ALT de un tracto compuesto», que exige por su
+# texto la prueba unitaria `the_expected_records_do_not_trust_the_truth_they_read`.
+# Los dos se disparan según esta misma puerta —ninguno está en la lista de los
+# que nunca lo hacen—; no se ha averiguado qué prueba dispara el primero. En `results.rs` entra el rechazo del juez
+# de la contabilidad cuando las bases de tracto de un locus no son las que
+# llevan sus registros —antes solo se comprobaba la suma—, y lo dispara
+# `each_locus_carries_the_vcf_tract_bases_of_its_own_records`, que exige su
+# motivo.
+#
 # Medido el 23/09/2026; oráculo y verificador del VCF remedidos el 29/09/2026
 # (168 a 52 y 25 a 22, con el mismo número de comprobaciones); `results.rs` y
 # `event_manifest.rs` medidos por primera vez el 29/09/2026.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
-src/vcf_semantic_validation.rs	98	22
+src/vcf_semantic_validation.rs	108	22
 src/f5_closure.rs	42	5
-src/results.rs	533	425
+src/results.rs	538	425
 src/event_manifest.rs	147	117

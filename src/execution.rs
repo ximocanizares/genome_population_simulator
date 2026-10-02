@@ -84,7 +84,7 @@ use crate::truth_schema::{
     TruthDocument, TruthHeader, TruthSourceKind, TruthSourceRef,
 };
 use crate::truth_validation::reference_content_sha256;
-use crate::vcf_publication::publish_truth_vcf;
+use crate::vcf_publication::{TractOutputCap, publish_truth_vcf_within};
 use crate::wgs_sampling::{WgsPairedEndSampler, WgsSamplingError};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -368,8 +368,14 @@ fn execute_validated_config_with_effective_document(
         // los registros recién escritos. Ninguna de las dos pasa por la cota.
         realized_tract_output.truth_bases = crate::results::realized_truth_tract_bases(&truth);
         if let Some(mode) = effective.vcf_output() {
-            let published = publish_truth_vcf(&mut workspace, reference, &truth, mode)?;
+            let cap = effective
+                .repeat_output_budget()
+                .declared_cap()
+                .map(|cap| TractOutputCap { cap });
+            let published =
+                publish_truth_vcf_within(&mut workspace, reference, &truth, mode, cap.as_ref())?;
             realized_tract_output.vcf_bases = published.tract_bases;
+            realized_tract_output.vcf_by_locus = published.tract_bases_by_locus;
             vcf_outputs.push(VcfManifestLink {
                 state: UnitState::Complete,
                 reference_id: published.reference_id,
@@ -403,6 +409,10 @@ fn execute_validated_config_with_effective_document(
             &reduction_outputs,
             population_snvs.as_ref(),
         )?;
+        crate::results::publish_measured_vcf_tract_bases(
+            &mut effective_document,
+            &realized_tract_output,
+        );
         if let Some(inserted) = &inserted_publication {
             effective_document["inserted_reference"] = crate::results::inserted_reference_json(
                 effective,
@@ -446,7 +456,7 @@ fn execute_validated_config_with_effective_document(
                 .initial_individuals
                 .as_ref()
                 .map_or(&[][..], InitialIndividualsMaterialization::repeat_draws),
-            realized_tract_output,
+            &realized_tract_output,
         )?;
         let manifest = GeneralManifest {
             execution_id: execution_id.as_str(),
@@ -1807,7 +1817,7 @@ fn publish_controlled_failure(
     let repeat_loci = crate::results::repeat_loci_manifest_json(
         effective,
         &[],
-        crate::results::RealizedTractOutput::default(),
+        &crate::results::RealizedTractOutput::default(),
     )?;
     let manifest = GeneralManifest {
         execution_id,
