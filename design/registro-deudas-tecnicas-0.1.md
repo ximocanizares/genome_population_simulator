@@ -45,7 +45,7 @@ documenta mejor.
 | DT-015 | El validador de la verdad por flujo rechaza toda verdad con alelos de repetición | Baja | 30/09/2026 | Abierta |
 | DT-016 | El tracto de un microsatélite compuesto no se coloca en una referencia simulada | Media | 01/10/2026 | **Cerrada (01/10/2026)** |
 | DT-017 | El juez de los recursos publicados cita el esquema efectivo v4 en sus rechazos aunque el documento sea v6 | Baja | 01/10/2026 | Abierta, corregida para la regeneración de la referencia simulada |
-| DT-018 | Una copia con cambios de base aplicados fuera de orden de posición aborta la ejecución al reconstruir la verdad | **Grave** | 02/10/2026; redefinida el 03/10/2026 | Abierta |
+| DT-018 | Una copia con cambios de base aplicados fuera de orden de posición aborta la ejecución al reconstruir la verdad | **Grave** | 02/10/2026; redefinida el 03/10/2026 | **Cerrada (03/10/2026)** |
 | DT-019 | Sin VCF, nadie juzga los genotipos de la verdad al publicar | **Grave** | 02/10/2026 | Abierta |
 
 ---
@@ -1076,7 +1076,7 @@ abortan igual, con la versión base y con la corregida; los mismos dos en orden
 ascendente publican. La condición es que los cambios de base de una copia
 entren en su historia en un orden distinto del de su posición, vengan de la
 matriz o de eventos directos. Los dos ejemplos: un directo seguido de uno de la
-matriz en una posición anterior, y dos directos en orden descendente.
+matriz en una posición más adelante, y dos directos en orden descendente.
 
 **Gravedad: grave.** No publica nada falso, pero **impide simular** casi
 cualquier escenario que combine un cambio de base declarado a mano con la
@@ -1095,9 +1095,9 @@ de la copia «no se reproduce» (`HistoryDoesNotReplay`).
 La causa está en el reproductor de historias del validador de la verdad
 (`src/truth_validation.rs`). Al reproducir los eventos de una copia, los
 cambios de base se añaden a su lista **en el orden de la historia**
-(`truth_validation.rs:762`), y en la historia el de la matriz va antes que el
+(`truth_validation.rs`, en `replay_event`, hacia la línea 773 antes de la corrección), y en la historia el de la matriz va antes que el
 directo —o el de la base 180 antes que el de la 150—; después, la lista reconstruida se compara **ordenada tal cual** con
-las piezas vigentes que publica la verdad (`truth_validation.rs:1067`), que van
+las piezas vigentes que publica la verdad (`truth_validation.rs`, en `reconstruct_copy`, hacia la línea 1149), que van
 por posición. Las dos listas tienen los mismos cambios en distinto orden, y la
 comparación las da por distintas.
 
@@ -1110,13 +1110,38 @@ en la posición 180 de la fase 1 de `ind-1`. Aborta con la versión actual y con
 la anterior a la fusión de variantes solapadas del VCF, de modo que **no lo
 introdujo esa fusión**: es previo.
 
-### Qué haría falta para cerrarla
+### Cómo se cerró
 
-Que el reproductor compare los cambios de base reconstruidos con los vigentes
-por posición, no por orden de llegada, o que los inserte ordenados; y pruebas
-con los dos ejemplos —un directo y uno de la matriz posterior en la misma
-copia, y dos directos en orden descendente— que fallen contra la variante
-actual. Queda para un encargo aparte.
+**Cerrada el 3 de octubre de 2026.** El diagnóstico se confirmó ejecutando: la
+verdad publica los cambios de base de cada tramo ordenados por posición (el
+productor los inserta en su sitio, y la lectura estructural rechaza piezas
+fuera de orden), mientras que el juez los añadía al final de la lista en el
+orden del historial. Las dos listas tenían los mismos cambios, con las mismas
+bases y posiciones, en distinto orden; no había ningún otro estado distinto.
+
+La corrección está solo en el juez (`src/truth_validation.rs`): al reproducir
+un cambio de base, lo inserta **en su posición** dentro de la lista del tramo,
+igual que el productor. La comparación final no se tocó y sigue siendo exacta:
+un cambio de más, de menos, con otra base o en otra posición se sigue
+rechazando; dos cambios en la misma posición los rechaza la lectura estructural
+(`ModificationsNotOrdered`) antes de llegar al reproductor; la guarda de
+posición repetida del propio reproductor es defensiva y ninguna prueba la
+ejercita.
+
+Pruebas: `tests/snp_order_replay.rs`, con los dos escenarios del revisor
+(`tests/fixtures/snp-order/`: dos directos en orden descendente, y un directo
+seguido de uno de la matriz más adelante) y una verdad escrita a mano con
+historial descendente, y otra con tres cambios en orden no monótono (4, 1, 6),
+que distingue insertar en su sitio de insertar al principio o junto al último. Las pruebas de rechazo fallan si se relaja la
+comparación (ignorar la base, ignorar las posiciones o aceptar longitudes
+distintas). Una exploración de 2000 escenarios al azar dio 0 abortos al
+reconstruir la verdad, frente a 106 con la versión anterior.
+
+Nota: el comprobador de la exploración señalaba en 39 escenarios un caso sin
+registro «propio» con un registro que toca su locus (`AUSENTE-CON-ALT`). La
+revisión adversarial lo identificó como un falso positivo del comprobador: son
+casos de efecto nulo adyacentes a otro registro, y el VCF es exacto (ver
+REQ-VER-25).
 
 ## DT-019. Sin VCF, nadie juzga los genotipos de la verdad al publicar
 

@@ -770,6 +770,11 @@ fn replay_event(
                     position: *position,
                 });
             }
+            // Guarda defensiva que ninguna prueba ejercita: un documento con
+            // dos cambios en la misma posición lo rechaza antes la lectura
+            // estructural (`ModificationsNotOrdered`), de modo que desde un
+            // documento válido no se llega aquí. Sin esta guarda, o con la rama
+            // «idéntico» rechazando, la batería entera sigue pasando.
             if let Some(existing) = snps.iter().find(|snp| snp.position == *position) {
                 if existing.event_id == *event_id
                     && existing.reference == *expected
@@ -782,13 +787,21 @@ fn replay_event(
                     identity: copy.identity.clone(),
                 });
             }
-            snps.push(TruthCurrentSnp {
-                event_id: event_id.clone(),
-                position: *position,
-                reference: expected.clone(),
-                alternate: alternate.clone(),
-                provenance: provenance.clone(),
-            });
+            // La verdad publica los cambios de base de cada tramo ordenados
+            // por posición, no por orden de llegada al historial: se insertan
+            // en su sitio, sin ordenar después ni relajar la comparación
+            // final. La posición no está repetida (se rechazó arriba).
+            let insert_at = snps.partition_point(|snp| snp.position < *position);
+            snps.insert(
+                insert_at,
+                TruthCurrentSnp {
+                    event_id: event_id.clone(),
+                    position: *position,
+                    reference: expected.clone(),
+                    alternate: alternate.clone(),
+                    provenance: provenance.clone(),
+                },
+            );
         }
         TruthHistoryEvent::Insertion {
             point,

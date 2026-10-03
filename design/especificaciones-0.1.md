@@ -4242,6 +4242,12 @@ suele necesitar dos registros BND relacionados.
   queda igual a la referencia contiene el locus entero, o ningún cambio de la
   copia —hueco, punto de inserción, cambio de base o tracto sustituido, leídos
   de sus piezas finales— toca el locus, extremos incluidos.
+
+  **La asociación entre un caso y un registro se hace por el tramo compuesto
+  antes de alinear** el registro. Por eso el locus de un caso nulo puede caer,
+  una vez alineado el registro, dentro del `REF` de **otro** registro que no
+  lo lista en `GPS_CASE`: el caso se asoció al tramo compuesto original, no al
+  `REF` final.
 - **REQ-VER-26.** El complemento debe conservar todo el detalle que se perdería
   en VCF y que sea necesario para reconstruir la secuencia o cambio real, el
   haplotipo y la fase, las coordenadas y el genotipo simulado. El manifiesto debe

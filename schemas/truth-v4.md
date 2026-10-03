@@ -54,6 +54,15 @@ el fragmento vigente y el evento de historial `repeat_allele`, el caso
 genotípico `repeat` y su alelo alternativo `repeat`, con su secuencia completa
 y su estructura en bloques.
 
+## Orden de los cambios de base de un fragmento
+
+En cada fragmento vigente de tipo `source`, los cambios de base (`snps`) se
+publican en orden **estrictamente creciente de posición**, sin posiciones
+repetidas, con independencia del orden en que entraron en el historial de la
+copia. El validador semántico replica el historial insertando cada cambio en su
+sitio y compara la lista resultante con la publicada, igual en bases, posiciones
+y longitud.
+
 ## El alelo estructural
 
 Un caso `indel` usa `reference` y una inserción o deleción tipada. El alelo
