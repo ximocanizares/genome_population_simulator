@@ -311,10 +311,18 @@ pub struct SegmentChain {
 
 /// Edición pequeña aceptada en las coordenadas de la secuencia vigente.
 ///
-/// Estas coordenadas no se convierten en coordenadas de referencia: después de
-/// una inserción o deleción esa correspondencia puede no existir. El historial
-/// conserva por separado el evento que la estableció y los fragmentos mantienen
-/// la reconstrucción perezosa desde la fuente o desde los bytes insertados.
+/// `point`, `start` y `end` son coordenadas **vigentes**, las del momento en
+/// que se aplicó el evento, y así las replica el historial. No hay una
+/// traducción general a la referencia: después de una inserción o una
+/// deleción una base vigente puede no tener base de referencia. Lo que sí
+/// existe siempre es el **locus del caso** en coordenadas de la referencia,
+/// que se fija al aplicar el evento y se guarda aparte (`reference_*`):
+///
+/// - una inserción se ancla donde termina la última base de referencia que la
+///   precede, la misma regla con la que el VCF ancla un fragmento insertado;
+/// - una deleción cubre desde la primera hasta la última base de referencia
+///   que elimina; si solo elimina bases insertadas, es el ancla de su inicio y
+///   queda vacía.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CurrentIndelEvent {
     Snp {
@@ -325,12 +333,17 @@ pub enum CurrentIndelEvent {
         point: u64,
         bases: Arc<[u8]>,
         provenance: ModificationProvenance,
+        /// Punto de inserción en coordenadas de la referencia.
+        reference_point: u64,
     },
     Deletion {
         event_id: EventId,
         start: u64,
         end: u64,
         provenance: ModificationProvenance,
+        /// Intervalo de referencia que elimina, semiabierto.
+        reference_start: u64,
+        reference_end: u64,
     },
     RepeatAllele {
         allele: CurrentRepeatAllelePiece,
@@ -710,6 +723,7 @@ impl SegmentChain {
             .ok_or(SegmentError::CurrentCoordinateMismatch)?
             .checked_add(1)
             .ok_or(SegmentError::ArithmeticOverflow)?;
+        let reference_point = reference_anchor(&pieces[..insertion_index])?;
         pieces.insert(
             insertion_index,
             CurrentIndelPiece::Inserted(CurrentInsertedPiece {
@@ -723,6 +737,7 @@ impl SegmentChain {
             point,
             bases,
             provenance,
+            reference_point,
         });
         Ok(Self {
             segments: self.segments.clone(),
@@ -749,21 +764,42 @@ impl SegmentChain {
         let split = split_pieces_at(&split, end)?;
         let mut cursor = 0_u64;
         let mut pieces = Vec::with_capacity(split.len());
+        // El ancla se toma al llegar al primer fragmento eliminado, cuando
+        // `pieces` contiene exactamente los que lo preceden.
+        let mut anchor = None;
+        let mut removed_reference: Option<(u64, u64)> = None;
         for piece in split {
             let next = cursor
                 .checked_add(piece.len())
                 .ok_or(SegmentError::ArithmeticOverflow)?;
             if next <= start || cursor >= end {
                 pieces.push(piece);
+            } else {
+                if anchor.is_none() {
+                    anchor = Some(reference_anchor(&pieces)?);
+                }
+                if let Some((piece_start, piece_end)) = reference_interval(&piece) {
+                    removed_reference = Some(match removed_reference {
+                        None => (piece_start, piece_end),
+                        Some((first, last)) => (first.min(piece_start), last.max(piece_end)),
+                    });
+                }
             }
             cursor = next;
         }
+        let (reference_start, reference_end) = match (removed_reference, anchor) {
+            (Some(span), _) => span,
+            (None, Some(anchor)) => (anchor, anchor),
+            (None, None) => return Err(SegmentError::CurrentCoordinateMismatch),
+        };
         let mut events = state.events.to_vec();
         events.push(CurrentIndelEvent::Deletion {
             event_id: provenance.event_id().clone(),
             start,
             end,
             provenance,
+            reference_start,
+            reference_end,
         });
         Ok(Self {
             segments: self.segments.clone(),
@@ -1142,6 +1178,31 @@ fn push_source_piece(
     Ok(())
 }
 
+/// Coordenada de referencia que sigue a la última base de referencia de
+/// `before`, los fragmentos vigentes que preceden a un límite.
+///
+/// Es el ancla con la que el VCF coloca un fragmento insertado. La primera
+/// base de una copia es siempre de referencia —no se inserta ni se elimina en
+/// el punto cero—, así que no encontrarla es una coordenada imposible.
+fn reference_anchor(before: &[CurrentIndelPiece]) -> Result<u64, SegmentError> {
+    before
+        .iter()
+        .rev()
+        .find_map(|piece| reference_interval(piece).map(|(_, end)| end))
+        .ok_or(SegmentError::CurrentCoordinateMismatch)
+}
+
+/// Intervalo de referencia que ocupa un fragmento vigente, si lo tiene.
+fn reference_interval(piece: &CurrentIndelPiece) -> Option<(u64, u64)> {
+    match piece {
+        CurrentIndelPiece::Source(source) => Some((source.source.start(), source.source.end())),
+        CurrentIndelPiece::RepeatAllele(allele) => {
+            Some((allele.interval().start(), allele.interval().end()))
+        }
+        CurrentIndelPiece::Inserted(_) => None,
+    }
+}
+
 fn split_pieces_at(
     pieces: &[CurrentIndelPiece],
     point: u64,
@@ -1441,5 +1502,52 @@ mod tests {
             Segment::new(interval(0, 10), vec![other_space]),
             Err(SegmentError::ModificationSourceMismatch)
         );
+    }
+
+    /// **Un tracto de repetición cuenta como base de referencia al anclar.**
+    ///
+    /// En el recorrido los alelos de repetición se aplican los últimos, de
+    /// modo que ningún *indel* llega a ver un tracto sustituido y esta regla
+    /// no cambia nada de lo que el programa publica hoy. La función es del
+    /// dominio y no del recorrido, sin embargo, y su contrato no debe
+    /// depender de ese orden: una inserción detrás de un tracto se ancla al
+    /// final del tracto y una deleción que lo borra entero cubre su
+    /// intervalo, no el ancla de antes del tracto.
+    #[test]
+    fn a_realized_repeat_tract_is_reference_for_the_reference_locus() {
+        use crate::identity::RepeatLocusId;
+        use crate::tandem_repeat::{RepeatMotif, TandemRepeatTract};
+        let repeat = SegmentChain::intact(interval(0, 10))
+            .with_current_repeat_allele(CurrentRepeatAllelePiece::new(
+                RepeatLocusId::parse("STR-1", "test").expect("locus id"),
+                interval(2, 6),
+                TandemRepeatTract::new(RepeatMotif::new(b"CA").expect("motif"), b"CACACA")
+                    .expect("tract"),
+                provenance(),
+            ))
+            .expect("repeat allele");
+        // Vigentes: ref[0,2) en [0, 2), el tracto de 6 bases en [2, 8) y
+        // ref[6,10) en [8, 12).
+        let inserted = repeat
+            .with_current_insertion(8, Arc::from(&b"T"[..]), provenance())
+            .expect("insertion after the tract");
+        assert!(matches!(
+            inserted.current_indel_events().last(),
+            Some(CurrentIndelEvent::Insertion {
+                reference_point: 6,
+                ..
+            })
+        ));
+        let deleted = repeat
+            .with_current_deletion(2, 8, provenance())
+            .expect("deletion of the whole tract");
+        assert!(matches!(
+            deleted.current_indel_events().last(),
+            Some(CurrentIndelEvent::Deletion {
+                reference_start: 2,
+                reference_end: 6,
+                ..
+            })
+        ));
     }
 }

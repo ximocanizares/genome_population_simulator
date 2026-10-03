@@ -465,6 +465,7 @@ fn project_history_event(
             point,
             bases,
             provenance,
+            ..
         } => {
             let source = domain_source(provenance);
             require_digest(source_digests, &source)?;
@@ -480,6 +481,7 @@ fn project_history_event(
             start,
             end,
             provenance,
+            ..
         } => {
             let source = domain_source(provenance);
             require_digest(source_digests, &source)?;
@@ -904,10 +906,14 @@ fn project_active_indel_genotypes(
                         CurrentIndelEvent::Snp { .. } | CurrentIndelEvent::RepeatAllele { .. } => {
                             continue;
                         }
+                        // El locus del caso va en coordenadas de la
+                        // referencia; el evento fuente conserva las vigentes
+                        // con las que se declaró y se replica el historial.
                         CurrentIndelEvent::Insertion {
                             event_id,
                             point,
                             bases,
+                            reference_point,
                             ..
                         } => {
                             let event_id = event_id.as_str().to_owned();
@@ -916,8 +922,8 @@ fn project_active_indel_genotypes(
                                 event_id.clone(),
                                 TruthLocus {
                                     sequence_id: sequence_id.clone(),
-                                    start: *point,
-                                    end: *point,
+                                    start: *reference_point,
+                                    end: *reference_point,
                                 },
                                 TruthAllele::Insertion {
                                     event_id: event_id.clone(),
@@ -936,6 +942,8 @@ fn project_active_indel_genotypes(
                             event_id,
                             start,
                             end,
+                            reference_start,
+                            reference_end,
                             ..
                         } => {
                             let event_id = event_id.as_str().to_owned();
@@ -943,8 +951,8 @@ fn project_active_indel_genotypes(
                                 event_id.clone(),
                                 TruthLocus {
                                     sequence_id: sequence_id.clone(),
-                                    start: *start,
-                                    end: *end,
+                                    start: *reference_start,
+                                    end: *reference_end,
                                 },
                                 TruthAllele::Deletion {
                                     event_id: event_id.clone(),

@@ -132,12 +132,22 @@
 # `each_locus_carries_the_vcf_tract_bases_of_its_own_records`, que exige su
 # motivo.
 #
+# **El 03/10/2026 `src/vcf_semantic_validation.rs` pasa de 108 a 109
+# comprobaciones; el techo sigue en 22.** Entra la guarda del oráculo que
+# rechaza un caso sin ALT cuya copia no queda igual a la referencia, «un caso
+# sin ALT cuya copia no queda igual a la referencia», con la excepción de
+# REQ-VER-25 para los casos de efecto neto nulo. Con una verdad válida no se
+# alcanza de extremo a extremo —el juez de la verdad fija el locus de cada caso
+# dentro de un componente de cambios de su copia— y la dispara la prueba
+# unitaria `a_case_without_an_alternate_needs_an_unchanged_copy`, que exige su
+# motivo.
+#
 # Medido el 23/09/2026; oráculo y verificador del VCF remedidos el 29/09/2026
 # (168 a 52 y 25 a 22, con el mismo número de comprobaciones); `results.rs` y
 # `event_manifest.rs` medidos por primera vez el 29/09/2026.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
-src/vcf_semantic_validation.rs	108	22
+src/vcf_semantic_validation.rs	109	22
 src/f5_closure.rs	42	5
 src/results.rs	538	425
 src/event_manifest.rs	147	117

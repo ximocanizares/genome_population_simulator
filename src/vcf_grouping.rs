@@ -10,7 +10,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::reference::Reference;
 use crate::truth_schema::{CopyIdentity, TruthDocument, TruthRecord};
 use crate::truth_validation::{TruthValidationError, ValidatedTruthForVcf, validate_truth_for_vcf};
-use crate::vcf_projection::{NormalizedAllele, ProjectedAllele, ProjectedAlternateValue};
+use crate::vcf_projection::{
+    NormalizedAllele, ProjectedAllele, ProjectedAlternateValue, ProjectedView,
+};
 
 /// Genotipo real de una muestra en el orden de fase de sus copias.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -142,6 +144,11 @@ impl std::error::Error for VcfGroupingError {}
 /// muestras y casos canónicamente. Antes de producir nada se vuelve a validar
 /// `truth.jsonl`, para que una copia o un caso desconectado nunca se convierta
 /// silenciosamente en un `GT` o `GPS_CASE` falso.
+///
+/// Esta vía pública solo recibe alelos, no las ventanas en que cada copia
+/// quedó igual a la referencia, así que es **más estricta** que la de
+/// publicación: un caso de efecto neto nulo (excepción de REQ-VER-25) se
+/// rechaza aquí con [`VcfGroupingError::CaseAlleleNotProjected`].
 pub fn group_normalized_alleles(
     truth: &TruthDocument,
     reference: &Reference,
@@ -198,17 +205,22 @@ fn group_normalized_alleles_from_document(
         carriers_by_record.push(carriers);
         records.push(record);
     }
-    finish_records(truth, records, carriers_by_record)
+    finish_records(truth, records, carriers_by_record, None)
 }
 
 /// Agrupa una vista de verdad que ya cruzó la frontera semántica completa sin
 /// materializar un ALT grande por copia. Los ALT se comparan por descriptor y
 /// se construyen una vez por valor de registro.
+///
+/// `view` trae, además de los alelos, las dos pruebas con que la proyección
+/// sabe que una copia es la referencia en un sitio; solo con ellas se admite
+/// un caso sin ALT.
 pub(crate) fn group_projected_alleles_from_validated_truth(
     truth: ValidatedTruthForVcf<'_>,
     reference: &Reference,
-    projected: &[ProjectedAllele<'_>],
+    view: &ProjectedView<'_>,
 ) -> Result<Vec<GroupedVcfRecord>, VcfGroupingError> {
+    let projected = view.alleles.as_slice();
     truth
         .validate_reference(reference)
         .map_err(VcfGroupingError::Truth)?;
@@ -257,13 +269,43 @@ pub(crate) fn group_projected_alleles_from_validated_truth(
         records.push(record);
     }
 
-    finish_records(truth, records, carriers_by_record)
+    finish_records(truth, records, carriers_by_record, Some(view))
+}
+
+/// Cierto si la proyección demuestra que `copy` es igual a la referencia en
+/// todo `[start, end]`: o una ventana compuesta igual a la referencia de esa
+/// misma copia contiene el locus entero, o ningún cambio de la copia lo toca,
+/// extremos incluidos. Sin vista no hay prueba y no se admite nada.
+fn copy_is_reference_at(
+    view: Option<&ProjectedView<'_>>,
+    copy: &CopyIdentity,
+    sequence_id: &str,
+    start: u64,
+    end: u64,
+) -> bool {
+    let Some(view) = view else {
+        return false;
+    };
+    if copy.sequence_id != sequence_id {
+        return false;
+    }
+    let in_window = view
+        .reference_windows
+        .iter()
+        .any(|window| window.copy == copy && window.start <= start && end <= window.end);
+    let untouched = view.copy_changes.get(copy).is_some_and(|changes| {
+        !changes
+            .iter()
+            .any(|(change_start, change_end)| *change_start <= end && start <= *change_end)
+    });
+    in_window || untouched
 }
 
 fn finish_records(
     truth: &TruthDocument,
     mut records: Vec<GroupedVcfRecord>,
     carriers_by_record: Vec<BTreeMap<CopyIdentity, ProjectedCarrier>>,
+    view: Option<&ProjectedView<'_>>,
 ) -> Result<Vec<GroupedVcfRecord>, VcfGroupingError> {
     // La asociación se deduce de los intervalos fuente finales de la copia,
     // emitidos por F2.5.2 después de componer sus cambios. Nunca se infiere
@@ -295,7 +337,19 @@ fn finish_records(
                     mapped = true;
                 }
             }
-            if !mapped {
+            // Un caso sin ALT solo se admite si su copia es la referencia
+            // alrededor del locus: su efecto neto es nulo y no hay nada que
+            // publicar (excepción de REQ-VER-25). Cualquier otro caso sin ALT
+            // es un alelo perdido.
+            if !mapped
+                && !copy_is_reference_at(
+                    view,
+                    &carrier.copy,
+                    &genotype.locus.sequence_id,
+                    genotype.locus.start,
+                    genotype.locus.end,
+                )
+            {
                 return Err(VcfGroupingError::CaseAlleleNotProjected {
                     case_id: genotype.case_id.clone(),
                     copy: carrier.copy.clone(),
@@ -847,6 +901,7 @@ mod tests {
         TruthStructuralEvent,
     };
     use crate::truth_validation::reference_content_sha256;
+    use crate::vcf_projection::CopyReferenceWindow;
 
     fn reference() -> Reference {
         let sequence = ReferenceSequence::new(
@@ -1070,6 +1125,117 @@ mod tests {
         assert_eq!(records[0].alternate_cases, [vec!["CASE_B"], vec!["CASE_A"]]);
         assert_eq!(records[0].samples[0].1.alleles, [2]);
         assert_eq!(records[0].samples[1].1.alleles, [1]);
+    }
+
+    /// **Un caso sin ALT solo se admite si la proyección demuestra que su
+    /// copia es la referencia alrededor del locus** (excepción de REQ-VER-25).
+    ///
+    /// *Por qué es unitaria.* Los casos de efecto nulo se alcanzan de extremo
+    /// a extremo (`tests/vcf_null_effect_case.rs`), pero un ALT perdido de
+    /// verdad no: el locus de cada caso cae siempre en un cambio de su copia.
+    /// Aquí se quita a mano el alelo de `IND_B` para simular esa pérdida, y se
+    /// da o se niega cada una de las dos pruebas que la excusarían: una
+    /// ventana compuesta igual a la referencia que contenga el locus, o que
+    /// ningún cambio de la copia toque el locus.
+    ///
+    /// *Qué hace que pueda fallar:* el control con la vista entera agrupa;
+    /// cada prueba válida excusa el caso y lo deja fuera de `GPS_CASE`; y el
+    /// mismo caso se rechaza por su nombre sin prueba, con la ventana de otra
+    /// copia, con una ventana que cubre el inicio del locus y no el final,
+    /// con un cambio de la copia que solo toca el extremo del locus y con una
+    /// copia cuyos cambios la proyección no conoce.
+    #[test]
+    fn a_case_without_alt_needs_proof_that_its_own_copy_is_the_reference() {
+        let reference = reference();
+        let truth = document(&reference, "G");
+        let validated = validate_truth_for_vcf(&truth, &reference).expect("validated truth");
+        let view = crate::vcf_projection::project_view_from_validated_truth(validated, &reference)
+            .expect("projection");
+        assert_eq!(view.alleles.len(), 2, "control: un alelo por copia");
+        group_projected_alleles_from_validated_truth(validated, &reference, &view)
+            .expect("control: la proyección entera agrupa");
+
+        let copy_b = identity("IND_B", 0);
+        let copy_a = identity("IND_A", 0);
+        assert_eq!(
+            view.copy_changes.get(&copy_b),
+            Some(&vec![(1, 2)]),
+            "control: el cambio de base de IND_B toca su locus [1, 2)"
+        );
+        let lost = view
+            .alleles
+            .iter()
+            .filter(|allele| allele.copy.individual_id != "IND_B")
+            .cloned()
+            .collect::<Vec<_>>();
+        let window = |copy, start, end| CopyReferenceWindow { copy, start, end };
+        let with = |windows: Vec<CopyReferenceWindow<'_>>, changes_b: Option<Vec<(u64, u64)>>| {
+            let mut copy_changes = view.copy_changes.clone();
+            match changes_b {
+                Some(changes) => {
+                    copy_changes.insert(&copy_b, changes);
+                }
+                None => {
+                    copy_changes.remove(&copy_b);
+                }
+            }
+            let lost_view = ProjectedView {
+                alleles: lost.clone(),
+                reference_windows: windows,
+                copy_changes,
+            };
+            group_projected_alleles_from_validated_truth(validated, &reference, &lost_view)
+        };
+
+        for (excused, why) in [
+            (
+                with(vec![window(&copy_b, 1, 2)], Some(vec![(1, 2)])),
+                "la ventana de su copia excusa el caso",
+            ),
+            (
+                with(vec![], Some(vec![(3, 3)])),
+                "ningún cambio de su copia toca el locus",
+            ),
+        ] {
+            let records = excused.unwrap_or_else(|error| panic!("{why}: {error:?}"));
+            assert!(
+                records
+                    .iter()
+                    .all(|record| !record.gps_cases.contains(&"CASE_B".to_owned())),
+                "{why}: un caso sin ALT no entra en ningún GPS_CASE"
+            );
+        }
+
+        for (result, why) in [
+            (with(vec![], Some(vec![(1, 2)])), "sin ninguna prueba"),
+            (
+                with(vec![window(&copy_a, 1, 2)], Some(vec![(1, 2)])),
+                "con la ventana de otra copia",
+            ),
+            (
+                with(vec![window(&copy_b, 0, 1)], Some(vec![(1, 2)])),
+                "con una ventana que cubre el inicio del locus y no el final",
+            ),
+            (
+                with(vec![], Some(vec![(2, 3)])),
+                "con un cambio que solo toca el extremo final del locus",
+            ),
+            (
+                with(vec![], Some(vec![(0, 1)])),
+                "con un cambio que solo toca el extremo inicial del locus",
+            ),
+            (
+                with(vec![], None),
+                "con una copia cuyos cambios no se conocen",
+            ),
+        ] {
+            let error = result.expect_err(why);
+            assert!(
+                matches!(&error, VcfGroupingError::CaseAlleleNotProjected { case_id, copy }
+                    if case_id == "CASE_B" && copy == &copy_b),
+                "{why}: {error:?}"
+            );
+        }
     }
 
     #[test]

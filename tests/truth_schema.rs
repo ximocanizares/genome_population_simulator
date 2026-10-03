@@ -169,6 +169,20 @@ fn structural_alleles_allow_partial_insertion_survival_but_reject_domain_boundar
     }
     assert!(invalid_point.validate_structure().is_err());
 
+    // El locus de una inserción va en coordenadas de la referencia y ya no
+    // tiene por qué coincidir con el punto vigente del evento fuente, pero
+    // sigue sin ocupar bases: un locus con anchura no es una inserción.
+    let mut wide_insertion_locus = document.clone();
+    if let TruthRecord::Genotype(genotype) =
+        wide_insertion_locus.records.last_mut().expect("genotype")
+    {
+        genotype.locus.end = genotype.locus.start + 1;
+    }
+    assert!(matches!(
+        wide_insertion_locus.validate_structure(),
+        Err(TruthContractError::InvalidGenotypeAllele { .. })
+    ));
+
     let mut duplicate_link = document.clone();
     if let TruthRecord::Genotype(genotype) = duplicate_link.records.last_mut().expect("genotype")
         && let TruthAllele::Insertion { piece_links, .. } = &mut genotype.alleles[1]

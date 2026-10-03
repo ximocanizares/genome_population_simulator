@@ -221,8 +221,10 @@ pub struct GenotypeRecord {
     pub case_id: String,
     pub reference_id: String,
     pub individual_id: String,
-    /// `Snp` uses a one-base locus; `Indel` names the canonical source
-    /// interval (or the zero-width insertion boundary) affected by the event.
+    /// `Snp` uses a one-base locus; `Indel` names the reference interval the
+    /// event removed, or the zero-width reference boundary where it inserted,
+    /// even when the event itself was declared in current copy coordinates
+    /// (`schemas/truth-v4.md`, «El locus de un caso indel»).
     pub case_kind: GenotypeCaseKind,
     pub locus: TruthLocus,
     /// Estructura tipada y autoritativa del alelo. No se codifican estados
@@ -1468,24 +1470,15 @@ pub(crate) fn validate_genotype(
                 });
             }
         }
-        match allele {
-            TruthAllele::Insertion {
-                source_event: TruthStructuralEvent::Insertion { point, .. },
-                ..
-            } if g.locus.start != *point || g.locus.end != *point => {
-                return Err(TruthContractError::InvalidGenotypeAllele {
-                    case_id: g.case_id.clone(),
-                });
-            }
-            TruthAllele::Deletion {
-                source_event: TruthStructuralEvent::Deletion { start, end, .. },
-                ..
-            } if g.locus.start != *start || g.locus.end != *end => {
-                return Err(TruthContractError::InvalidGenotypeAllele {
-                    case_id: g.case_id.clone(),
-                });
-            }
-            _ => {}
+        // El locus va en coordenadas de la referencia y el evento fuente en
+        // las vigentes de la copia, que solo coinciden si ningún indel previo
+        // de la copia las desplazó. Su igualdad exacta la exige el validador
+        // semántico, que replica el historial; aquí solo cabe la forma: una
+        // inserción no ocupa bases de referencia.
+        if matches!(allele, TruthAllele::Insertion { .. }) && g.locus.start != g.locus.end {
+            return Err(TruthContractError::InvalidGenotypeAllele {
+                case_id: g.case_id.clone(),
+            });
         }
     }
     let mut seen = BTreeSet::new();

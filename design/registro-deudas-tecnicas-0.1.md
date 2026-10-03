@@ -45,7 +45,8 @@ documenta mejor.
 | DT-015 | El validador de la verdad por flujo rechaza toda verdad con alelos de repetición | Baja | 30/09/2026 | Abierta |
 | DT-016 | El tracto de un microsatélite compuesto no se coloca en una referencia simulada | Media | 01/10/2026 | **Cerrada (01/10/2026)** |
 | DT-017 | El juez de los recursos publicados cita el esquema efectivo v4 en sus rechazos aunque el documento sea v6 | Baja | 01/10/2026 | Abierta, corregida para la regeneración de la referencia simulada |
-| DT-018 | Un cambio de base directo seguido de otro de la matriz en la misma copia aborta la ejecución al reconstruir la verdad | **Grave** | 02/10/2026 | Abierta |
+| DT-018 | Una copia con cambios de base aplicados fuera de orden de posición aborta la ejecución al reconstruir la verdad | **Grave** | 02/10/2026; redefinida el 03/10/2026 | Abierta |
+| DT-019 | Sin VCF, nadie juzga los genotipos de la verdad al publicar | **Grave** | 02/10/2026 | Abierta |
 
 ---
 
@@ -1064,18 +1065,30 @@ reetiquetar.
 
 ---
 
-## DT-018. Un cambio de base directo y otro de la matriz en la misma copia abortan la ejecución
+## DT-018. Una copia con cambios de base aplicados fuera de orden de posición aborta la ejecución
+
+**Redefinida el 3 de octubre de 2026.** Se registró como «un cambio de base
+directo y otro de la matriz en la misma copia», y estaba mal acotada: no hace
+falta la matriz. La revisión adversarial de ese día encontró que **dos cambios
+de base directos** en la misma copia, declarados en orden descendente de
+posición —el de la base 180 y después el de la 150, en la fase 0 de `ind-1`—,
+abortan igual, con la versión base y con la corregida; los mismos dos en orden
+ascendente publican. La condición es que los cambios de base de una copia
+entren en su historia en un orden distinto del de su posición, vengan de la
+matriz o de eventos directos. Los dos ejemplos: un directo seguido de uno de la
+matriz en una posición anterior, y dos directos en orden descendente.
 
 **Gravedad: grave.** No publica nada falso, pero **impide simular** casi
 cualquier escenario que combine un cambio de base declarado a mano con la
-matriz de variantes de población: la ejecución termina con un error interno en
-vez de con un paquete.
+matriz de variantes de población, o varios cambios declarados a mano sin
+ordenar: la ejecución termina con un error interno en vez de con un paquete.
 
 ### Qué pasa
 
-Una copia recibe un cambio de base directo —un evento `snp` de
-`[[direct_events]]`— y, **más adelante en la misma copia**, un cambio de base
-de la matriz de población. La ejecución aborta con `GPS-INTERNAL-001`, en la
+En el primer ejemplo, una copia recibe un cambio de base directo —un evento
+`snp` de `[[direct_events]]`— y, **más adelante en la misma copia**, un cambio
+de base de la matriz de población; en el segundo, dos directos con la
+posición en orden descendente. La ejecución aborta con `GPS-INTERNAL-001`, en la
 operación de reconstruir la verdad de forma independiente, porque la historia
 de la copia «no se reproduce» (`HistoryDoesNotReplay`).
 
@@ -1083,7 +1096,7 @@ La causa está en el reproductor de historias del validador de la verdad
 (`src/truth_validation.rs`). Al reproducir los eventos de una copia, los
 cambios de base se añaden a su lista **en el orden de la historia**
 (`truth_validation.rs:762`), y en la historia el de la matriz va antes que el
-directo; después, la lista reconstruida se compara **ordenada tal cual** con
+directo —o el de la base 180 antes que el de la 150—; después, la lista reconstruida se compara **ordenada tal cual** con
 las piezas vigentes que publica la verdad (`truth_validation.rs:1067`), que van
 por posición. Las dos listas tienen los mismos cambios en distinto orden, y la
 comparación las da por distintas.
@@ -1100,6 +1113,48 @@ introdujo esa fusión**: es previo.
 ### Qué haría falta para cerrarla
 
 Que el reproductor compare los cambios de base reconstruidos con los vigentes
-por posición, no por orden de llegada, o que los inserte ordenados; y una
-prueba con un cambio directo y uno de la matriz posterior en la misma copia que
-falle contra la variante actual. Queda para un encargo aparte.
+por posición, no por orden de llegada, o que los inserte ordenados; y pruebas
+con los dos ejemplos —un directo y uno de la matriz posterior en la misma
+copia, y dos directos en orden descendente— que fallen contra la variante
+actual. Queda para un encargo aparte.
+
+## DT-019. Sin VCF, nadie juzga los genotipos de la verdad al publicar
+
+**Gravedad: grave.** No es un defecto que publique algo falso por sí mismo,
+sino la falta de la red que lo pararía, y falta **en la configuración por
+omisión**: el VCF solo se escribe si se pide `[vcf_output]`, y sin él los casos
+genotípicos de `truth.jsonl` —la fuente canónica de la verdad— salen sin que
+ningún juez los haya contrastado. Ya ha dejado pasar un defecto real.
+
+### Qué pasa
+
+Al publicar, el productor de la verdad solo contrasta las **copias**: compara
+la huella SHA-256 de cada copia que materializa con la de la reconstrucción
+independiente (`verify_copies_against_independent_reconstruction`, en
+`src/truth_projection.rs`). Los **casos genotípicos** —locus, alelos,
+portadores y dosis— no los mira nadie. El juez semántico de la verdad
+(`validate_and_reconstruct_truth` y su variante para el VCF, en
+`src/truth_validation.rs`), que sí los contrasta con las copias reconstruidas,
+solo se ejecuta dentro de la publicación del VCF y en las pruebas.
+
+### Cómo se detectó
+
+Al corregir, el 2 de octubre de 2026, el locus de los casos indel que salía en
+coordenadas de la copia y no de la referencia. Hasta ese día, una ejecución sin
+VCF publicaba ese locus falso sin error; con VCF abortaba, pero solo porque el
+agrupador no encontraba el caso, no porque nadie juzgara la verdad. Tras la
+corrección, dos mutantes de verificación lo confirmaron sobre una copia del
+árbol: con el productor devolviendo el locus viejo (M1) y con el juez anclando
+las inserciones a la derecha (M6), **las ejecuciones sin VCF publicaron igual**;
+solo una prueba que compara lo publicado con una tabla escrita a mano
+(`tests/indel_case_reference_locus.rs`) lo vio.
+
+### Qué haría falta para cerrarla
+
+Ejecutar el juez semántico de la verdad sobre el documento ya proyectado
+también cuando no se pide VCF, antes de escribirlo, y fallar con un defecto
+interno si rechaza. La reconstrucción de cada copia ya se hace para la
+comparación de huellas, de modo que el coste añadido es contrastar los casos,
+no reconstruir de nuevo; conviene medirlo con un genoma grande antes de darlo
+por bueno. Y una prueba que publique sin VCF con un productor alterado y exija
+el rechazo. Queda para un encargo aparte.

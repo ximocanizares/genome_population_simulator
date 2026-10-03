@@ -19,7 +19,7 @@ use crate::vcf_contract::{
     write_vcf_records,
 };
 use crate::vcf_grouping::group_projected_alleles_from_validated_truth;
-use crate::vcf_projection::{VcfProjectionError, project_projected_alleles_from_validated_truth};
+use crate::vcf_projection::{VcfProjectionError, project_view_from_validated_truth};
 use crate::vcf_representation::prepare_conditional_vcf_records;
 
 pub const VCF_ARTIFACT_ID: &str = "truth-vcf";
@@ -228,7 +228,7 @@ pub fn publish_truth_vcf_within(
         // Antes de la vista compacta, estos errores emergían de proyección.
         // Mantener el contexto público no retrasa la validación al escritor.
         .map_err(|error| vcf_invariant("project", error.to_string()))?;
-    let normalized = project_projected_alleles_from_validated_truth(validated, reference)
+    let view = project_view_from_validated_truth(validated, reference)
         .map_err(|error| match error {
             // No es una invariante rota sino un escenario que el VCF no sabe
             // anotar sin inventar una regla: se le dice a quien lo escribió.
@@ -267,7 +267,7 @@ pub fn publish_truth_vcf_within(
             }
             other => vcf_invariant("project", other.to_string()),
         })?;
-    let grouped = group_projected_alleles_from_validated_truth(validated, reference, &normalized)
+    let grouped = group_projected_alleles_from_validated_truth(validated, reference, &view)
         .map_err(|error| vcf_invariant("group", error.to_string()))?;
     let conditional = prepare_conditional_vcf_records(grouped)
         .map_err(|error| vcf_invariant("representation", error.to_string()))?;

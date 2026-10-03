@@ -657,8 +657,10 @@ Después, el subpaso diferido F6.5.a incorpora la variación aleatoria directa.
     posición en un registro multialélico.
 - ☐ **F6.5.2.** Publicar el catálogo cerrado y versionado de códigos
   `GPS_LOSS`, el esquema `vcf-complement-v1` y la cardinalidad positiva
-  multicaso: uno o varios registros por caso, exactamente una entrada por caso
-  con pérdida, `GPS_CASE` intacta. **Bloqueado por DP-F6-05.**
+  multicaso: uno o varios registros por caso —ninguno para un caso de efecto
+  neto nulo, excepción de REQ-VER-25 desde el 3 de octubre de 2026—,
+  exactamente una entrada por caso con pérdida, `GPS_CASE` intacta.
+  **Bloqueado por DP-F6-05.**
   - Depende de: F6.5.1.
   - Procede de: REQ-VER-24/25/26, DTC-065, REQ-MAN-31.
   - Cambia: catálogo nuevo en `catalogs/`, esquema nuevo, escritor JSONL por

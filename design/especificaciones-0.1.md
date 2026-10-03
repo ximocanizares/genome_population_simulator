@@ -4220,6 +4220,28 @@ suele necesitar dos registros BND relacionados.
   positiva entre varios casos y una entrada complementaria futura se concretará
   en F6.5 únicamente a partir de una pérdida real. F5 no genera VCF, BND, SV
   ni complemento de verdad.
+
+  **Excepción, desde el 3 de octubre de 2026: un caso de efecto neto nulo no
+  aporta ningún ALT propio.** Si cada copia portadora es igual a la
+  referencia alrededor del locus del caso —una inserción y una deleción de la
+  misma copia que se anulan, una inserción que una deleción posterior borra
+  entera, o un alelo de repetición más una deleción del flanco que juntos
+  reproducen la referencia—, el caso no aporta ningún ALT. Lo habitual es que
+  entonces no aparezca en ningún registro. **Aparece**, en cambio, en el
+  `GPS_CASE` de un registro cuando su copia lleva en él **otro** ALT cuyo tramo
+  compuesto contiene el locus del caso: la asociación entre casos y ALT se
+  hace por tramo, y un caso de efecto nulo dentro del tramo de un ALT
+  compuesto o fundido de su copia queda listado con ese ALT. Es una
+  diferencia **a propósito** entre las dos salidas: `truth.jsonl` registra
+  **eventos**, y el caso sigue en él con sus portadores y su dosis, porque el
+  evento ocurrió y sigue activo; el VCF registra **secuencia**, y en ese sitio
+  la copia no difiere de la referencia. La excepción no admite un caso
+  perdido: el productor y el oráculo independiente solo la aceptan después de
+  comprobar que la copia portadora es la referencia alrededor del locus, de
+  una de dos maneras: una ventana que el VCF compuso y en la que esa copia
+  queda igual a la referencia contiene el locus entero, o ningún cambio de la
+  copia —hueco, punto de inserción, cambio de base o tracto sustituido, leídos
+  de sus piezas finales— toca el locus, extremos incluidos.
 - **REQ-VER-26.** El complemento debe conservar todo el detalle que se perdería
   en VCF y que sea necesario para reconstruir la secuencia o cambio real, el
   haplotipo y la fase, las coordenadas y el genotipo simulado. El manifiesto debe

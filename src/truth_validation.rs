@@ -534,6 +534,7 @@ pub fn validate_and_reconstruct_truth(
                 bases,
                 source_slices,
                 pieces,
+                event_loci,
             } = result;
             reconstructed.insert(copy.identity.clone(), bases);
             details.insert(
@@ -542,6 +543,7 @@ pub fn validate_and_reconstruct_truth(
                     source_slices,
                     pieces,
                     history: Cow::Borrowed(&copy.history),
+                    event_loci,
                 },
             );
         }
@@ -564,13 +566,19 @@ struct ReconstructedCopy {
     /// base para el contraste posterior de genotipos en modo streaming.
     source_slices: Vec<SourceSlice>,
     pieces: Vec<PieceLayout>,
+    event_loci: EventLoci,
 }
+
+/// Locus en coordenadas de la referencia de cada inserción y deleción del
+/// historial, por identificador de evento, tal como lo deja la réplica.
+type EventLoci = BTreeMap<String, (u64, u64)>;
 
 #[derive(Clone, Debug)]
 struct CopySummary<'truth> {
     source_slices: Vec<SourceSlice>,
     pieces: Vec<PieceLayout>,
     history: Cow<'truth, [TruthHistoryEvent]>,
+    event_loci: EventLoci,
 }
 
 impl<'truth> CopySummary<'truth> {
@@ -582,6 +590,7 @@ impl<'truth> CopySummary<'truth> {
             source_slices: value.source_slices,
             pieces: value.pieces,
             history,
+            event_loci: value.event_loci,
         }
     }
 }
@@ -675,12 +684,26 @@ impl ReplayPiece {
     }
 }
 
+/// Aplica un evento del historial a los fragmentos replicados.
+///
+/// Para una inserción o una deleción devuelve además su locus en coordenadas
+/// de la referencia, calculado aquí con una regla propia y no leído del caso:
+/// la inserción se ancla donde termina la última base de referencia que la
+/// precede; la deleción cubre de la primera a la última base de referencia
+/// que elimina, o es el ancla vacía de su inicio si solo elimina bases
+/// insertadas.
+///
+/// Los dos rechazos por no haber ninguna base de referencia delante son
+/// defensivos y **ninguna prueba los ejercita**: el productor nunca inserta ni
+/// elimina en el punto cero, y la réplica ya exige `point > 0` y `start > 0`,
+/// así que delante siempre queda al menos el primer fragmento de la copia.
+/// Solo los alcanzaría un documento cuya copia empezase por bases insertadas.
 fn replay_event(
     copy: &HaplotypeCopyRecord,
     reference: &Reference,
     pieces: &mut Vec<ReplayPiece>,
     event: &TruthHistoryEvent,
-) -> Result<(), TruthValidationError> {
+) -> Result<Option<(u64, u64)>, TruthValidationError> {
     match event {
         TruthHistoryEvent::Snp {
             event_id,
@@ -753,7 +776,7 @@ fn replay_event(
                     && existing.alternate == *alternate
                     && existing.provenance == *provenance
                 {
-                    return Ok(());
+                    return Ok(None);
                 }
                 return Err(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
@@ -781,6 +804,11 @@ fn replay_event(
             }
             split_replay_at(copy, pieces, *point)?;
             let index = piece_boundary_index(copy, pieces, *point)?;
+            let Some(anchor) = replay_reference_anchor(&pieces[..index]) else {
+                return Err(TruthValidationError::HistoryDoesNotReplay {
+                    identity: copy.identity.clone(),
+                });
+            };
             pieces.insert(
                 index,
                 ReplayPiece::Inserted {
@@ -788,6 +816,7 @@ fn replay_event(
                     provenance: provenance.clone(),
                 },
             );
+            return Ok(Some((anchor, anchor)));
         }
         TruthHistoryEvent::Deletion { start, end, .. } => {
             let length = replay_length(copy, pieces)?;
@@ -800,6 +829,8 @@ fn replay_event(
             split_replay_at(copy, pieces, *end)?;
             let mut cursor = 0_u64;
             let mut retained = Vec::with_capacity(pieces.len());
+            let mut anchor = None;
+            let mut removed: Option<(u64, u64)> = None;
             for piece in pieces.drain(..) {
                 let next = cursor
                     .checked_add(piece.len().ok_or_else(|| {
@@ -812,10 +843,28 @@ fn replay_event(
                     })?;
                 if next <= *start || cursor >= *end {
                     retained.push(piece);
+                } else {
+                    // `retained` contiene aquí justo lo que precede al
+                    // primer fragmento eliminado.
+                    if anchor.is_none() {
+                        anchor = Some(replay_reference_anchor(&retained));
+                    }
+                    if let Some((first, last)) = replay_reference_interval(&piece) {
+                        removed = Some(removed.map_or((first, last), |(low, high)| {
+                            (low.min(first), high.max(last))
+                        }));
+                    }
                 }
                 cursor = next;
             }
             *pieces = retained;
+            return match (removed, anchor.flatten()) {
+                (Some(span), _) => Ok(Some(span)),
+                (None, Some(anchor)) => Ok(Some((anchor, anchor))),
+                (None, None) => Err(TruthValidationError::HistoryDoesNotReplay {
+                    identity: copy.identity.clone(),
+                }),
+            };
         }
         // **El alelo de repetición se replica en coordenadas de referencia**,
         // no en las vigentes: sustituye el intervalo declarado del locus, que
@@ -895,7 +944,25 @@ fn replay_event(
             pieces.splice(index..=index, replacement);
         }
     }
-    Ok(())
+    Ok(None)
+}
+
+/// Fin de la última base de referencia entre `before`, o nada si no hay
+/// ninguna.
+fn replay_reference_anchor(before: &[ReplayPiece]) -> Option<u64> {
+    before
+        .iter()
+        .rev()
+        .find_map(|piece| replay_reference_interval(piece).map(|(_, end)| end))
+}
+
+fn replay_reference_interval(piece: &ReplayPiece) -> Option<(u64, u64)> {
+    match piece {
+        ReplayPiece::Source { source, .. } | ReplayPiece::RepeatAllele { source, .. } => {
+            Some((source.start, source.end))
+        }
+        ReplayPiece::Inserted { .. } => None,
+    }
 }
 
 fn replay_length(
@@ -1060,8 +1127,15 @@ fn reconstruct_copy(
     reference: &Reference,
 ) -> Result<ReconstructedCopy, TruthValidationError> {
     let mut pieces = initial_replay_from_segments(copy)?;
+    let mut event_loci = EventLoci::new();
     for event in &copy.history {
-        replay_event(copy, reference, &mut pieces, event)?;
+        if let Some(locus) = replay_event(copy, reference, &mut pieces, event)? {
+            // Con identificadores repetidos, el contraste de genotipos lee el
+            // primer evento del historial; el locus es el de ese mismo.
+            event_loci
+                .entry(history_event_id(event).to_owned())
+                .or_insert(locus);
+        }
     }
     let replayed = pieces.iter().map(ReplayPiece::current).collect::<Vec<_>>();
     if replayed != copy.current_pieces {
@@ -1069,7 +1143,18 @@ fn reconstruct_copy(
             identity: copy.identity.clone(),
         });
     }
-    materialize_replayed_copy(copy, reference, &pieces)
+    let mut result = materialize_replayed_copy(copy, reference, &pieces)?;
+    result.event_loci = event_loci;
+    Ok(result)
+}
+
+fn history_event_id(event: &TruthHistoryEvent) -> &str {
+    match event {
+        TruthHistoryEvent::Snp { event_id, .. }
+        | TruthHistoryEvent::Insertion { event_id, .. }
+        | TruthHistoryEvent::Deletion { event_id, .. }
+        | TruthHistoryEvent::RepeatAllele { event_id, .. } => event_id,
+    }
 }
 
 /// Materializa el estado heredado de los segmentos antes de los eventos en
@@ -1406,6 +1491,7 @@ fn materialize_replayed_copy(
         bases,
         source_slices,
         pieces: layouts,
+        event_loci: EventLoci::new(),
     })
 }
 
@@ -1638,6 +1724,12 @@ fn validate_indel_genotype(
         ));
     }
     let (alternate_index, alternate) = alternates[0];
+    let structural_event = match alternate {
+        TruthAllele::Insertion { event_id, .. } | TruthAllele::Deletion { event_id, .. } => {
+            Some(event_id.as_str())
+        }
+        _ => None,
+    };
     let mut expected = BTreeMap::new();
     for (identity, copy) in copies.iter().filter(|(identity, _)| {
         identity.reference_id == genotype.reference_id
@@ -1666,6 +1758,18 @@ fn validate_indel_genotype(
             }
             _ => false,
         };
+        // El locus del caso está en coordenadas de la referencia: tiene que
+        // ser el que la réplica de esta copia asigna a su evento, no las
+        // coordenadas vigentes con que se declaró.
+        if active
+            && let Some(event_id) = structural_event
+            && copy.event_loci.get(event_id) != Some(&(genotype.locus.start, genotype.locus.end))
+        {
+            return Err(mismatch(
+                genotype,
+                "el locus del caso no es el que su evento ocupa en la referencia",
+            ));
+        }
         expected.insert(identity.clone(), if active { alternate_index } else { 0 });
     }
     carriers_match(genotype, expected)

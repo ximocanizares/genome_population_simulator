@@ -284,7 +284,7 @@ precedencia.
 | Grupo de lectura | Único en toda la ejecución y único para el individuo dentro del evento | Evento, individuo, biblioteca, tanda y archivos asociados |
 | Instancia de lectura | Observación concreta con identidad técnica única dentro del evento; una pareja constituye una unidad y comparte el nombre exigido por el formato | Biblioteca actual, miembros cuando sea pareja, origen estable y mecanismo de copia o transferencia |
 | Conjunto | Local a un evento y una referencia de mapeo | Mismas muestras que los demás conjuntos del evento y resultados de esa referencia |
-| Caso de verdad | Local a un conjunto | Diferencia biológica simple o compuesta y uno o varios registros VCF |
+| Caso de verdad | Local a un conjunto | Diferencia biológica simple o compuesta y uno o varios registros VCF; ninguno si su efecto neto es nulo (excepción de REQ-VER-25 desde el 3 de octubre de 2026) |
 | Registro VCF | Local a un conjunto y enlazado a uno o varios casos de verdad originales | Referencia, representación estándar, lista canónica `GPS_CASE` y, si pierde detalle, el enlace complementario que se defina para ese caso real |
 | Entrada complementaria | Única para un caso que pierde detalle en VCF | Identificador local estable, registros enlazados y detalle completo no representable |
 

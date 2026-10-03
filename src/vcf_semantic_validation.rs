@@ -682,13 +682,21 @@ fn expected_records(
     }
     validate_oracle_phases(&paths)?;
     let mut spans = BTreeMap::<String, Vec<OracleSpan>>::new();
+    // Los cambios de cada copia, aunque no tenga ninguno: si ninguno toca el
+    // locus de un caso, la copia es la referencia ahí.
+    let mut copy_changes = BTreeMap::<CopyIdentity, Vec<OracleSpan>>::new();
     for (_, path) in &paths {
+        let path_changes = path.changes();
+        copy_changes.insert(path.identity.clone(), path_changes.clone());
         spans
             .entry(path.sequence_id.clone())
             .or_default()
-            .extend(path.changes());
+            .extend(path_changes);
     }
     let mut alleles = Vec::new();
+    // Ventanas en que cada copia queda igual a la referencia: las únicas en
+    // que un caso puede no aportar ALT (excepción de REQ-VER-25).
+    let mut unchanged = BTreeMap::<CopyIdentity, Vec<OracleSpan>>::new();
     for (sequence_id, changes) in spans {
         let sequence = reference
             .sequences()
@@ -730,12 +738,13 @@ fn expected_records(
         let tract_spans = realized.iter().map(|(span, _)| *span).collect::<Vec<_>>();
         let mut sequence_alleles = Vec::new();
         for path in &sequence_paths {
-            sequence_alleles.extend(normalize_oracle_components(
-                path,
-                sequence_bases,
-                &components,
-                &tract_spans,
-            )?);
+            let (path_alleles, path_unchanged) =
+                normalize_oracle_components(path, sequence_bases, &components, &tract_spans)?;
+            sequence_alleles.extend(path_alleles);
+            unchanged
+                .entry(path.identity.clone())
+                .or_default()
+                .extend(path_unchanged);
         }
         alleles.extend(oracle_fuse(
             sequence_alleles,
@@ -744,6 +753,7 @@ fn expected_records(
             &realized,
         )?);
     }
+    every_case_has_an_alternate_or_an_unchanged_copy(truth, &alleles, &unchanged, &copy_changes)?;
     let mut by_record = BTreeMap::<(String, u64), Vec<OracleAllele>>::new();
     for allele in alleles {
         by_record
@@ -887,6 +897,76 @@ fn expected_records(
             ))
         })
         .collect()
+}
+
+/// **Cada portador de un caso aporta un ALT, o su copia queda igual a la
+/// referencia alrededor del locus.**
+///
+/// Un portador cuyo caso no cae en el tramo de ningún alelo de su copia solo
+/// es legítimo si su efecto neto es nulo (excepción de REQ-VER-25), es decir,
+/// si su copia es la referencia alrededor del locus. Hay dos maneras de
+/// saberlo:
+///
+/// - en esa copia hay una ventana, de las que la normalización compuso, que
+///   contiene el locus entero y cuya secuencia es la de la referencia;
+/// - ningún cambio de la copia —hueco, punto de inserción, cambio de base o
+///   tracto sustituido, sacados de sus piezas finales— toca el locus, extremos
+///   incluidos. Es el caso de una inserción que una deleción posterior borra
+///   entera: la copia queda intacta, no produce ningún cambio y, si ninguna
+///   otra copia cambia ahí, tampoco se compone ninguna ventana.
+///
+/// Cualquier otro es un ALT perdido, y sin esta guarda el oráculo lo
+/// admitiría en silencio: los registros esperados se derivan de las copias,
+/// no de los casos.
+///
+/// *Quién caza antes.* Con una verdad válida no se alcanza de extremo a
+/// extremo: el juez de la verdad exige que el locus de cada caso sea el que su
+/// evento ocupa en la copia, y ese locus queda siempre dentro de un componente
+/// de cambios de la copia, que o produce un alelo cuyo tramo lo contiene o es
+/// una ventana igual a la referencia. La ejercita la prueba unitaria
+/// `a_case_without_an_alternate_needs_an_unchanged_copy`, que llama a
+/// [`expected_records`] con una verdad sin validar.
+fn every_case_has_an_alternate_or_an_unchanged_copy(
+    truth: &TruthDocument,
+    alleles: &[OracleAllele],
+    unchanged: &BTreeMap<CopyIdentity, Vec<OracleSpan>>,
+    copy_changes: &BTreeMap<CopyIdentity, Vec<OracleSpan>>,
+) -> Result<(), VcfSemanticValidationError> {
+    for genotype in truth.records.iter().filter_map(|record| match record {
+        TruthRecord::Genotype(genotype) => Some(genotype),
+        TruthRecord::HaplotypeCopy(_) => None,
+    }) {
+        let locus = &genotype.locus;
+        for carrier in genotype
+            .carriers
+            .iter()
+            .filter(|carrier| carrier.allele_index != 0)
+        {
+            let contributes = alleles.iter().any(|allele| {
+                allele.copy == carrier.copy
+                    && allele.sequence_id == locus.sequence_id
+                    && oracle_span_contains(allele.source, locus.start, locus.end)
+            });
+            let in_window = unchanged.get(&carrier.copy).is_some_and(|windows| {
+                windows
+                    .iter()
+                    .any(|window| window.start <= locus.start && locus.end <= window.end)
+            });
+            let untouched = copy_changes.get(&carrier.copy).is_some_and(|changes| {
+                !changes
+                    .iter()
+                    .any(|change| change.start <= locus.end && locus.start <= change.end)
+            });
+            let unchanged_copy =
+                carrier.copy.sequence_id == locus.sequence_id && (in_window || untouched);
+            if !contributes && !unchanged_copy {
+                return Err(oracle_error(
+                    "un caso sin ALT cuya copia no queda igual a la referencia",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Lo que una copia aporta a un registro: su ALT y el tramo que lo compuso.
@@ -1130,7 +1210,7 @@ fn normalize_oracle_components(
     reference: &[u8],
     initial: &[OracleSpan],
     tracts: &[OracleSpan],
-) -> Result<Vec<OracleAllele>, VcfSemanticValidationError> {
+) -> Result<(Vec<OracleAllele>, Vec<OracleSpan>), VcfSemanticValidationError> {
     let mut components = initial.to_vec();
     loop {
         let normalized = components
@@ -1203,15 +1283,20 @@ fn normalize_oracle_components(
             }
         }
         if merge.is_empty() {
-            return Ok(normalized
-                .into_iter()
-                .filter_map(|(span, allele)| {
-                    allele.map(|mut allele| {
+            // Un componente sin alelo es una ventana en que la copia queda
+            // igual a la referencia; se devuelve aparte.
+            let mut alleles = Vec::new();
+            let mut unchanged = Vec::new();
+            for (span, allele) in normalized {
+                match allele {
+                    Some(mut allele) => {
                         allele.source = span;
-                        allele
-                    })
-                })
-                .collect());
+                        alleles.push(allele);
+                    }
+                    None => unchanged.push(span),
+                }
+            }
+            return Ok((alleles, unchanged));
         }
         for (left, right) in merge {
             let envelope = OracleSpan {
@@ -3047,6 +3132,223 @@ mod tests {
             detail(&error),
             "una copia produce ALT incompatibles al mismo CHROM+POS"
         );
+    }
+
+    /// **Un caso sin ALT exige que su copia sea la referencia alrededor del
+    /// locus**, y el oráculo no puede rechazar uno que lo es.
+    ///
+    /// *Quién caza antes.* Con una verdad validada nadie llega aquí con un
+    /// caso cuya copia cambie en el locus sin ALT: el juez de la verdad fija
+    /// el locus de cada caso donde su evento cambió la copia (véase
+    /// [`super::every_case_has_an_alternate_or_an_unchanged_copy`]). Por eso
+    /// se llama a `expected_records` con una verdad sin validar.
+    ///
+    /// *Qué hace que pueda fallar:*
+    ///
+    /// - se admite un caso cuya copia es la referencia en la ventana que la
+    ///   copia vecina obliga a componer;
+    /// - se admite un caso en un sitio que **ninguna** copia cambia, de modo
+    ///   que no hay ventana: es la forma de una inserción que una deleción
+    ///   posterior borra entera. Hasta el 3 de octubre de 2026 el oráculo la
+    ///   rechazaba en falso con el motivo de esta guarda;
+    /// - se rechaza, con su motivo exacto, un caso cuyo locus no está en
+    ///   ningún alelo de su copia y que toca un cambio de ella.
+    #[test]
+    fn a_case_without_an_alternate_needs_an_unchanged_copy() {
+        use crate::truth_schema::{
+            AlleleCarrier, GenotypeCaseKind, GenotypeRecord, TruthAllele, TruthLocus,
+        };
+        let reference = tiny_reference(b"AAAAAAAA");
+        // La copia 0 lleva el cambio de base en 2; la copia 1 es la
+        // referencia, pero la ventana [2, 3) se compone para las dos.
+        let with_case = |case_id: &str, copy_index: u8, start: u64| {
+            let mut truth = fixture_truth();
+            truth.records.push(TruthRecord::Genotype(GenotypeRecord {
+                case_id: case_id.to_owned(),
+                reference_id: "REF_main".to_owned(),
+                individual_id: "IND_01".to_owned(),
+                case_kind: GenotypeCaseKind::Snp,
+                locus: TruthLocus {
+                    sequence_id: "chr1".to_owned(),
+                    start,
+                    end: start + 1,
+                },
+                alleles: vec![
+                    TruthAllele::Reference,
+                    TruthAllele::Snp {
+                        base: "G".to_owned(),
+                    },
+                ],
+                allele_dosages: vec![1, 1],
+                carriers: vec![
+                    AlleleCarrier {
+                        allele_index: usize::from(copy_index == 0),
+                        copy: identity(0),
+                    },
+                    AlleleCarrier {
+                        allele_index: usize::from(copy_index == 1),
+                        copy: identity(1),
+                    },
+                ],
+            }));
+            truth
+        };
+
+        for (copy_index, start, why) in [
+            (
+                1,
+                2,
+                "la copia 1 queda igual a la referencia en la ventana [2, 3)",
+            ),
+            (
+                0,
+                5,
+                "ninguna copia cambia en 5: sin ventana, la copia 0 es la referencia",
+            ),
+            (
+                1,
+                5,
+                "ninguna copia cambia en 5: sin ventana, la copia 1 es la referencia",
+            ),
+        ] {
+            let records = expected_records(&reference, &with_case("CASE_02", copy_index, start))
+                .unwrap_or_else(|error| panic!("{why}: {error:?}"));
+            assert!(
+                records
+                    .values()
+                    .all(|record| !record.gps_cases.contains(&"CASE_02".to_owned())),
+                "{why}: un caso sin ALT no entra en ningún GPS_CASE"
+            );
+        }
+
+        let error = expected_records(&reference, &with_case("CASE_03", 0, 3))
+            .expect_err("la copia 0 cambia en 2, que toca el locus [3, 4) por su extremo");
+        assert_eq!(
+            detail(&error),
+            "un caso sin ALT cuya copia no queda igual a la referencia"
+        );
+    }
+
+    /// **Las dos pruebas de que una copia es la referencia, una por una.**
+    ///
+    /// *Por qué se llama a la guarda directamente.* Ninguna verdad combina a
+    /// la vez un caso sin ALT y una copia que cambia junto a su locus (véase
+    /// la prueba anterior), y aquí hace falta fijar por separado cada
+    /// condición: la ventana tiene que ser **de la misma copia** y
+    /// **contener** el locus entero, no solo tocarlo; y un cambio de la copia
+    /// que toca el locus por cualquiera de sus extremos ya impide la segunda
+    /// prueba.
+    #[test]
+    fn each_proof_of_an_unchanged_copy_is_checked_on_its_own() {
+        use super::every_case_has_an_alternate_or_an_unchanged_copy;
+        use crate::truth_schema::{
+            AlleleCarrier, GenotypeCaseKind, GenotypeRecord, TruthAllele, TruthLocus,
+        };
+        let mut truth = fixture_truth();
+        truth
+            .records
+            .retain(|record| matches!(record, TruthRecord::HaplotypeCopy(_)));
+        // Un caso de la copia 0 con locus [3, 5).
+        truth.records.push(TruthRecord::Genotype(GenotypeRecord {
+            case_id: "CASE_X".to_owned(),
+            reference_id: "REF_main".to_owned(),
+            individual_id: "IND_01".to_owned(),
+            case_kind: GenotypeCaseKind::Snp,
+            locus: TruthLocus {
+                sequence_id: "chr1".to_owned(),
+                start: 3,
+                end: 5,
+            },
+            alleles: vec![
+                TruthAllele::Reference,
+                TruthAllele::Snp {
+                    base: "G".to_owned(),
+                },
+            ],
+            allele_dosages: vec![1, 1],
+            carriers: vec![
+                AlleleCarrier {
+                    allele_index: 1,
+                    copy: identity(0),
+                },
+                AlleleCarrier {
+                    allele_index: 0,
+                    copy: identity(1),
+                },
+            ],
+        }));
+        let span = |start, end| OracleSpan { start, end };
+        let check = |windows: Vec<(u8, OracleSpan)>, changes: Vec<(u8, Vec<OracleSpan>)>| {
+            let mut unchanged = BTreeMap::new();
+            for (copy, window) in windows {
+                unchanged
+                    .entry(identity(copy))
+                    .or_insert_with(Vec::new)
+                    .push(window);
+            }
+            let copy_changes = changes
+                .into_iter()
+                .map(|(copy, spans)| (identity(copy), spans))
+                .collect::<BTreeMap<_, _>>();
+            every_case_has_an_alternate_or_an_unchanged_copy(&truth, &[], &unchanged, &copy_changes)
+        };
+        // La copia 0 cambia en 4, dentro del locus, para que solo una ventana
+        // pueda excusar el caso.
+        let touching = vec![(0, vec![span(4, 5)])];
+        check(vec![(0, span(3, 5))], touching.clone())
+            .expect("control: una ventana de la copia 0 que contiene el locus");
+        check(vec![], vec![(0, vec![span(6, 7), span(1, 2)])])
+            .expect("control: ningún cambio de la copia 0 toca [3, 5]");
+        for (windows, changes, why) in [
+            (
+                vec![],
+                touching.clone(),
+                "sin ventana y con un cambio dentro",
+            ),
+            (
+                vec![(1, span(3, 5))],
+                touching.clone(),
+                "con la ventana de otra copia",
+            ),
+            (
+                vec![(0, span(3, 4))],
+                touching.clone(),
+                "con una ventana que no cubre el final",
+            ),
+            (
+                vec![(0, span(4, 6))],
+                touching.clone(),
+                "con una ventana que no cubre el inicio",
+            ),
+            (
+                vec![(0, span(1, 3))],
+                touching.clone(),
+                "con una ventana que solo toca el inicio",
+            ),
+            (
+                vec![],
+                vec![(0, vec![span(5, 6)])],
+                "con un cambio que toca el extremo final",
+            ),
+            (
+                vec![],
+                vec![(0, vec![span(2, 3)])],
+                "con un cambio que toca el extremo inicial",
+            ),
+            (
+                vec![],
+                vec![(0, vec![span(3, 3)])],
+                "con una inserción en el extremo inicial",
+            ),
+            (vec![], vec![], "con una copia cuyos cambios no se conocen"),
+        ] {
+            let error = check(windows, changes).expect_err(why);
+            assert_eq!(
+                detail(&error),
+                "un caso sin ALT cuya copia no queda igual a la referencia",
+                "{why}"
+            );
+        }
     }
 
     #[test]

@@ -79,3 +79,93 @@ si y solo si:
 La cota de los `piece_links` —que no se salgan de la copia— la implica esa
 igualdad con la reconstrucción; antes se comprobaba además contra la longitud
 de `final_haplotype_bases`, que ya no existe.
+
+## El locus de un caso *indel*
+
+**Desde el 2 de octubre de 2026** el `locus` de un caso `indel` se publica en
+coordenadas de la **referencia**, como manda `coordinate_convention`, y no en
+las coordenadas **vigentes** de la copia con que se declaró el evento. Las dos
+coinciden mientras ningún *indel* anterior de la misma copia las desplace; en
+cuanto uno lo hace, dejan de coincidir. Hasta esa fecha el locus copiaba las
+vigentes: una inserción `AAT` declarada en el punto vigente 175, detrás de una
+inserción de dos bases y una deleción de una, quedaba en la base 173 de la
+referencia y su caso decía 175, de modo que el VCF no encontraba el caso de
+ese ALT y la ejecución abortaba. No cambia la versión: el esquema no fijaba
+esa igualdad, la imponía el código, y lo que se publicaba contradecía el
+convenio declarado en la cabecera.
+
+El evento fuente del alelo (`source_event`), los `start`/`end` de la deleción
+y el historial de la copia **siguen en coordenadas vigentes**: son los datos
+con que el evento se aplicó y con los que se replica.
+
+La regla de traducción es una sola y es la misma con la que el VCF ancla un
+fragmento insertado:
+
+- **Inserción.** El locus es el punto vacío `[a, a)`, donde `a` es el final de
+  la última base de referencia que precede al punto de inserción en la copia
+  tal como estaba al aplicarla. Una inserción dentro de otra hereda así el
+  ancla de la exterior, y una inserción justo en la junta que deja una
+  deleción se ancla a la izquierda de la junta, no a la derecha.
+- **Deleción.** El locus va de la primera a la última base de referencia que
+  la deleción elimina. Si solo elimina bases insertadas, no ocupa ninguna base
+  de referencia y su locus es el punto vacío del ancla de su inicio.
+
+Dos consecuencias de la regla que un consumidor tiene que conocer:
+
+- **El locus de una deleción puede incluir bases que ya había borrado un
+  evento anterior.** Es el intervalo entre la primera y la última base de
+  referencia que elimina, y entre ellas puede haber un hueco previo: una
+  deleción que se lleva las bases de los dos lados de una deleción anterior
+  de cinco bases tiene un locus que abarca también esas cinco.
+- **El locus de una inserción no tiene por qué caer dentro del `REF` de su
+  registro VCF.** El VCF normaliza cada alelo —lo alinea a la izquierda y
+  recorta lo común—, de modo que el locus de una inserción puede quedar en el
+  borde derecho del `REF` o fuera de él, por ejemplo cuando una deleción
+  posterior más a la izquierda desplaza el registro. Para asociar un caso con
+  su registro hay que usar `GPS_CASE`, no `POS` ni `REF`.
+
+La estructura de una línea solo puede comprobar la forma —el locus de una
+inserción no tiene anchura—. La igualdad exacta la exige el validador
+semántico: al replicar el historial de cada copia calcula, con su propia
+implementación de la regla, el locus de cada inserción y deleción, y rechaza
+un caso cuya copia portadora asigne a su evento un locus distinto del
+publicado.
+
+## Un caso sin registro VCF
+
+**Desde el 3 de octubre de 2026** un caso de `truth.jsonl` puede no aportar
+ningún ALT al VCF. Ocurre cuando cada copia portadora es igual a la
+referencia alrededor del locus: una inserción y una deleción de la misma
+copia que se anulan, una inserción que una deleción posterior borra entera, o
+un alelo de repetición más una deleción del flanco que juntos reproducen la
+referencia. La verdad y el VCF difieren ahí **a propósito**:
+
+- la verdad registra **eventos**: el caso sigue en el fichero con sus
+  portadores y su dosis, porque la copia es portadora del alternativo si y
+  solo si su historial contiene el evento, y lo contiene;
+- el VCF registra **secuencia**: en ese sitio la copia es igual a la
+  referencia y no hay ALT que publicar por ese caso.
+
+Lo habitual es que entonces el caso no aparezca en ningún registro. **Sí
+aparece** en el `GPS_CASE` de un registro cuando su copia lleva en él otro ALT
+cuyo tramo compuesto —o fundido con el de otras copias— contiene el locus del
+caso: la relación ALT↔casos se establece por tramo, y el caso queda listado
+con ese ALT aunque su efecto propio sea nulo. Un ejemplo: una copia con una
+inserción y una deleción que se anulan y, unas bases más allá, otra deleción,
+todo dentro de un registro fundido con la deleción grande de otra copia; los
+tres casos de esa copia figuran en el `GPS_CASE` del registro.
+
+No cambia la versión ni ningún campo: nada de lo que se escribe es distinto,
+solo deja de ser obligatorio que cada caso tenga un registro (excepción de
+REQ-VER-25 y nota de DTC-065). El agrupador del productor y el oráculo VCF
+independiente aceptan un caso sin ALT **solo** si comprueban que su copia
+portadora es la referencia alrededor del locus, de una de dos maneras:
+
+- una ventana que el VCF compuso, y en la que esa copia queda igual a la
+  referencia, contiene el locus entero;
+- ningún cambio de la copia —hueco, punto de inserción, cambio de base o
+  tracto sustituido, leídos de sus piezas finales— toca el locus, extremos
+  incluidos. Es la que cubre una inserción borrada entera en un sitio que
+  ninguna otra copia cambia: no queda cambio alguno y no se compone ventana.
+
+Un caso cuya copia difiere y no tiene ALT sigue siendo un defecto interno.

@@ -316,6 +316,38 @@ pub fn project_normalized_alleles(
     })
 }
 
+/// Ventana de referencia en la que una copia **queda igual a la referencia**
+/// aunque alguna copia de la secuencia tenga cambios en ella.
+///
+/// La proyección la descarta porque no hay ALT que publicar para esa copia.
+/// El agrupador la necesita para distinguir un caso de efecto neto nulo —sus
+/// eventos se anulan en la copia, el caso existe en la verdad y no aporta ALT
+/// (excepción de REQ-VER-25)— de un caso cuyo ALT se ha perdido de verdad.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CopyReferenceWindow<'truth> {
+    pub(crate) copy: &'truth CopyIdentity,
+    pub(crate) start: u64,
+    pub(crate) end: u64,
+}
+
+/// Lo que la proyección entrega al agrupador: los alelos y las dos pruebas
+/// de que una copia es igual a la referencia en un sitio.
+#[derive(Clone, Debug)]
+pub(crate) struct ProjectedView<'truth> {
+    pub(crate) alleles: Vec<ProjectedAllele<'truth>>,
+    /// Ventanas compuestas en que la copia quedó igual a la referencia.
+    pub(crate) reference_windows: Vec<CopyReferenceWindow<'truth>>,
+    /// Los cambios de **cada** copia respecto de la referencia, sacados de
+    /// sus piezas finales: huecos, puntos de inserción, cambios de base y
+    /// tractos sustituidos. Una copia sin cambios figura con la lista vacía.
+    ///
+    /// Si ninguno toca un locus, extremos incluidos, la copia es la
+    /// referencia ahí aunque ninguna copia haya hecho componer una ventana:
+    /// una inserción borrada después por una deleción que solo quita bases
+    /// insertadas deja la copia intacta y no produce cambio alguno.
+    pub(crate) copy_changes: BTreeMap<&'truth CopyIdentity, Vec<(u64, u64)>>,
+}
+
 /// Proyecta una verdad cuya estructura y semántica ya se validaron completa y
 /// secuencialmente. Solo la publicación VCF puede encadenar esta variante con
 /// el agrupador para no reconstruir todas las copias varias veces.
@@ -323,6 +355,15 @@ pub(crate) fn project_projected_alleles_from_validated_truth<'truth>(
     truth: ValidatedTruthForVcf<'truth>,
     reference: &Reference,
 ) -> Result<Vec<ProjectedAllele<'truth>>, VcfProjectionError> {
+    project_view_from_validated_truth(truth, reference).map(|view| view.alleles)
+}
+
+/// Como [`project_projected_alleles_from_validated_truth`], conservando
+/// además las ventanas en que cada copia quedó igual a la referencia.
+pub(crate) fn project_view_from_validated_truth<'truth>(
+    truth: ValidatedTruthForVcf<'truth>,
+    reference: &Reference,
+) -> Result<ProjectedView<'truth>, VcfProjectionError> {
     truth
         .validate_reference(reference)
         .map_err(VcfProjectionError::Truth)?;
@@ -352,14 +393,24 @@ pub(crate) fn project_projected_alleles_from_validated_truth<'truth>(
     }
 
     let mut changes = BTreeMap::<String, Vec<ReferenceSpan>>::new();
+    let mut copy_changes = BTreeMap::new();
     for path in &paths {
+        let path_changes = path.changes();
+        copy_changes.insert(
+            path.identity,
+            path_changes
+                .iter()
+                .map(|span| (span.start, span.end))
+                .collect::<Vec<_>>(),
+        );
         changes
             .entry(path.sequence_id.to_owned())
             .or_default()
-            .extend(path.changes());
+            .extend(path_changes);
     }
 
     let mut projected = Vec::new();
+    let mut reference_windows = Vec::new();
     for (sequence_id, spans) in changes {
         let (_, sequence) = catalog.get(sequence_id.as_str()).ok_or_else(|| {
             VcfProjectionError::MissingReferenceSequence {
@@ -378,12 +429,14 @@ pub(crate) fn project_projected_alleles_from_validated_truth<'truth>(
             .collect::<Vec<_>>();
         let mut alleles = Vec::new();
         for path in &sequence_paths {
-            alleles.extend(normalize_path_components(
-                path,
-                sequence,
-                &components,
-                &realized_tracts,
-            )?);
+            let (path_alleles, unchanged) =
+                normalize_path_components(path, sequence, &components, &realized_tracts)?;
+            alleles.extend(path_alleles);
+            reference_windows.extend(unchanged.into_iter().map(|span| CopyReferenceWindow {
+                copy: path.identity,
+                start: span.start,
+                end: span.end,
+            }));
         }
         // El identificador de cada locus, por su intervalo, para que un
         // rechazo lo nombre: la verdad lo publica en sus casos de repetición.
@@ -428,7 +481,11 @@ pub(crate) fn project_projected_alleles_from_validated_truth<'truth>(
             })
             .then_with(|| left.copy.cmp(right.copy))
     });
-    Ok(projected)
+    Ok(ProjectedView {
+        alleles: projected,
+        reference_windows,
+        copy_changes,
+    })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -780,7 +837,7 @@ fn normalize_path_components<'truth>(
     sequence: &ReferenceSequence,
     initial: &[ReferenceSpan],
     realized_tracts: &[ReferenceSpan],
-) -> Result<Vec<ProjectedAllele<'truth>>, VcfProjectionError> {
+) -> Result<(Vec<ProjectedAllele<'truth>>, Vec<ReferenceSpan>), VcfProjectionError> {
     let mut components = initial.to_vec();
     loop {
         let normalized = components
@@ -802,16 +859,21 @@ fn normalize_path_components<'truth>(
         collisions.extend(normalization_traversal_closures(&normalized, &components)?);
         collisions.extend(changed_component_collisions(&normalized)?);
         if collisions.is_empty() {
-            return Ok(normalized
-                .into_iter()
-                .filter_map(|(span, allele)| {
-                    allele.map(|mut allele| {
+            // Un componente sin alelo es una ventana en la que esta copia queda
+            // igual a la referencia: se devuelve aparte, no se pierde.
+            let mut alleles = Vec::new();
+            let mut unchanged = Vec::new();
+            for (span, allele) in normalized {
+                match allele {
+                    Some(mut allele) => {
                         allele.source_start = span.start;
                         allele.source_end = span.end;
-                        allele
-                    })
-                })
-                .collect());
+                        alleles.push(allele);
+                    }
+                    None => unchanged.push(span),
+                }
+            }
+            return Ok((alleles, unchanged));
         }
         components = merge_normalized_collisions(components, &collisions);
     }
