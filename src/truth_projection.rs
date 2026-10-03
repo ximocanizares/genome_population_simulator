@@ -38,7 +38,8 @@ use crate::truth_schema::{
     TruthSourceKind, TruthSourceRef, TruthStructuralEvent, records_carry_repeat_alleles,
 };
 use crate::truth_validation::{
-    TruthValidationError, reconstructed_copy_sha256, reference_content_sha256,
+    InspectedValidationError, TruthValidationError, reference_content_sha256,
+    validate_truth_with_copy_inspection,
 };
 
 pub const TRUTH_ARTIFACT_ID: &str = "truth-jsonl";
@@ -89,6 +90,12 @@ pub enum TruthProjectionError {
     },
     /// Hay una copia en el estado interno sin registro publicado, o al revés.
     CopySetMismatch,
+    /// El juez semántico de la verdad rechaza el documento proyectado —un caso
+    /// genotípico (locus, alelos, portadores o dosis) no concuerda con las
+    /// copias reconstruidas— **o** su cabecera no concuerda con la referencia
+    /// (identificador o huella; también si sus bases no se conservaron). Es un
+    /// defecto interno del productor.
+    GenotypeJudgement(Box<TruthValidationError>),
     DuplicateCaseId(String),
     /// El individuo no tiene copias de la secuencia que un locus nombra.
     /// Es imposible con una referencia coherente y se declara en vez de
@@ -208,32 +215,78 @@ pub fn project_truth(
         },
         records,
     };
+    #[cfg(test)]
+    let document = {
+        let mut document = document;
+        test_tamper::apply(&mut document);
+        document
+    };
     document
         .validate_structure()
         .map_err(TruthProjectionError::Contract)?;
-    verify_copies_against_independent_reconstruction(
-        &document,
-        input.reference,
-        input.individuals,
-    )?;
+    verify_publication_against_simulation(&document, input.reference, input.individuals)?;
     Ok(document)
 }
 
-/// **Cada copia publicada es la copia simulada.**
+/// Gancho de prueba: altera el documento proyectado justo antes de que se
+/// verifique, para ejercitar la verificación **a través de `project_truth`**
+/// —y de la ejecución completa— con un productor defectuoso. Solo existe en
+/// compilación de pruebas y es local a cada hilo.
+#[cfg(test)]
+pub(crate) mod test_tamper {
+    use super::TruthDocument;
+    use std::cell::RefCell;
+
+    type Tamper = Box<dyn Fn(&mut TruthDocument)>;
+
+    thread_local! {
+        static TAMPER: RefCell<Option<Tamper>> = const { RefCell::new(None) };
+    }
+
+    /// Instala la alteración hasta que el guarda devuelto se suelte.
+    pub(crate) fn install(tamper: impl Fn(&mut TruthDocument) + 'static) -> Guard {
+        TAMPER.with(|slot| *slot.borrow_mut() = Some(Box::new(tamper)));
+        Guard
+    }
+
+    pub(crate) struct Guard;
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            TAMPER.with(|slot| *slot.borrow_mut() = None);
+        }
+    }
+
+    pub(super) fn apply(document: &mut TruthDocument) {
+        TAMPER.with(|slot| {
+            if let Some(tamper) = slot.borrow().as_ref() {
+                tamper(document);
+            }
+        });
+    }
+}
+
+/// **Lo publicado describe lo simulado, y sus casos genotípicos concuerdan con
+/// sus copias.**
 ///
-/// Compara, para **todas** las copias —lleven o no *indels*—, la huella
-/// SHA-256 de la secuencia que el productor materializa desde su estado
-/// interno con la de la que el validador independiente reconstruye desde el
-/// registro publicado. No escribe nada en la verdad: es un contraste en
-/// memoria, una copia cada vez, que se libera antes de pasar a la siguiente.
+/// Hace dos contrastes con **una sola** reconstrucción por copia:
 ///
-/// Hasta el 30/09/2026 este contraste lo hacía, de rebote y solo para las
-/// copias con *indels*, la secuencia final que cada alelo estructural copiaba
-/// en `final_haplotype_bases`. Sin él, una proyección que publicara bases
-/// distintas de las simuladas, pero coherentes en todos sus registros, pasaría
-/// todas las demás comprobaciones: las lecturas saldrían de una secuencia y la
-/// verdad y el VCF describirían otra.
-pub(crate) fn verify_copies_against_independent_reconstruction(
+/// 1. Para **todas** las copias —lleven o no *indels*—, compara la huella
+///    SHA-256 de la secuencia que el productor materializa desde su estado
+///    interno con la de la que el validador independiente reconstruye desde el
+///    registro publicado.
+/// 2. Ejecuta el juez semántico de la verdad sobre el documento ya proyectado:
+///    locus, alelos, portadores y dosis de cada caso genotípico contra las
+///    copias reconstruidas.
+///
+/// Hasta el 30/09/2026 el primero lo hacía, de rebote y solo para las copias
+/// con *indels*, la secuencia final que cada alelo estructural copiaba en
+/// `final_haplotype_bases`; hasta el 3/10/2026 el segundo solo corría dentro de
+/// la publicación del VCF, que está apagado por omisión, y así una ejecución
+/// sin VCF publicó un locus de *indel* falso sin error (DT-019). No escribe
+/// nada: es un contraste en memoria, una copia cada vez, que se libera antes de
+/// pasar a la siguiente.
+pub(crate) fn verify_publication_against_simulation(
     document: &TruthDocument,
     reference: &Reference,
     individuals: &InitialIndividualsMaterialization,
@@ -246,20 +299,11 @@ pub(crate) fn verify_copies_against_independent_reconstruction(
         .map(|copy| (copy_identity(copy), copy))
         .collect::<BTreeMap<_, _>>();
     let mut published = 0_usize;
-    for record in &document.records {
-        let TruthRecord::HaplotypeCopy(record) = record else {
-            continue;
-        };
+    validate_truth_with_copy_inspection(document, reference, |record, reconstructed| {
         published += 1;
         let copy = simulated
             .get(&record.identity)
             .ok_or(TruthProjectionError::CopySetMismatch)?;
-        let reconstructed = reconstructed_copy_sha256(record, reference).map_err(|error| {
-            TruthProjectionError::IndependentReconstruction {
-                identity: record.identity.clone(),
-                error: Box::new(error),
-            }
-        })?;
         let materialized: [u8; 32] = Sha256::digest(
             materialize_copy(copy, reference).map_err(TruthProjectionError::Materialization)?,
         )
@@ -269,7 +313,17 @@ pub(crate) fn verify_copies_against_independent_reconstruction(
                 identity: record.identity.clone(),
             });
         }
-    }
+        Ok(())
+    })
+    .map_err(|error| match error {
+        InspectedValidationError::CopyReconstruction { identity, error } => {
+            TruthProjectionError::IndependentReconstruction { identity, error }
+        }
+        InspectedValidationError::Semantics(error) => {
+            TruthProjectionError::GenotypeJudgement(error)
+        }
+        InspectedValidationError::Inspection(error) => error,
+    })?;
     if published != simulated.len() {
         return Err(TruthProjectionError::CopySetMismatch);
     }
@@ -2043,10 +2097,10 @@ genotype_model = "hwe""#
     ///   contraste no se limita a las copias con *indels*.
     ///
     /// Lo que esta prueba **no** puede ver es que `project_truth` deje de
-    /// llamar al contraste: sin una proyección defectuosa no hay discrepancia
-    /// que cazar, y la batería no tiene ninguna. Quitar la llamada solo se nota
-    /// junto con un defecto de la proyección; el de la revisión lo caza, con o
-    /// sin contraste, `tests/truth_matches_simulation.rs`.
+    /// llamar a la verificación: sin una proyección defectuosa no hay
+    /// discrepancia que cazar. Eso lo cazan, a través del gancho
+    /// `test_tamper` y de la ejecución completa, las pruebas
+    /// `shifted_case_locus_*` y `changed_case_dosage_*` de `execution.rs`.
     #[test]
     fn publication_rejects_a_truth_that_does_not_describe_the_simulated_copies() {
         let reference = reference();
@@ -2083,7 +2137,7 @@ genotype_model = "hwe""#
         .expect("the true projection agrees with its own state");
 
         assert!(matches!(
-            verify_copies_against_independent_reconstruction(&document, &reference, &other_state),
+            verify_publication_against_simulation(&document, &reference, &other_state),
             Err(TruthProjectionError::ReconstructionMismatch { identity }) if identity.copy_index == 0
         ));
 
@@ -2121,7 +2175,7 @@ genotype_model = "hwe""#
         }
         assert_eq!(changed, 2, "the SNP of copy 1 must change in both views");
         assert!(matches!(
-            verify_copies_against_independent_reconstruction(&tampered, &reference, &state),
+            verify_publication_against_simulation(&tampered, &reference, &state),
             Err(TruthProjectionError::ReconstructionMismatch { identity }) if identity.copy_index == 1
         ));
     }

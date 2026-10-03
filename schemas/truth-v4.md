@@ -47,6 +47,12 @@ al publicar, el productor compara, para **cada** copia y no solo las que llevan
 del validador independiente, y la ejecución falla con un defecto interno si
 difieren. No se escribe nada en `truth.jsonl`.
 
+Desde el 3 de octubre de 2026, en esa misma pasada el productor ejecuta además
+el juez semántico de los casos genotípicos (locus, alelos, portadores y dosis)
+sobre el documento ya proyectado, **siempre al publicar, con VCF o sin él**, y
+falla con un defecto interno si lo rechaza. Antes solo corría dentro de la
+publicación del VCF, que está apagado por omisión (DT-019).
+
 Todo lo demás es exactamente lo que describe `truth-v1.md` para la versión
 `"1"` —cabecera, copias, fragmentos vigentes, historial, procedencias, orden
 canónico y relaciones del conjunto— y, para la `"5"`, lo que añadió la `"3"`:

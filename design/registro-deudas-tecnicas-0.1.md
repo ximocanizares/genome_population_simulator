@@ -46,7 +46,9 @@ documenta mejor.
 | DT-016 | El tracto de un microsatélite compuesto no se coloca en una referencia simulada | Media | 01/10/2026 | **Cerrada (01/10/2026)** |
 | DT-017 | El juez de los recursos publicados cita el esquema efectivo v4 en sus rechazos aunque el documento sea v6 | Baja | 01/10/2026 | Abierta, corregida para la regeneración de la referencia simulada |
 | DT-018 | Una copia con cambios de base aplicados fuera de orden de posición aborta la ejecución al reconstruir la verdad | **Grave** | 02/10/2026; redefinida el 03/10/2026 | **Cerrada (03/10/2026)** |
-| DT-019 | Sin VCF, nadie juzga los genotipos de la verdad al publicar | **Grave** | 02/10/2026 | Abierta |
+| DT-019 | Sin VCF, nadie juzga los genotipos de la verdad al publicar | **Grave** | 02/10/2026 | **Cerrada (03/10/2026)** |
+| DT-020 | Sin VCF, quitar un caso indel o de repetición de la verdad se publica | Media | 03/10/2026 | Abierta |
+| DT-021 | El juez de la verdad no ancla los casos todo-REF, deja pasar un SNP quitado y clasifica mal una corrupción estructural | Media | 03/10/2026 | Abierta |
 
 ---
 
@@ -1145,6 +1147,8 @@ REQ-VER-25).
 
 ## DT-019. Sin VCF, nadie juzga los genotipos de la verdad al publicar
 
+**Estado: cerrada el 3 de octubre de 2026.**
+
 **Gravedad: grave.** No es un defecto que publique algo falso por sí mismo,
 sino la falta de la red que lo pararía, y falta **en la configuración por
 omisión**: el VCF solo se escribe si se pide `[vcf_output]`, y sin él los casos
@@ -1174,12 +1178,111 @@ las inserciones a la derecha (M6), **las ejecuciones sin VCF publicaron igual**;
 solo una prueba que compara lo publicado con una tabla escrita a mano
 (`tests/indel_case_reference_locus.rs`) lo vio.
 
+### Cómo se cerró
+
+Al publicar, el productor ejecuta ahora el juez semántico de la verdad sobre el
+documento ya proyectado, **con o sin VCF** y antes de escribirlo. Si rechaza,
+la ejecución falla con un defecto interno (`GPS-INTERNAL-001`) que lleva el
+motivo del juez.
+
+- `src/truth_validation.rs`: nueva `validate_truth_with_copy_inspection`, **la
+  única implementación del juez**: `validate_truth_for_vcf` es ahora esa misma
+  función con una inspección vacía, de modo que no pueden divergir. Entrega a
+  quien la llama la huella de cada copia reconstruida y suelta las bases
+  **antes** de la inspección. Se retiró `reconstructed_copy_sha256`, que dejó de
+  usarse.
+- `src/truth_projection.rs`: el contraste de huellas
+  (`verify_copies_against_independent_reconstruction`) pasó a llamarse
+  `verify_publication_against_simulation` y hace **los dos contrastes con una
+  sola reconstrucción por copia**: la huella de cada copia y, a continuación,
+  los casos genotípicos. Hay una variante de error nueva,
+  `GenotypeJudgement`. Y un gancho solo de pruebas (`test_tamper`) que altera
+  el documento justo antes de verificarlo.
+- `src/execution.rs`: esa variante se traduce a defecto interno, como ya se
+  hacía con las de las copias.
+
+Con VCF, el juez ya se ejecutaba varias veces dentro de la publicación del
+VCF (proyección y agrupación lo repiten a propósito, para que cada frontera
+pública no acepte un documento sin reconstruir las copias). Eso no se tocó. La
+ejecución nueva, en la publicación de la verdad, es **una más** también con
+VCF: no se pudo dejar una sola porque esas fronteras reciben solo el documento
+y no tienen cómo saber que otro ya lo juzgó. A cambio, la comparación de
+huellas y el juez comparten reconstrucción, de modo que la verdad no reconstruye
+cada copia dos veces.
+
+### Coste medido
+
+Binario release, genoma simulado de 40 Mb, 4 individuos diploides, 1000 loci
+de matriz y 30 inserciones directas, sin VCF y sin lecturas; tres ejecuciones
+de cada binario, alternadas. Tiempo: antes 48,6 / 43,7 / 45,2 s, después
+44,7 / 51,9 / 44,1 s (medianas 45,2 y 44,7 s: dentro del ruido). Las verdades
+son idénticas byte a byte. Con 20 000 loci de matriz el escenario tarda más de
+diez minutos; no se midió con ambos binarios.
+
+**Memoria.** La primera versión de la corrección tenía una regresión que esta
+medición de 40 Mb no veía: con un cromosoma de 100 Mb y un haploide, el máximo
+subía de 204 MB a 300 MB, con VCF y sin él, porque la inspección materializaba
+la copia del productor mientras las bases reconstruidas seguían vivas. Se
+corrigió calculando la huella y soltando las bases antes de la inspección:
+medido con `/usr/bin/time -v` sobre ese escenario, 204,5 MB antes, 300,6 MB con
+la primera versión y 204,5 MB con la final, con tiempos de 11,4 / 11,4 / 11,6 s.
+
+### Pruebas
+
+En `src/execution.rs`, de extremo a extremo con el gancho de alteración:
+`shifted_case_locus_without_vcf_is_rejected_as_internal_defect` (locus
+desplazado sin VCF), `changed_case_dosage_without_vcf_is_rejected_as_internal_defect`
+(dosis y portadores intercambiados de forma coherente: la estructura del
+documento sigue siendo válida, así que solo el juez lo ve) y
+`shifted_case_locus_with_vcf_is_rejected_before_any_vcf` (con VCF). Cada una
+exige que el rechazo sea el del juez (`GenotypeJudgement`). Se verificaron
+mutando sobre una copia del árbol: quitar el juez, ejecutarlo ignorando su
+error, ejecutarlo condicionado a algo externo (el equivalente de «solo con
+VCF» en este diseño, donde el juez es incondicional) y quitar la llamada a la
+verificación en `project_truth` matan las tres pruebas.
+
+Una exploración de 4000 escenarios al azar sin VCF (dos generadores de 2000) y
+600 con VCF dio 0 escenarios que antes publicaran y ahora aborten, y verdad y
+VCF idénticos byte a byte frente a la base `8d9da4d`.
+
+### Lo que esta corrección no cubre
+
+Sigue habiendo cosas que el juez no ve y que no son de esta deuda: que **falte**
+un caso entero (DT-020) y tres limitaciones anteriores del juez (DT-021).
+
+## DT-020. Sin VCF, quitar un caso indel o de repetición de la verdad se publica
+
+**Gravedad: media.** Aparece al revisar DT-019. El juez semántico contrasta cada
+caso **que está** con las copias, pero no exige que estén **todos**.
+
+### Qué pasa
+
+Si un productor defectuoso omite un caso indel o de repetición (y baja el
+recuento de casos de la cabecera para que el contrato estructural no proteste),
+una ejecución sin VCF publica la verdad sin el caso. Con VCF, el agrupador lo
+rechaza con `AlternateWithoutCase` (`src/vcf_grouping.rs`), porque encuentra un
+alelo alternativo en las copias sin caso que lo explique.
+
 ### Qué haría falta para cerrarla
 
-Ejecutar el juez semántico de la verdad sobre el documento ya proyectado
-también cuando no se pide VCF, antes de escribirlo, y fallar con un defecto
-interno si rechaza. La reconstrucción de cada copia ya se hace para la
-comparación de huellas, de modo que el coste añadido es contrastar los casos,
-no reconstruir de nuevo; conviene medirlo con un genoma grande antes de darlo
-por bueno. Y una prueba que publique sin VCF con un productor alterado y exija
-el rechazo. Queda para un encargo aparte.
+No basta con exigir un caso por evento: en un evento insertado y borrado después
+(*inserted-then-deleted*) el primero no tiene caso, a propósito. Cerrarla exige
+una comprobación de **completitud basada en la secuencia**, como la del
+agrupador: toda diferencia de una copia con la referencia debe quedar explicada
+por algún caso, salvo las ventanas en que la copia vuelve a ser la referencia.
+No se ha corregido.
+
+## DT-021. Tres limitaciones del juez de la verdad anteriores a DT-019
+
+**Gravedad: media.** Ya estaban antes de DT-019 y valen también con VCF.
+
+- Un caso todo-REF (dosis `[2,0]`) no está anclado a ninguna posición: se puede
+  desplazar, fabricar o duplicar con otro identificador de caso y se publica.
+- Quitar un caso SNP de dosis `[0,4]` se publica, incluso con VCF, si el caso de
+  otro individuo cubre ese mismo alelo alternativo.
+- Una corrupción estructural del productor (un portador de otro individuo, un
+  identificador fuera de léxico) sale como `GPS-FMT-006`, error de formato, y no
+  como defecto interno.
+
+No se han corregido. Las dos primeras pasan por la misma comprobación de
+completitud de DT-020.

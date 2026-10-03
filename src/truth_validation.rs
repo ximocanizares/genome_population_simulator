@@ -332,34 +332,101 @@ pub(crate) fn validate_truth_for_vcf<'truth>(
     document: &'truth TruthDocument,
     reference: &Reference,
 ) -> Result<ValidatedTruthForVcf<'truth>, TruthValidationError> {
-    if document.header.reference_id != reference.id().as_str() {
-        return Err(TruthValidationError::ReferenceIdMismatch {
-            declared: document.header.reference_id.clone(),
-            actual: reference.id().as_str().to_owned(),
-        });
-    }
-    validate_reference_digest(&document.header, reference)?;
-
-    let mut details = BTreeMap::new();
-    for record in &document.records {
-        if let TruthRecord::HaplotypeCopy(copy) = record {
-            let result = reconstruct_copy(copy, reference)?;
-            details.insert(
-                copy.identity.clone(),
-                CopySummary::from_reconstructed(result, Cow::Borrowed(&copy.history)),
-            );
-        }
-    }
-    for record in &document.records {
-        if let TruthRecord::Genotype(genotype) = record {
-            validate_genotype_semantics(genotype, reference, &details)?;
-        }
-    }
+    // Una sola implementación del juez: la de la publicación, con una
+    // inspección que no hace nada, para que las dos no puedan divergir.
+    validate_truth_with_copy_inspection(document, reference, |_, _| {
+        Ok::<(), std::convert::Infallible>(())
+    })
+    .map_err(|error| match error {
+        InspectedValidationError::CopyReconstruction { error, .. }
+        | InspectedValidationError::Semantics(error) => *error,
+        InspectedValidationError::Inspection(never) => match never {},
+    })?;
     Ok(ValidatedTruthForVcf {
         document,
         reference_id: &document.header.reference_id,
         reference_content_sha256: &document.header.reference_content_sha256,
     })
+}
+
+/// Fallo de [`validate_truth_with_copy_inspection`], con la fase en que ocurrió.
+#[derive(Debug)]
+pub(crate) enum InspectedValidationError<E> {
+    /// No se pudo reconstruir la copia con esa identidad.
+    CopyReconstruction {
+        identity: CopyIdentity,
+        error: Box<TruthValidationError>,
+    },
+    /// Falló la referencia, o un caso genotípico no concuerda con las copias.
+    Semantics(Box<TruthValidationError>),
+    /// Falló la inspección que el llamador hace de cada copia reconstruida.
+    Inspection(E),
+}
+
+/// El juez semántico de la verdad —[`validate_truth_for_vcf`] es este mismo con
+/// una inspección vacía—. Entrega a `inspect` la identidad y la huella SHA-256
+/// de cada copia reconstruida, y suelta las bases **antes** de llamarla.
+///
+/// Existe para que la publicación contraste las huellas de las copias y juzgue
+/// los casos genotípicos con **una sola** reconstrucción por copia, en lugar de
+/// reconstruir una vez para cada cosa. Las bases no se retienen: solo los
+/// resúmenes compactos que el contraste de genotipos necesita.
+pub(crate) fn validate_truth_with_copy_inspection<E>(
+    document: &TruthDocument,
+    reference: &Reference,
+    mut inspect: impl FnMut(&HaplotypeCopyRecord, [u8; 32]) -> Result<(), E>,
+) -> Result<(), InspectedValidationError<E>> {
+    if document.header.reference_id != reference.id().as_str() {
+        return Err(InspectedValidationError::Semantics(Box::new(
+            TruthValidationError::ReferenceIdMismatch {
+                declared: document.header.reference_id.clone(),
+                actual: reference.id().as_str().to_owned(),
+            },
+        )));
+    }
+    validate_reference_digest(&document.header, reference)
+        .map_err(|error| InspectedValidationError::Semantics(Box::new(error)))?;
+
+    let mut details = BTreeMap::new();
+    for record in &document.records {
+        if let TruthRecord::HaplotypeCopy(copy) = record {
+            let result = reconstruct_copy(copy, reference).map_err(|error| {
+                InspectedValidationError::CopyReconstruction {
+                    identity: copy.identity.clone(),
+                    error: Box::new(error),
+                }
+            })?;
+            let ReconstructedCopy {
+                bases,
+                source_slices,
+                pieces,
+                event_loci,
+            } = result;
+            // La huella se calcula y las bases se sueltan **antes** de la
+            // inspección: esta materializa la copia del productor, y con las
+            // dos secuencias vivas a la vez un cromosoma de 100 Mb pasaba de
+            // unos 204 MB de memoria máxima a unos 300 MB.
+            let digest: [u8; 32] = Sha256::digest(&bases).into();
+            drop(bases);
+            inspect(copy, digest).map_err(InspectedValidationError::Inspection)?;
+            details.insert(
+                copy.identity.clone(),
+                CopySummary {
+                    source_slices,
+                    pieces,
+                    history: Cow::Borrowed(&copy.history),
+                    event_loci,
+                },
+            );
+        }
+    }
+    for record in &document.records {
+        if let TruthRecord::Genotype(genotype) = record {
+            validate_genotype_semantics(genotype, reference, &details)
+                .map_err(|error| InspectedValidationError::Semantics(Box::new(error)))?;
+        }
+    }
+    Ok(())
 }
 
 /// Valida y reconstruye por flujo, reteniendo únicamente metadatos compactos
@@ -1118,21 +1185,6 @@ struct PieceLayout {
     start: u64,
     end: u64,
     inserted_provenance: Option<ModificationProvenance>,
-}
-
-/// SHA-256 de la secuencia final de una copia **reconstruida desde su
-/// registro publicado**, sin usar el estado del productor.
-///
-/// Es la mitad independiente del contraste que la proyección hace al publicar
-/// con la copia que ella misma materializa: la verdad ya no copia la secuencia
-/// final en ningún registro, y sin este contraste una proyección que publicara
-/// bases distintas de las del estado interno —de modo coherente en todos sus
-/// registros— no la detectaría nadie. La secuencia se libera al volver.
-pub(crate) fn reconstructed_copy_sha256(
-    copy: &HaplotypeCopyRecord,
-    reference: &Reference,
-) -> Result<[u8; 32], TruthValidationError> {
-    Ok(Sha256::digest(reconstruct_copy(copy, reference)?.bases).into())
 }
 
 fn reconstruct_copy(

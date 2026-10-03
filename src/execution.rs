@@ -626,7 +626,10 @@ fn write_execution_truth(
                 // del programa, no un fallo de formato de la entrada.
                 TruthProjectionError::IndependentReconstruction { .. }
                 | TruthProjectionError::ReconstructionMismatch { .. }
-                | TruthProjectionError::CopySetMismatch => internal("truth_reconstruction", error),
+                | TruthProjectionError::CopySetMismatch
+                | TruthProjectionError::GenotypeJudgement(_) => {
+                    internal("truth_reconstruction", error)
+                }
                 _ => Diagnostic::format("GPS-FMT-006", "No se pudo proyectar la verdad genómica.")
                     .with("detail", error.to_string()),
             })?
@@ -3919,5 +3922,308 @@ i5 = "TGCATGCA"
         assert!(!destination.join("outputs/truth.vcf.gz").exists());
         assert!(!destination.join("outputs/truth.vcf.gz.tbi").exists());
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    const TRUTH_JUDGE_CONFIG: &[u8] = b"\n[population_snvs]\nmode = \"generate\"\n[population_snvs.generate]\ncount_mode = \"exact\"\nlocus_count = 1\nspatial_mode = \"uniform\"\nsubstitution_profile = \"uniform_snv12_v1\"\n[[population_snvs.generate.populations]]\npopulation_id = \"P1\"\nfrequency_model = \"uniform\"\nmin_alt_af = 0.2\nmax_alt_af = 0.8\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"IND_01\"]\nploidy = 2\ngenotype_model = \"hwe\"\n";
+
+    /// Ejecuta de extremo a extremo, con el productor de la verdad alterado,
+    /// una configuración con un caso genotípico, con o sin `[vcf_output]`.
+    /// Devuelve el diagnóstico con que acaba.
+    fn run_with_tampered_producer(
+        with_vcf: bool,
+        tamper: impl Fn(&mut crate::truth_schema::TruthDocument) + 'static,
+    ) -> Diagnostic {
+        let root = std::env::temp_dir().join(format!(
+            "gps-dt019-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("test root");
+        let destination = root.join("result");
+        let config = root.join("config.toml");
+        let mut bytes = fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/config/general-seeded.toml"),
+        )
+        .expect("fixture");
+        bytes.extend_from_slice(TRUTH_JUDGE_CONFIG);
+        if with_vcf {
+            bytes.extend_from_slice(b"[vcf_output]\nmode = \"bgzf\"\n");
+        }
+        fs::write(&config, bytes).expect("config");
+        let effective = load_and_validate_config(&config).expect("valid config");
+        let _guard = crate::truth_projection::test_tamper::install(tamper);
+        let error = execute_validated_config_with_effective_document(
+            &effective,
+            &destination,
+            ExecutionAuthorizations::default(),
+            |_| Ok(()),
+            std::convert::identity,
+            |_| Ok(()),
+        )
+        .expect_err("a tampered producer must not publish");
+        fs::remove_dir_all(root).expect("cleanup");
+        error
+    }
+
+    fn shift_first_genotype_locus(document: &mut crate::truth_schema::TruthDocument) {
+        for record in &mut document.records {
+            if let crate::truth_schema::TruthRecord::Genotype(genotype) = record {
+                genotype.locus.start += 1;
+                genotype.locus.end += 1;
+                return;
+            }
+        }
+        panic!("the scenario must publish a genotype case");
+    }
+
+    /// Intercambia, de forma coherente, qué alelo lleva cada copia y la dosis
+    /// de cada alelo: la estructura del documento sigue siendo válida y sus
+    /// totales no cambian, de modo que solo el juez semántico puede verlo.
+    fn change_first_genotype_dosage(document: &mut crate::truth_schema::TruthDocument) {
+        for record in &mut document.records {
+            if let crate::truth_schema::TruthRecord::Genotype(genotype) = record {
+                assert_eq!(genotype.allele_dosages.len(), 2, "REF and one ALT");
+                genotype.allele_dosages.swap(0, 1);
+                for carrier in &mut genotype.carriers {
+                    carrier.allele_index = 1 - carrier.allele_index;
+                }
+                return;
+            }
+        }
+        panic!("the scenario must publish a genotype case");
+    }
+
+    /// DT-019. Sin `[vcf_output]` —la configuración por omisión— nadie más que
+    /// el juez de la publicación contrasta los casos genotípicos: un locus
+    /// desplazado tiene que acabar rechazado como defecto interno.
+    #[test]
+    fn shifted_case_locus_without_vcf_is_rejected_as_internal_defect() {
+        let error = run_with_tampered_producer(false, shift_first_genotype_locus);
+        assert_eq!(error.code(), "GPS-INTERNAL-001");
+        assert!(
+            format!("{error:?}").contains("GenotypeJudgement"),
+            "the judge, not another check, must reject: {error:?}"
+        );
+    }
+
+    /// DT-019, con la dosis y los portadores. Si el escenario fijado dejara
+    /// de producir un caso con REF y un ALT, el `assert_eq!` de la ayuda lo
+    /// diría en vez de fingir que discrimina. Intercambiar los índices de
+    /// alelo de los portadores siempre cambia quién lleva qué, también con
+    /// dosis simétricas.
+    #[test]
+    fn changed_case_dosage_without_vcf_is_rejected_as_internal_defect() {
+        let error = run_with_tampered_producer(false, change_first_genotype_dosage);
+        assert_eq!(error.code(), "GPS-INTERNAL-001");
+        assert!(
+            format!("{error:?}").contains("GenotypeJudgement"),
+            "the judge, not another check, must reject: {error:?}"
+        );
+    }
+
+    /// Con VCF el productor alterado también se rechaza, ya en la proyección y
+    /// como defecto interno, antes de escribir ningún VCF.
+    #[test]
+    fn shifted_case_locus_with_vcf_is_rejected_before_any_vcf() {
+        let error = run_with_tampered_producer(true, shift_first_genotype_locus);
+        assert_eq!(error.code(), "GPS-INTERNAL-001");
+        assert!(
+            format!("{error:?}").contains("GenotypeJudgement"),
+            "{error:?}"
+        );
+    }
+
+    // ---- DT-019: un escenario con varios casos de cada clase, sin VCF ----
+
+    use crate::truth_schema::{
+        GenotypeCaseKind, GenotypeRecord, TruthAllele, TruthDocument, TruthRecord,
+        TruthStructuralEvent,
+    };
+
+    /// Ejecuta sin VCF el escenario de efecto neto nulo con repeticiones,
+    /// ploidía 4 y dos individuos, al que se añaden una inserción y una
+    /// deleción más, con el gancho de alteración instalado.
+    fn run_direct_cancel_without_vcf(
+        tamper: impl Fn(&mut TruthDocument) + 'static,
+    ) -> Result<(), Diagnostic> {
+        let root = std::env::temp_dir().join(format!(
+            "gps-dt019-multi-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("root");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/vcf-null-effect/direct-cancel");
+        for name in ["reference.fa", "snvs.tsv"] {
+            fs::copy(fixture.join(name), root.join(name)).expect("fixture file");
+        }
+        let mut config = fs::read_to_string(fixture.join("general.toml")).expect("config");
+        config = config.replace("[vcf_output]\nmode = \"text\"\n", "");
+        assert!(
+            !config.contains("vcf_output"),
+            "the scenario must have no VCF"
+        );
+        config.push_str(
+            "\n[[direct_events]]\nevent_id = \"extra-ins\"\ncontig = \"chr1\"\nindividual_id = \"ind-1\"\nphase = 0\nkind = \"insertion\"\npoint = 60\nbases = \"GGA\"\n\n[[direct_events]]\nevent_id = \"extra-del\"\ncontig = \"chr1\"\nindividual_id = \"ind-1\"\nphase = 2\nkind = \"deletion\"\nstart = 250\nend = 253\n",
+        );
+        let path = root.join("general.toml");
+        fs::write(&path, config).expect("write config");
+        let effective = load_and_validate_config(&path).expect("valid config");
+        let _guard = crate::truth_projection::test_tamper::install(tamper);
+        let result = execute_validated_config_with_effective_document(
+            &effective,
+            &root.join("out"),
+            ExecutionAuthorizations::default(),
+            |_| Ok(()),
+            std::convert::identity,
+            |_| Ok(()),
+        )
+        .map(|_| ());
+        fs::remove_dir_all(root).expect("cleanup");
+        result
+    }
+
+    fn assert_judge_rejects(result: Result<(), Diagnostic>) {
+        let error = result.expect_err("the tampered producer must not publish");
+        assert_eq!(error.code(), "GPS-INTERNAL-001", "{error:?}");
+        assert!(
+            format!("{error:?}").contains("GenotypeJudgement"),
+            "the judge, not another check, must reject: {error:?}"
+        );
+    }
+
+    fn genotypes_mut(document: &mut TruthDocument) -> Vec<&mut GenotypeRecord> {
+        document
+            .records
+            .iter_mut()
+            .filter_map(|record| match record {
+                TruthRecord::Genotype(genotype) => Some(genotype),
+                TruthRecord::HaplotypeCopy(_) => None,
+            })
+            .collect()
+    }
+
+    /// Reordena los casos en el orden canónico, para que un locus alterado no
+    /// lo cace antes la comprobación de orden del contrato.
+    fn sort_genotypes(document: &mut TruthDocument) {
+        let copies = document
+            .records
+            .iter()
+            .filter(|record| matches!(record, TruthRecord::HaplotypeCopy(_)))
+            .count();
+        document.records[copies..].sort_by(|left, right| match (left, right) {
+            (TruthRecord::Genotype(a), TruthRecord::Genotype(b)) => (
+                &a.reference_id,
+                &a.individual_id,
+                &a.locus,
+                &a.case_id,
+            )
+                .cmp(&(&b.reference_id, &b.individual_id, &b.locus, &b.case_id)),
+            _ => unreachable!("genotypes follow copies"),
+        });
+    }
+
+    fn swap_two_differing_carriers(genotype: &mut GenotypeRecord) -> bool {
+        for i in 0..genotype.carriers.len() {
+            for j in i + 1..genotype.carriers.len() {
+                if genotype.carriers[i].allele_index != genotype.carriers[j].allele_index {
+                    let first = genotype.carriers[i].allele_index;
+                    genotype.carriers[i].allele_index = genotype.carriers[j].allele_index;
+                    genotype.carriers[j].allele_index = first;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Un locus de indel desplazado. Es lo que DT-019 dejó pasar de verdad.
+    /// Lo cazan solo el juez de los casos indel: ignorarlos lo deja pasar.
+    #[test]
+    fn shifted_indel_locus_without_vcf_is_rejected() {
+        assert_judge_rejects(run_direct_cancel_without_vcf(|document| {
+            let genotype = genotypes_mut(document)
+                .into_iter()
+                .find(|genotype| genotype.case_kind == GenotypeCaseKind::Indel)
+                .expect("an indel case");
+            genotype.locus.start += 1;
+            genotype.locus.end += 1;
+            sort_genotypes(document);
+        }));
+    }
+
+    /// Las bases de una inserción cambiadas **junto con** las de su evento
+    /// fuente: el documento es coherente consigo mismo y solo contrastarlo con
+    /// la copia reconstruida lo delata.
+    #[test]
+    fn changed_insertion_bases_with_their_source_event_without_vcf_are_rejected() {
+        assert_judge_rejects(run_direct_cancel_without_vcf(|document| {
+            let mut changed = false;
+            'outer: for genotype in genotypes_mut(document) {
+                if genotype.case_kind != GenotypeCaseKind::Indel {
+                    continue;
+                }
+                for allele in &mut genotype.alleles {
+                    if let TruthAllele::Insertion {
+                        bases,
+                        source_event: TruthStructuralEvent::Insertion { bases: source, .. },
+                        ..
+                    } = allele
+                    {
+                        let first = if bases.starts_with('T') { 'A' } else { 'T' };
+                        bases.replace_range(..1, &first.to_string());
+                        source.clone_from(bases);
+                        changed = true;
+                        break 'outer;
+                    }
+                }
+            }
+            assert!(changed, "the scenario must carry an insertion case");
+        }));
+    }
+
+    /// Los portadores de un caso de repetición intercambiados: quién lleva qué
+    /// alelo de la repetición. Ignorar los casos de repetición lo deja pasar.
+    #[test]
+    fn swapped_repeat_carriers_without_vcf_are_rejected() {
+        assert_judge_rejects(run_direct_cancel_without_vcf(|document| {
+            let swapped = genotypes_mut(document)
+                .into_iter()
+                .filter(|genotype| genotype.case_kind == GenotypeCaseKind::Repeat)
+                .any(swap_two_differing_carriers);
+            assert!(swapped, "a heterozygous repeat case must exist");
+        }));
+    }
+
+    /// Una alteración en el **último** caso del documento, que no es el
+    /// primero: juzgar solo el primer caso, o parar en él, lo deja pasar.
+    #[test]
+    fn tampering_only_the_last_case_without_vcf_is_rejected() {
+        assert_judge_rejects(run_direct_cancel_without_vcf(|document| {
+            let mut genotypes = genotypes_mut(document);
+            assert!(genotypes.len() > 2, "the scenario must carry several cases");
+            let last = genotypes.pop().expect("last case");
+            last.locus.start += 1;
+            last.locus.end += 1;
+            let altered = last.case_id.clone();
+            sort_genotypes(document);
+            let position = genotypes_mut(document)
+                .iter()
+                .position(|genotype| genotype.case_id == altered)
+                .expect("altered case");
+            assert!(position > 0, "the altered case must not be the first");
+        }));
+    }
+
+    /// DT-019, referencia. Una huella de referencia falsa en la cabecera no la
+    /// ve ninguna otra comprobación de la publicación: el contrato estructural
+    /// no conoce las bases de la referencia.
+    #[test]
+    fn wrong_reference_digest_in_the_header_without_vcf_is_rejected() {
+        assert_judge_rejects(run_direct_cancel_without_vcf(|document| {
+            let digest = &mut document.header.reference_content_sha256;
+            let first = if digest.starts_with('0') { "1" } else { "0" };
+            digest.replace_range(..1, first);
+        }));
     }
 }
