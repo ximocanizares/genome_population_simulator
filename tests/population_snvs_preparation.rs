@@ -80,6 +80,7 @@ fn resolved(
     resolve_manifest_reference(
         &destination.join("manifest.json"),
         &ReferenceId::parse(reference_id, "test").expect("ID"),
+        None,
     )
     .expect("resolved manifest")
 }
@@ -100,6 +101,7 @@ fn manifest_resolution_rejects_changed_fasta_bytes() {
     let error = resolve_manifest_reference(
         &root.join("published/manifest.json"),
         resolved.reference_id(),
+        None,
     )
     .expect_err("digest mismatch");
     assert_eq!(error.code(), "GPS-IO-002");
@@ -114,6 +116,7 @@ fn manifest_resolution_rejects_corrupted_reduction_map_with_intact_fasta_and_has
     let original = resolve_manifest_reference(
         &manifest_path,
         &ReferenceId::parse("reference-small", "test").expect("ID"),
+        None,
     )
     .expect("complete derived reference resolves before corruption");
     let original_fasta = identify_file(original.fasta_path(), Path::new("derived.fa"))
@@ -167,6 +170,7 @@ fn manifest_resolution_rejects_corrupted_reduction_map_with_intact_fasta_and_has
     let error = resolve_manifest_reference(
         &manifest_path,
         &ReferenceId::parse("reference-small", "test").expect("ID"),
+        None,
     )
     .expect_err("physical F1 validation must reject the corrupted map");
     assert_eq!(error.code(), "GPS-FMT-006");
@@ -245,6 +249,7 @@ target_bases = 4
     let reference = resolve_manifest_reference(
         &destination.join("manifest.json"),
         &ReferenceId::parse("reference-main", "test").expect("ID"),
+        None,
     )
     .expect("nonlexical F1 reference with reversible non-UTF-8 description");
     let prepared = prepare_supplied_population_snvs(

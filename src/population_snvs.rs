@@ -1202,7 +1202,10 @@ fn validate_reusable_population_snvs_snapshots(
         .join("population_snvs.tsv");
     let matrix_bytes = fs::read(&matrix_path).map_err(|error| {
         PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: error.to_string(),
+            detail: format!(
+                "no se puede leer la matriz {}, que debe estar junto a los metadatos: {error}",
+                matrix_path.display()
+            ),
         }
     })?;
     after_matrix_snapshot();

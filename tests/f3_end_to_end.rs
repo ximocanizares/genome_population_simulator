@@ -46,6 +46,7 @@ fn valid_matrix_contamination_and_hopping_publish_only_final_paired_fastq() {
         &effective_bytes,
         &manifest_path,
         &manifest_bytes,
+        None,
     )
     .expect("published PE resources are mutually verifiable");
     assert_external_manifest_schema(&manifest_path, "manifest-general-v4.schema.json");

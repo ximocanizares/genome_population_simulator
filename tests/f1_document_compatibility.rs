@@ -133,6 +133,7 @@ fn old_pairs_and_physical_validation_report_the_current_schema_on_rejection() {
             F1_REDUCTION_EFFECTIVE,
             &physical_manifest_path,
             &serde_json::to_vec(&broken).expect("JSON"),
+            None,
         )
         .expect_err("the v1 physical validator must reject a corrupt manifest"),
         &effective_path,

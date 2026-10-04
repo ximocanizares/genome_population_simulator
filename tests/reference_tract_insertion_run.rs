@@ -1324,6 +1324,7 @@ fn judge(destination: &Path) -> Result<(), String> {
         &fs::read(&effective_path).expect("efectiva"),
         &manifest_path,
         &fs::read(&manifest_path).expect("manifiesto"),
+        None,
     )
     .map_err(|error| format!("{error:?}"))
 }

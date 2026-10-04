@@ -49,8 +49,8 @@ documenta mejor.
 | DT-019 | Sin VCF, nadie juzga los genotipos de la verdad al publicar | **Grave** | 02/10/2026 | **Cerrada (03/10/2026)** |
 | DT-020 | Sin VCF, quitar un caso indel o de repetición de la verdad se publica | Media | 03/10/2026 | **Cerrada (03/10/2026)** |
 | DT-021 | El juez de la verdad no ancla los casos todo-REF, deja pasar un SNP quitado y clasifica mal una corrupción estructural | Media | 03/10/2026 | **Cerrada (04/10/2026)** |
-| DT-022 | El juez de los recursos publicados resuelve la ruta de una matriz reutilizada respecto al directorio de trabajo, no al paquete | Media | 04/10/2026 | Abierta |
-| DT-023 | Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete | Baja | 04/10/2026 | Abierta |
+| DT-022 | El juez de los recursos publicados resuelve la ruta de una matriz reutilizada respecto al directorio de trabajo, no al paquete | Media | 04/10/2026 | **Cerrada (04/10/2026)** |
+| DT-023 | Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete | Baja | 04/10/2026 | **Cerrada por aceptación (04/10/2026)** |
 
 ---
 
@@ -1620,43 +1620,110 @@ idénticas byte a byte.
 
 ## DT-022. El juez de los recursos publicados resuelve la ruta de una matriz reutilizada respecto al directorio de trabajo
 
-**Gravedad: media.** La encontró la tercera revisión adversarial de DT-020 y
-DT-021, el 4 de octubre de 2026; es anterior a ellas.
+**Gravedad: media. Cerrada el 04/10/2026.** La encontró la tercera revisión
+adversarial de DT-020 y DT-021, el 4 de octubre de 2026; es anterior a ellas.
 
-### Qué pasa
+### Qué pasaba
 
 Cuando la matriz de SNV se reutiliza (`population_snvs.mode = "reuse"`), el
-juez de los recursos publicados reconstruye la configuración desde el TOML
+juez de los recursos publicados reconstruía la configuración desde el TOML
 copiado en el paquete, y la ruta de los metadatos de la matriz
-(`metadata_path`) se resuelve respecto a la carpeta del TOML **original**
+(`metadata_path`) se resolvía respecto a la carpeta del TOML **original**
 (`resolve_link` en `src/application.rs`, con la ruta de
-`configuration_input.original_path` del manifiesto). Si esa ruta original es
-relativa, acaba resuelta respecto al directorio de trabajo del proceso y no
-al paquete: el mismo paquete se acepta o se rechaza según desde dónde se
-lance el juez. Lo reprodujo el revisor ejecutándolo; aquí solo se ha seguido
-el camino en el código.
+`configuration_input.original_path` del manifiesto). `original_path` se copia
+tal como se pidió, así que con un TOML relativo la ruta acababa resuelta
+contra el directorio de trabajo del proceso: **el mismo paquete se aceptaba o
+se rechazaba según desde dónde se lanzara el juez**. Reproducido ejecutando el
+juez desde `/` y desde el directorio de la ejecución. No afectaba a la
+publicación, que corre con el directorio de la ejecución, sino a quien
+juzgase un paquete ya publicado: `resolve_manifest_reference` y las pruebas.
+Ninguna orden de la CLI llamaba a esas funciones.
 
-### Qué haría falta
+La matriz reutilizada no viaja en el paquete **a propósito**: el esquema del
+manifiesto fuerza `metadata_artifact_id` nulo en modo `reuse` y el manifiesto
+solo registra `metadata_sha256` y la auditoría de normalización; los
+metadatos llevan dentro la huella del TSV. Copiarla o registrar una ruta
+absoluta habría exigido cambiar el formato publicado, y `original_path` es
+literal por una condición documentada de identidad binaria de los manifiestos.
 
-Decidir de dónde lee el juez una matriz reutilizada: del paquete, si se
-copia en él, o de una ruta absoluta registrada al publicar. No se ha
-corregido.
+### Cómo se cerró
+
+Sin cambiar ningún formato publicado: **quien juzga dice dónde está la
+matriz**. `validate_published_resources` y `resolve_manifest_reference`
+(`src/results.rs`) reciben `reused_snv_metadata: Option<&Path>`, la ruta de
+`population_snvs.metadata.json` con el TSV al lado. Es **obligatorio si y solo
+si el paquete es de `mode = "reuse"`**: sin él, el juez rechaza diciendo qué
+falta; sin reutilización se ignora. El juez lee la matriz de esa ubicación y
+nunca de la ruta del TOML copiado, y la acepta solo si coinciden las huellas:
+`metadata_sha256` del manifiesto con los bytes de los metadatos y la del TSV
+dentro de los metadatos. `ExecutionWorkspace` guarda la ruta que la ejecución
+acaba de usar (`set_reused_snv_metadata`, llamado desde `src/execution.rs`) y
+la pasa al juez de publicación. Todas las pruebas que llamaban al juez pasan
+`None` salvo la de F2.2, que pasa la ruta de la matriz reutilizada.
+
+Pruebas nuevas, en `tests/published_reused_matrix_location.rs`: el juez
+acepta un paquete con TOML y `metadata_path` relativos cuando la matriz se ha
+movido a un sitio que ninguna ruta del TOML alcanza, y sin la ubicación lo
+rechaza (control negativo). **Lo que discrimina es mover la matriz, no cambiar
+de directorio de trabajo**: una versión anterior lanzaba el juez en un
+subproceso y esa parte no aportaba nada, así que se quitó. Además: el error
+claro cuando falta la ubicación, con el código de entrada y no el de esquema
+(con una ruta absoluta en el TOML, para que el juez antiguo la hubiera
+encontrado sin que se la dijeran); el nombre del fichero cuando falta el TSV
+junto a los metadatos; y el rechazo de otra matriz con los mismos nombres de
+fichero, de unos metadatos con otros bytes (solo la huella de los metadatos los
+separa), de un par híbrido y de una auditoría de normalización falsificada a
+la vez en la configuración efectiva y en el manifiesto.
+Mutaciones sobre copia, todas muertas salvo una documentada: el juez que
+ignora el parámetro y usa la ruta del TOML, el que no exige el dato, el que
+no compara la huella de los metadatos, el que no compara la auditoría
+enlazada. **La comparación de `matrix.sha256` de los metadatos con el TSV no la
+discrimina ninguna prueba** (mutante equivalente): las comprobaciones
+posteriores de bytes canónicos y de auditoría rechazarían igualmente un TSV
+retocado o el de otra matriz. Es una guarda anterior, no tocada aquí.
+
+Dos precisiones. Una ruta relativa para la ubicación se resuelve contra el
+directorio de trabajo del proceso que llama: conviene pasar una absoluta, y
+está dicho en la documentación de las dos funciones. Y el error de ubicación
+ausente usa `GPS-INPUT-001`, el código más cercano del catálogo, porque este
+no tiene uno de «argumento ausente» y añadirlo cambiaría un catálogo
+congelado.
 
 ## DT-023. Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete
 
-**Gravedad: baja.** Anotada en la tercera revisión adversarial de DT-020 y
-DT-021, el 4 de octubre de 2026.
+**Gravedad: baja. Cerrada por aceptación el 04/10/2026**, con una condición
+para reabrirla.
 
 ### Qué pasa
 
 `resolve_manifest_reference` (`src/results.rs`) llama a
-`validate_published_resources` sobre el paquete del que toma la referencia.
-Desde DT-020 y DT-021 ese juez lee y juzga además la verdad entera del
-paquete, de modo que resolver una referencia cuesta ahora, en tiempo y en
-memoria, lo que juzgar aquella verdad (el coste de ese juicio está medido en
-DT-020 y DT-021). No se ha medido aquí. No es un fallo de corrección; es un coste que antes no estaba.
+`validate_published_resources` sobre el paquete del que toma la referencia, así
+que resolver una referencia cuesta lo que juzgar la verdad entera de aquel
+paquete. No es un fallo de corrección. **El coste no es nuevo**: la base
+(`9c1fb5f`) ya leía la verdad entera en memoria, solo para su cabecera;
+`99d70ac` añadió juzgarla.
 
-### Qué haría falta
+### Medidas
 
-Decidir si resolver una referencia necesita el juez completo de aquel
-paquete o basta con el de su referencia. No se ha corregido.
+`/usr/bin/time -v` sobre paquetes publicados con el simulador del árbol de
+`99d70ac`, sondas de `resolve_manifest_reference` compiladas de `9c1fb5f` y
+de `99d70ac`, alternadas:
+
+| Paquete | Verdad | Tiempo base | Tiempo actual | Memoria máxima base | actual |
+|---|---|---|---|---|---|
+| 2 Mb, 60 diploides, 1000 filas (3 repeticiones) | 65 MB | 7,2 a 8,0 s | 8,3 a 8,5 s | 106,8 MB | 177,7 MB |
+| 2 Mb, 120 diploides, 2500 filas (2 repeticiones) | 329 MB | 1:46 y 2:04 | 1:39 y 2:26 | 421 MB | 780 MB |
+
+En el primero el tiempo sube un 16 % y la memoria un 66 %; en el segundo la
+memoria sube un 85 % y el tiempo es ruido (la dispersión entre repeticiones
+supera la diferencia). Resolver sin juzgar costaría milisegundos, pero perdería
+la garantía que DTC-060 busca: que la referencia, la verdad y las relaciones
+del paquete son coherentes antes de entregarla.
+
+### Decisión
+
+Aceptarla. Ninguna orden de la CLI usa la función hoy: solo la usan las
+pruebas, con paquetes pequeños. **Reconsiderarla si una orden de la CLI llega
+a usarla con paquetes grandes**; la alternativa entonces sería un juez ligero,
+solo de la referencia y del manifiesto, lo que exigiría decidir qué
+comprobaciones bastan. Documentado también en la documentación de la función.

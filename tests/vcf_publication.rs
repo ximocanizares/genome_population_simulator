@@ -421,6 +421,7 @@ fn effective_vcf_request_manifest_and_catalog_are_bound_bidirectionally() {
             &effective,
             &manifest_path,
             &serde_json::to_vec(&wrong_route).expect("manifest JSON"),
+            None,
         )
         .is_err()
     );
@@ -442,6 +443,7 @@ fn toml_without_vcf_cannot_claim_an_effective_vcf_request() {
         &serde_json::to_vec(&effective).expect("effective JSON"),
         &manifest_path,
         &serde_json::to_vec(&manifest).expect("manifest JSON"),
+        None,
     )
     .expect_err("the copied TOML keeps VCF disabled");
     assert_eq!(error.code(), "GPS-FMT-006");

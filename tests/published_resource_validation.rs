@@ -289,6 +289,7 @@ fn execution_id_is_bound_to_csprng_seed_and_exact_toml_digest() {
         &fs::read(&effective_path).expect("effective bytes"),
         &manifest_path,
         &fs::read(&manifest_path).expect("manifest bytes"),
+        None,
     )
     .expect_err("execution ID from the first root cannot authenticate the second root");
     assert_eq!(error.code(), "GPS-FMT-006");
@@ -397,6 +398,7 @@ fn published_founder_keys_are_revalidated_against_the_toml_contract() {
         &fs::read(&effective_path).expect("effective bytes"),
         &manifest_path,
         &fs::read(&manifest_path).expect("manifest bytes"),
+        None,
     )
     .expect_err("revalidation must bind founder keys to the typed TOML resolution");
     assert_eq!(error.code(), "GPS-FMT-006");
@@ -435,6 +437,7 @@ fn hostile_genotype_dosage_overflow_is_a_controlled_revalidation_error() {
             &effective_bytes,
             &manifest_path,
             &manifest_bytes,
+            None,
         )
         .is_err(),
         "la revalidación no debe aceptar ni desbordar con dosis hostiles"
@@ -474,6 +477,7 @@ fn assert_physical_rejection(
         &effective_bytes,
         &manifest_path,
         &manifest_bytes,
+        None,
     );
     let error = match validation {
         Ok(()) => panic!("case {label}: physical authority accepted correlated declarations"),
@@ -835,6 +839,7 @@ fn published_truth_is_judged_with_the_published_matrix() {
             &effective_bytes,
             &manifest_path,
             &manifest_bytes,
+            None,
         )
         .expect_err(label);
         let debug = format!("{error:?}");

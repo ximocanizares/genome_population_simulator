@@ -50,6 +50,10 @@ pub struct ExecutionWorkspace {
     /// publicar. El catálogo no los contiene aún, de modo que sin este
     /// registro dos salidas simultáneas podrían reclamar el mismo nombre.
     reserved: BTreeSet<(String, String)>,
+    /// Ruta de los metadatos de la matriz SNV reutilizada, si la ejecución la
+    /// reutiliza. La matriz no viaja en el paquete, así que el juez de los
+    /// recursos publicados necesita que se le diga dónde está.
+    reused_snv_metadata: Option<PathBuf>,
 }
 
 impl ExecutionWorkspace {
@@ -101,6 +105,7 @@ impl ExecutionWorkspace {
                         f5_manifest: false,
                         root_documents: BTreeSet::new(),
                         reserved: BTreeSet::new(),
+                        reused_snv_metadata: None,
                     });
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -116,6 +121,11 @@ impl ExecutionWorkspace {
     #[must_use]
     pub(crate) fn root(&self) -> &Path {
         &self.payload
+    }
+
+    /// Registra dónde está la matriz SNV reutilizada que la ejecución consume.
+    pub fn set_reused_snv_metadata(&mut self, metadata_path: &Path) {
+        self.reused_snv_metadata = Some(metadata_path.to_path_buf());
     }
 
     #[must_use]
@@ -816,6 +826,7 @@ impl ExecutionWorkspace {
             &effective_bytes,
             manifest_path,
             manifest_bytes,
+            self.reused_snv_metadata.as_deref(),
         )
     }
 }

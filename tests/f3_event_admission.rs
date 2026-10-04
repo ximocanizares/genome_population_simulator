@@ -296,6 +296,7 @@ fn f3_technical_event_is_written_to_and_revalidated_from_effective_v3() {
             &effective_bytes,
             &manifest_path,
             &serde_json::to_vec(&forged_manifest).expect("forged general JSON"),
+            None,
         )
         .is_err(),
         "physical event facts must be rederived from effective seed and reference"

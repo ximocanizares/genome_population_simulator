@@ -144,6 +144,7 @@ fn publish(document: &str) -> PathBuf {
         &fs::read(&effective_path).expect("configuración efectiva"),
         &manifest_path,
         &fs::read(&manifest_path).expect("manifiesto"),
+        None,
     )
     .expect("los recursos publicados se validan juntos");
     destination
@@ -754,6 +755,7 @@ fn the_reference_judge_reads_the_blocks_from_the_effective_config() {
             &serde_json::to_vec_pretty(document).expect("JSON"),
             &manifest_path,
             &manifest,
+            None,
         )
     };
     judge(&original).expect("el documento reserializado se acepta");
@@ -875,6 +877,7 @@ fn every_corruption_of_a_published_tract_is_rejected_by_its_own_branch() {
             &serde_json::to_vec_pretty(document).expect("JSON"),
             &manifest_path,
             &manifest,
+            None,
         )
     };
     judge(&original).expect("el documento reserializado se acepta");

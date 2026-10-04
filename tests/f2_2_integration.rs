@@ -82,6 +82,10 @@ length = 12
 }
 
 fn execute(config_path: &Path, destination: &Path) {
+    execute_reusing(config_path, destination, None);
+}
+
+fn execute_reusing(config_path: &Path, destination: &Path, reused_snv_metadata: Option<&Path>) {
     execute_validated_config(
         &load_and_validate_config(config_path).expect("valid integrated configuration"),
         destination,
@@ -95,6 +99,7 @@ fn execute(config_path: &Path, destination: &Path) {
         &fs::read(&effective_path).expect("effective bytes"),
         &manifest_path,
         &fs::read(&manifest_path).expect("manifest bytes"),
+        reused_snv_metadata,
     )
     .expect("the published physical resources validate together");
 }
@@ -188,7 +193,11 @@ fn matrix_sources_are_reproducible_canonical_and_reusable_without_republication(
     .expect("reuse TOML");
     let source_snapshot = generated_matrix.clone();
     let reused = root.join("reused");
-    execute(&reuse_config, &reused);
+    execute_reusing(
+        &reuse_config,
+        &reused,
+        Some(&generated.join("population_snvs.metadata.json")),
+    );
     assert_eq!(
         fs::read(generated.join("population_snvs.tsv")).expect("source matrix"),
         source_snapshot
@@ -284,6 +293,7 @@ length = 7
             &serde_json::to_vec(&forged_effective).expect("forged effective bytes"),
             &published.join("manifest.json"),
             &serde_json::to_vec(&forged_manifest).expect("forged manifest bytes"),
+            None,
         )
         .is_err(),
         "la auditoría ligada debe coincidir con la metadata canónica"

@@ -1605,9 +1605,19 @@ fn validate_event_artifact_against_catalog(
 /// Es la frontera reutilizable de DTC-060: el llamador aporta conjuntamente el
 /// manifiesto y el `reference_id`; ni una ruta FASTA libre ni un ID aislado
 /// pueden llegar al consumidor posterior.
+///
+/// `reused_snv_metadata` es la ruta de los metadatos de la matriz de SNV si el
+/// paquete la reutilizó (`mode = "reuse"`); conviene una ruta absoluta, porque
+/// una relativa se resuelve contra el directorio de trabajo. Ver
+/// [`validate_published_resources`].
+///
+/// Esta función juzga además la verdad entera del paquete (DT-023, cerrada por
+/// aceptación): su coste es el de ese juicio, y debe reconsiderarse si una orden
+/// de la CLI la usa con paquetes grandes.
 pub fn resolve_manifest_reference(
     manifest_path: &Path,
     reference_id: &ReferenceId,
+    reused_snv_metadata: Option<&Path>,
 ) -> Result<ResolvedManifestReference, Diagnostic> {
     let bytes = fs::read(manifest_path).map_err(|error| {
         Diagnostic::io("GPS-IO-001", "Una operación de lectura o escritura falló.")
@@ -1699,6 +1709,7 @@ pub fn resolve_manifest_reference(
         &effective_bytes,
         manifest_path,
         &bytes,
+        reused_snv_metadata,
     )?;
     Ok(ResolvedManifestReference {
         reference_id: reference_id.clone(),
@@ -2224,12 +2235,24 @@ fn validate_effective_technical_event_link(
 
 /// Relee los artefactos físicos enlazados y reconstruye sus relaciones sin
 /// aceptar effective/manifest como prueba de sus propias declaraciones.
+///
+/// `reused_snv_metadata` es la ubicación de la matriz de SNV reutilizada: la
+/// ruta de su `population_snvs.metadata.json`, con el TSV al lado. **Es
+/// obligatorio si y solo si el paquete es de `mode = "reuse"`**, porque la
+/// matriz reutilizada no viaja en el paquete y su ruta, escrita en el TOML
+/// copiado, es relativa al directorio de trabajo de la ejecución original; el
+/// resultado del juez no puede depender de dónde se lance. Sin reutilización el
+/// parámetro se ignora. El juez acepta la matriz indicada solo si coinciden
+/// las huellas: `metadata_sha256` del manifiesto y `matrix.sha256` de los
+/// metadatos. **Conviene una ruta absoluta**: una relativa se resuelve contra
+/// el directorio de trabajo del proceso que llama.
 pub fn validate_published_resources(
     root: &Path,
     effective_path: &Path,
     effective_bytes: &[u8],
     manifest_path: &Path,
     manifest_bytes: &[u8],
+    reused_snv_metadata: Option<&Path>,
 ) -> Result<(), Diagnostic> {
     match effective_schema_version(effective_path, effective_bytes)? {
         EFFECTIVE_CONFIG_SCHEMA_VERSION | EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS => {
@@ -2239,6 +2262,7 @@ pub fn validate_published_resources(
                 effective_bytes,
                 manifest_path,
                 manifest_bytes,
+                reused_snv_metadata,
             )
         }
         _ => unreachable!("effective_schema_version only returns supported versions"),
@@ -2251,6 +2275,7 @@ fn validate_published_resources_v3(
     effective_bytes: &[u8],
     manifest_path: &Path,
     manifest_bytes: &[u8],
+    reused_snv_metadata: Option<&Path>,
 ) -> Result<(), Diagnostic> {
     validate_published_event_manifests(root, manifest_path, manifest_bytes)?;
     validate_effective_config_against_manifest_bytes(
@@ -2368,6 +2393,7 @@ fn validate_published_resources_v3(
         source_reference,
         effective_path,
         allow_empty_snv_matrix,
+        reused_snv_metadata,
     )?;
     validate_physical_initial_population_statistics(
         effective,
@@ -3927,6 +3953,7 @@ fn simulation_reference_object<'a>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_physical_population_snvs(
     root: &Path,
     effective: &serde_json::Map<String, Value>,
@@ -3935,12 +3962,13 @@ fn validate_physical_population_snvs(
     reference: &Reference,
     effective_path: &Path,
     allow_empty_snv_matrix: bool,
+    reused_snv_metadata: Option<&Path>,
 ) -> Result<Option<PreparedPopulationSnvs>, Diagnostic> {
     let Some(link) = effective.get("population_snvs").and_then(Value::as_object) else {
         return Ok(None);
     };
     if link.get("mode").and_then(Value::as_str) == Some("reuse") {
-        let crate::application::EffectivePopulationSnvs::Reuse { metadata_path } =
+        let crate::application::EffectivePopulationSnvs::Reuse { .. } =
             physical_config.population_snvs().ok_or_else(|| {
                 effective_error(effective_path, "reutilización SNV sin fuente física")
             })?
@@ -3950,6 +3978,25 @@ fn validate_physical_population_snvs(
                 "modo SNV efectivo no coincide con reutilización",
             ));
         };
+        // La matriz reutilizada no viaja en el paquete: se lee de la ubicación
+        // que indica quien juzga, nunca de la ruta del TOML copiado, que es
+        // relativa al directorio de trabajo de la ejecución original.
+        //
+        // Falta de un argumento del llamador, no un defecto del documento: el
+        // catálogo no tiene un código de «argumento ausente», y el más cercano
+        // es el de entrada declarada que no se puede leer.
+        let metadata_path = reused_snv_metadata.ok_or_else(|| {
+            Diagnostic::input(
+                "GPS-INPUT-001",
+                "No se puede abrir o leer una entrada declarada.",
+            )
+            .with("path", effective_path.display().to_string())
+            .with(
+                "detail",
+                "el paquete reutiliza la matriz SNV (mode = \"reuse\") y esta no viaja en él: \
+                 falta indicar la ruta de population_snvs.metadata.json",
+            )
+        })?;
         let reference_id = simulation_reference_object(effective, effective_path)?
             .get("fasta_artifact_id")
             .and_then(Value::as_str)

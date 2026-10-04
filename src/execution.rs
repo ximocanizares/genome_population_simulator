@@ -188,6 +188,11 @@ fn execute_validated_config_with_effective_document(
     // mismo pico y la mejora no se observa.
     let mut prepared_reference = Some(prepared_reference);
     let mut workspace = ExecutionWorkspace::create(destination)?;
+    if let Some(crate::application::EffectivePopulationSnvs::Reuse { metadata_path }) =
+        effective.population_snvs()
+    {
+        workspace.set_reused_snv_metadata(metadata_path);
+    }
     let mut configuration_input = None;
     let mut reference_artifact = None;
     let mut manifest_references = Vec::new();

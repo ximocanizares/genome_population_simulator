@@ -52,6 +52,7 @@ length = 6
     resolve_manifest_reference(
         &root.join("published/manifest.json"),
         &ReferenceId::parse("ref-main", "test").unwrap(),
+        None,
     )
     .unwrap()
 }

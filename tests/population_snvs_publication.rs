@@ -521,6 +521,7 @@ length = 2
         &serde_json::to_vec(&effective).expect("forged effective"),
         &manifest_path,
         &serde_json::to_vec(&manifest).expect("forged manifest"),
+        None,
     )
     .expect_err("el validador físico debe rechazar metadata sin el grupo P2");
     assert!(
@@ -686,6 +687,7 @@ length = 20
         &effective,
         &manifest_path,
         &manifest,
+        None,
     )
     .expect_err("correlated canonical mutation must fail before publication");
     assert!(

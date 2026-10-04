@@ -1700,6 +1700,7 @@ fn the_normalization_version_is_published_and_any_other_is_refused() {
             &altered,
             &manifest_path,
             &manifest_bytes,
+            None,
         )
         .expect_err("ni la comprobación completa de lo publicado");
     }

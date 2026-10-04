@@ -122,6 +122,7 @@ fn complete_execution_assembles_and_links_the_validated_event_manifest() {
             &fs::read(destination.join("effective-config.json")).expect("effective bytes"),
             &manifest_path,
             &serde_json::to_vec(&unlinked).expect("unlinked manifest"),
+            None,
         )
         .is_err()
     );

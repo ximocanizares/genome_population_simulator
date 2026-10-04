@@ -155,6 +155,7 @@ fn assert_case(label: &str, mutate: impl FnOnce(&mut Fixture), valid: bool) {
         &fs::read(&fixture.effective_path).expect("effective bytes"),
         &fixture.manifest_path,
         &fs::read(&fixture.manifest_path).expect("general bytes"),
+        None,
     );
     if valid {
         result.expect("fixture física F4 coherente");
@@ -176,6 +177,7 @@ fn assert_contamination_case(label: &str, mutate: impl FnOnce(&mut Fixture), val
         &fs::read(&fixture.effective_path).expect("effective bytes"),
         &fixture.manifest_path,
         &fs::read(&fixture.manifest_path).expect("general bytes"),
+        None,
     );
     if valid {
         result.expect("resumen neutro coherente");
@@ -214,6 +216,7 @@ fn assert_contamination_sampled_percent_rng_guard() {
         &fs::read(&fixture.effective_path).expect("effective bytes"),
         &fixture.manifest_path,
         &fs::read(&fixture.manifest_path).expect("general bytes"),
+        None,
     )
     .expect_err("a different in-range percentage must fail the RNG bit guard");
     assert!(
