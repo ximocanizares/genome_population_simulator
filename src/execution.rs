@@ -429,6 +429,10 @@ fn execute_validated_config_with_effective_document(
         // referencia completa. Sin esto ambas conviven y el pico de memoria
         // dobla el tamaño del genoma de partida.
         prepared_reference = None;
+        // Tampoco hace falta ya la verdad en memoria: el juez de los recursos
+        // publicados relee la del paquete. Viva, convivía con la releída y con
+        // muchos casos subía el pico de memoria un 41 % (DT-020).
+        drop(truth);
         let effective_record = workspace.write_artifact(
             "effective-config",
             "effective_config",
@@ -630,8 +634,37 @@ fn write_execution_truth(
                 | TruthProjectionError::GenotypeJudgement(_) => {
                     internal("truth_reconstruction", error)
                 }
-                _ => Diagnostic::format("GPS-FMT-006", "No se pudo proyectar la verdad genómica.")
-                    .with("detail", error.to_string()),
+                // Un documento que el propio programa acaba de proyectar y
+                // que incumple el contrato de la verdad —un portador de otro
+                // individuo, un identificador fuera de léxico, dos casos con
+                // el mismo identificador, un alelo fuera de su catálogo— es un
+                // defecto del productor, no un error de la entrada (DT-021).
+                // La lectura de una verdad ya escrita no pasa por aquí.
+                //
+                // Solo `Contract` lo ejercita una prueba. `DuplicateCaseId` y
+                // `RepeatAlleleOutsideItsCase` **no se alcanzan**: la
+                // proyección arma cada catálogo y cada identificador con las
+                // mismas copias que después consulta, y ninguna entrada puede
+                // hacerlos divergir. Están aquí para que, si algún día se
+                // alcanzan, salgan como lo que serían, un defecto interno.
+                // Devolverlos a `GPS-FMT-006` no lo detecta ninguna prueba.
+                TruthProjectionError::Contract(_)
+                | TruthProjectionError::DuplicateCaseId(_)
+                | TruthProjectionError::RepeatAlleleOutsideItsCase(_) => {
+                    internal("truth_projection", error)
+                }
+                TruthProjectionError::BasesNotMaterialized
+                | TruthProjectionError::MissingMatrix
+                | TruthProjectionError::MatrixReferenceMismatch
+                | TruthProjectionError::MatrixSourceMismatch
+                | TruthProjectionError::MissingDigest(_)
+                | TruthProjectionError::InvalidUtf8Insertion { .. }
+                | TruthProjectionError::Genotype(_)
+                | TruthProjectionError::Materialization(_)
+                | TruthProjectionError::MissingRepeatSequence(_) => {
+                    Diagnostic::format("GPS-FMT-006", "No se pudo proyectar la verdad genómica.")
+                        .with("detail", error.to_string())
+                }
             })?
         }
         (Some(prepared), None) => empty_truth_document(
@@ -4225,5 +4258,788 @@ i5 = "TGCATGCA"
             let first = if digest.starts_with('0') { "1" } else { "0" };
             digest.replace_range(..1, first);
         }));
+    }
+
+    // ---- DT-020 y DT-021: el conjunto de casos de la verdad ----
+
+    use crate::truth_schema::{TruthHistoryEvent, TruthModification};
+
+    /// Posición, en base 1, de la fila de matriz que este escenario añade con
+    /// frecuencia alternativa casi nula: cada individuo de la población tiene que
+    /// publicar ahí un caso todo-REF, aunque ninguna copia lleve el ALT.
+    const ALL_REFERENCE_LOCUS_1BASED: u64 = 310;
+
+    /// Posición, en base 1, del cambio de base directo del escenario, que no
+    /// es fila de la matriz.
+    const DIRECT_SNP_1BASED: u64 = 40;
+
+    /// El escenario de efecto neto nulo con repeticiones, ploidía 4 y dos
+    /// individuos, con tres eventos más y una fila de matriz de frecuencia
+    /// casi nula, con o sin VCF y con el gancho de alteración instalado.
+    ///
+    /// - `extra-ins`: inserción `GGA` en el punto 60 de la copia 0 de `ind-1`;
+    /// - `extra-del`: deleción 250..253 de la copia 2 de `ind-1`, y
+    ///   `extra-del-2`, 280..282 en la misma copia, que sigue en el historial
+    ///   cuando la primera se traslada a los segmentos;
+    /// - `seg-ins`: inserción `TTG` en el punto 300 de la copia 0 de `ind-1`,
+    ///   aguas abajo de todo lo demás, para poder trasladarla a los segmentos;
+    /// - `extra-snp` y `extra-snp-2`: dos cambios de base directos en la base
+    ///   40 de las copias 0 y 1 de `ind-2`, con alternativos distintos, que no
+    ///   es fila de la matriz. La copia 0 lleva el mayor en orden de base: el
+    ///   catálogo del caso los ordena por base, no por copia;
+    /// - la fila `chr1:310` con `alt_af = 0.01` (una fila con frecuencia 0 la
+    ///   retira la preparación de la matriz: su ALT no existe en la población).
+    fn run_case_set_scenario(
+        with_vcf: bool,
+        tamper: impl Fn(&mut TruthDocument) + 'static,
+    ) -> Result<(), Diagnostic> {
+        run_fixture_with_tamper(
+            "direct-cancel",
+            with_vcf,
+            |config, snvs, reference| {
+                config.push_str(
+                    "\n[[direct_events]]\nevent_id = \"extra-ins\"\ncontig = \"chr1\"\nindividual_id = \"ind-1\"\nphase = 0\nkind = \"insertion\"\npoint = 60\nbases = \"GGA\"\n\n[[direct_events]]\nevent_id = \"extra-del\"\ncontig = \"chr1\"\nindividual_id = \"ind-1\"\nphase = 2\nkind = \"deletion\"\nstart = 250\nend = 253\n\n[[direct_events]]\nevent_id = \"extra-del-2\"\ncontig = \"chr1\"\nindividual_id = \"ind-1\"\nphase = 2\nkind = \"deletion\"\nstart = 280\nend = 282\n\n[[direct_events]]\nevent_id = \"seg-ins\"\ncontig = \"chr1\"\nindividual_id = \"ind-1\"\nphase = 0\nkind = \"insertion\"\npoint = 300\nbases = \"TTG\"\n",
+                );
+                let offset = usize::try_from(ALL_REFERENCE_LOCUS_1BASED - 1).expect("offset");
+                let base = char::from(reference[offset]);
+                let alternate = if base == 'A' { 'C' } else { 'A' };
+                snvs.push_str(&format!(
+                    "chr1\t{ALL_REFERENCE_LOCUS_1BASED}\t{base}\t{alternate}\tP1\t0.01\n"
+                ));
+                let offset = usize::try_from(DIRECT_SNP_1BASED - 1).expect("offset");
+                let base = char::from(reference[offset]);
+                let alternates = ['A', 'C', 'G', 'T']
+                    .into_iter()
+                    .filter(|candidate| *candidate != base)
+                    .collect::<Vec<_>>();
+                // La copia 0 lleva el mayor y la 1 el menor: en el orden de
+                // las copias salen al revés que en el de base.
+                for (event, phase, alternate) in [
+                    ("extra-snp", 0, alternates[2]),
+                    ("extra-snp-2", 1, alternates[0]),
+                ] {
+                    config.push_str(&format!(
+                        "\n[[direct_events]]\nevent_id = \"{event}\"\ncontig = \"chr1\"\nindividual_id = \"ind-2\"\nphase = {phase}\nkind = \"snp\"\nposition_1based = {DIRECT_SNP_1BASED}\nref = \"{base}\"\nalt = \"{alternate}\"\n"
+                    ));
+                }
+            },
+            tamper,
+        )
+    }
+
+    /// Copia un escenario de `tests/fixtures/vcf-null-effect/`, deja que
+    /// `edit` cambie su configuración y su matriz (recibe además las bases de
+    /// la referencia), quita o deja el VCF y lo ejecuta con `tamper`.
+    fn run_fixture_with_tamper(
+        name: &str,
+        with_vcf: bool,
+        edit: impl FnOnce(&mut String, &mut String, &[u8]),
+        tamper: impl Fn(&mut TruthDocument) + 'static,
+    ) -> Result<(), Diagnostic> {
+        let root = std::env::temp_dir().join(format!(
+            "gps-dt020-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("root");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/vcf-null-effect")
+            .join(name);
+        fs::copy(fixture.join("reference.fa"), root.join("reference.fa")).expect("FASTA");
+        let reference = fs::read_to_string(fixture.join("reference.fa"))
+            .expect("FASTA")
+            .lines()
+            .filter(|line| !line.starts_with('>'))
+            .collect::<String>()
+            .into_bytes();
+        let mut config = fs::read_to_string(fixture.join("general.toml")).expect("config");
+        let mut snvs = fs::read_to_string(fixture.join("snvs.tsv")).expect("matrix");
+        edit(&mut config, &mut snvs, &reference);
+        if !with_vcf {
+            config = config.replace("[vcf_output]\nmode = \"text\"\n", "");
+        }
+        assert_eq!(
+            config.contains("[vcf_output]"),
+            with_vcf,
+            "the scenario must have VCF exactly when asked"
+        );
+        fs::write(root.join("snvs.tsv"), snvs).expect("write matrix");
+        let path = root.join("general.toml");
+        fs::write(&path, config).expect("write config");
+        let effective = load_and_validate_config(&path).expect("valid config");
+        let _guard = crate::truth_projection::test_tamper::install(tamper);
+        let result = execute_validated_config_with_effective_document(
+            &effective,
+            &root.join("out"),
+            ExecutionAuthorizations::default(),
+            |_| Ok(()),
+            std::convert::identity,
+            |_| Ok(()),
+        )
+        .map(|_| ());
+        fs::remove_dir_all(root).expect("cleanup");
+        result
+    }
+
+    /// El rechazo tiene que ser el del juez del **conjunto** de casos, no el
+    /// de otra comprobación: lo exige `reason`, que es el nombre de su error
+    /// (`MissingCase`, que solo da el conjunto) o el texto exacto de su motivo
+    /// (los `GenotypeMismatch` del conjunto, cuyo nombre comparte con el
+    /// contraste caso a caso).
+    fn assert_case_set_rejects(result: Result<(), Diagnostic>, reason: &str) {
+        let error = result.expect_err("the tampered producer must not publish");
+        assert_eq!(error.code(), "GPS-INTERNAL-001", "{error:?}");
+        let debug = format!("{error:?}");
+        assert!(
+            debug.contains("GenotypeJudgement") && debug.contains(reason),
+            "the case-set judge must reject with {reason}: {error:?}"
+        );
+    }
+
+    const UNANCHORED: &str = "no corresponde a ningún cambio";
+    const DUPLICATED: &str = "publica ya ese locus o ese evento";
+
+    /// Quita el primer caso que cumpla `select` y baja el recuento de la
+    /// cabecera, para que el contrato estructural no lo vea.
+    fn remove_case(
+        document: &mut TruthDocument,
+        select: impl Fn(&GenotypeRecord) -> bool,
+    ) -> GenotypeRecord {
+        let index = document
+            .records
+            .iter()
+            .position(
+                |record| matches!(record, TruthRecord::Genotype(genotype) if select(genotype)),
+            )
+            .expect("the scenario must publish the selected case");
+        let TruthRecord::Genotype(removed) = document.records.remove(index) else {
+            unreachable!("selected a genotype");
+        };
+        document.header.genotype_count -= 1;
+        removed
+    }
+
+    fn alternate_event_id(genotype: &GenotypeRecord) -> Option<&str> {
+        genotype.alleles.iter().find_map(|allele| match allele {
+            TruthAllele::Insertion { event_id, .. } | TruthAllele::Deletion { event_id, .. } => {
+                Some(event_id.as_str())
+            }
+            TruthAllele::Reference | TruthAllele::Snp { .. } | TruthAllele::Repeat { .. } => None,
+        })
+    }
+
+    fn is_event_case(event_id: &'static str) -> impl Fn(&GenotypeRecord) -> bool {
+        move |genotype| alternate_event_id(genotype) == Some(event_id)
+    }
+
+    /// El caso todo-REF de `ind-1` en la fila de frecuencia nula.
+    fn is_all_reference_case(genotype: &GenotypeRecord) -> bool {
+        genotype.case_kind == GenotypeCaseKind::Snp
+            && genotype.individual_id == "ind-1"
+            && genotype.locus.start == ALL_REFERENCE_LOCUS_1BASED - 1
+    }
+
+    fn all_reference_case(document: &TruthDocument) -> GenotypeRecord {
+        let genotype = document
+            .records
+            .iter()
+            .find_map(|record| match record {
+                TruthRecord::Genotype(genotype) if is_all_reference_case(genotype) => {
+                    Some(genotype.clone())
+                }
+                _ => None,
+            })
+            .expect("the zero-frequency matrix row must publish a case");
+        assert!(
+            genotype
+                .allele_dosages
+                .iter()
+                .skip(1)
+                .all(|dosage| *dosage == 0)
+                && genotype.allele_dosages[0] > 0,
+            "the case must be all-REF: {:?}",
+            genotype.allele_dosages
+        );
+        genotype
+    }
+
+    /// DT-020. Sin el caso de una inserción que sigue en la copia, la verdad
+    /// dejaría de explicar esas bases. Sin VCF se publicaba; con VCF lo
+    /// paraba el agrupador, no el juez de la verdad.
+    #[test]
+    fn omitted_insertion_case_is_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    remove_case(document, is_event_case("extra-ins"));
+                }),
+                "MissingCase",
+            );
+        }
+    }
+
+    /// DT-020, con una deleción: las bases que faltan en la copia no las
+    /// explica ningún caso.
+    #[test]
+    fn omitted_deletion_case_is_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    remove_case(document, is_event_case("extra-del"));
+                }),
+                "MissingCase",
+            );
+        }
+    }
+
+    /// DT-020, con una repetición: el tracto realizado de una copia sin el
+    /// caso que lo publica.
+    #[test]
+    fn omitted_repeat_case_is_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    remove_case(document, |genotype| {
+                        genotype.case_kind == GenotypeCaseKind::Repeat
+                    });
+                }),
+                "MissingCase",
+            );
+        }
+    }
+
+    /// DT-021, segunda limitación. Un caso SNP cuyas cuatro copias llevan el
+    /// alternativo se quitaba sin que nadie lo viera, **también con VCF**,
+    /// porque el caso de otro individuo en el mismo locus le daba al VCF el
+    /// alternativo que buscaba. La ayuda comprueba que el escenario lo
+    /// reproduce de verdad: dosis `[0, 4]` y otro individuo con el ALT ahí.
+    #[test]
+    fn omitted_all_alternate_snp_case_covered_by_another_individual_is_rejected() {
+        fn tamper(document: &mut TruthDocument) {
+            let covered = |genotype: &GenotypeRecord, document: &TruthDocument| {
+                document.records.iter().any(|record| {
+                    matches!(record, TruthRecord::Genotype(other)
+                        if other.case_kind == GenotypeCaseKind::Snp
+                            && other.individual_id != genotype.individual_id
+                            && other.locus == genotype.locus
+                            && other.allele_dosages.iter().skip(1).any(|dosage| *dosage > 0))
+                })
+            };
+            let snapshot = document.clone();
+            let removed = remove_case(document, |genotype| {
+                genotype.case_kind == GenotypeCaseKind::Snp
+                    && genotype.allele_dosages[0] == 0
+                    && genotype.allele_dosages.iter().sum::<u8>() == 4
+                    && covered(genotype, &snapshot)
+            });
+            assert_eq!(removed.allele_dosages.iter().sum::<u8>(), 4);
+        }
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(run_case_set_scenario(with_vcf, tamper), "MissingCase");
+        }
+    }
+
+    /// DT-021, primera limitación. Un caso todo-REF desplazado a un sitio en
+    /// que todas las copias son referencia pasaba el contraste de portadores:
+    /// nada lo ataba a su fila de matriz. Lo caza primero que la fila se quede
+    /// sin caso; que el sitio nuevo no sea fila ni cambio de ninguna copia lo
+    /// ejercita la prueba del caso fabricado, que no deja ninguna fila sin
+    /// caso.
+    #[test]
+    fn shifted_all_reference_case_is_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    all_reference_case(document);
+                    for genotype in genotypes_mut(document) {
+                        if is_all_reference_case(genotype) {
+                            genotype.locus.start = 3;
+                            genotype.locus.end = 4;
+                        }
+                    }
+                    sort_genotypes(document);
+                }),
+                "MissingCase",
+            );
+        }
+    }
+
+    /// DT-021, primera limitación: un caso todo-REF inventado en un sitio que
+    /// no es fila de matriz ni cambio de ninguna copia.
+    #[test]
+    fn fabricated_all_reference_case_is_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    let mut fabricated = all_reference_case(document);
+                    fabricated.case_id = "CASE_fabricated".to_owned();
+                    fabricated.locus.start = 3;
+                    fabricated.locus.end = 4;
+                    document.records.push(TruthRecord::Genotype(fabricated));
+                    document.header.genotype_count += 1;
+                    sort_genotypes(document);
+                }),
+                UNANCHORED,
+            );
+        }
+    }
+
+    /// DT-021, primera limitación: el mismo caso todo-REF publicado dos veces
+    /// con otro identificador. Cada copia se contrasta igual en los dos, así
+    /// que solo el conjunto lo ve.
+    #[test]
+    fn duplicated_case_under_another_case_id_is_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    let mut duplicate = all_reference_case(document);
+                    let last = duplicate.case_id.pop().expect("case id");
+                    duplicate.case_id.push(if last == 'f' { 'e' } else { 'f' });
+                    document.records.push(TruthRecord::Genotype(duplicate));
+                    document.header.genotype_count += 1;
+                    sort_genotypes(document);
+                }),
+                DUPLICATED,
+            );
+        }
+    }
+
+    /// DT-021, tercera limitación. Un portador que es copia de **otro**
+    /// individuo es una verdad que el propio programa ha escrito mal: un
+    /// defecto interno, no un error de formato (`GPS-FMT-006`) que señale a la
+    /// entrada del usuario.
+    #[test]
+    fn carrier_of_another_individual_is_an_internal_defect_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            let error = run_case_set_scenario(with_vcf, |document| {
+                let genotype = genotypes_mut(document)
+                    .into_iter()
+                    .find(|genotype| genotype.case_kind == GenotypeCaseKind::Snp)
+                    .expect("a SNP case");
+                let other = if genotype.individual_id == "ind-1" {
+                    "ind-2"
+                } else {
+                    "ind-1"
+                };
+                genotype.carriers[0].copy.individual_id = other.to_owned();
+            })
+            .expect_err("a structurally corrupt truth must not publish");
+            assert_eq!(error.code(), "GPS-INTERNAL-001", "{error:?}");
+            assert!(format!("{error:?}").contains("Contract"), "{error:?}");
+        }
+    }
+
+    /// El caso de la deleción que borra entera una inserción anterior no
+    /// cambia la copia, pero el evento ocurrió y su caso tiene que estar
+    /// (`schemas/truth-v4.md`, «Un caso sin registro VCF»). Ninguna
+    /// diferencia de secuencia lo delata: solo el historial.
+    #[test]
+    fn omitted_null_effect_deletion_case_is_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_fixture_with_tamper(
+                    "inserted-then-deleted",
+                    with_vcf,
+                    |_, _, _| {},
+                    |document| {
+                        let removed = remove_case(document, is_event_case("b"));
+                        assert_eq!(removed.locus.start, removed.locus.end, "null deletion");
+                    },
+                ),
+                "MissingCase",
+            );
+        }
+    }
+
+    /// Control: la inserción borrada entera **no** tiene caso, a propósito, y
+    /// el escenario publica con VCF y sin él.
+    #[test]
+    fn inserted_then_deleted_publishes_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            run_fixture_with_tamper("inserted-then-deleted", with_vcf, |_, _, _| {}, |document| {
+                assert!(
+                    !document.records.iter().any(|record| matches!(record,
+                        TruthRecord::Genotype(genotype) if alternate_event_id(genotype) == Some("a"))),
+                    "the deleted insertion has no case"
+                );
+            })
+            .expect("a legitimate truth publishes");
+        }
+    }
+
+    /// Lleva un evento del historial de una copia a sus segmentos, como un
+    /// cambio heredado, y quita su caso. La copia reconstruida es la misma
+    /// —coinciden las huellas— y el historial ya no tiene el evento, de modo
+    /// que ni el contraste de copias ni la exigencia de un caso por evento lo
+    /// ven: **solo** que una diferencia de la copia con la referencia quede
+    /// sin caso. Es el escenario saturado de esa comprobación.
+    fn move_event_to_segments(document: &mut TruthDocument, event: &'static str) {
+        let case = remove_case(document, is_event_case(event));
+        let mut moved = 0;
+        for record in &mut document.records {
+            let TruthRecord::HaplotypeCopy(copy) = record else {
+                continue;
+            };
+            let Some(index) = copy.history.iter().position(|historical| {
+                matches!(historical,
+                    TruthHistoryEvent::Insertion { event_id, .. }
+                    | TruthHistoryEvent::Deletion { event_id, .. } if event_id == event)
+            }) else {
+                continue;
+            };
+            let modification = match copy.history.remove(index) {
+                TruthHistoryEvent::Insertion {
+                    event_id,
+                    bases,
+                    provenance,
+                    ..
+                } => TruthModification::Insertion {
+                    event_id,
+                    point: case.locus.start,
+                    bases,
+                    provenance,
+                },
+                TruthHistoryEvent::Deletion {
+                    event_id,
+                    provenance,
+                    ..
+                } => TruthModification::Deletion {
+                    event_id,
+                    start: case.locus.start,
+                    end: case.locus.end,
+                    provenance,
+                },
+                TruthHistoryEvent::Snp { .. } | TruthHistoryEvent::RepeatAllele { .. } => {
+                    unreachable!("selected a structural event")
+                }
+            };
+            assert_eq!(copy.segments.len(), 1, "one reference segment");
+            let modifications = &mut copy.segments[0].modifications;
+            let start = |modification: &TruthModification| match modification {
+                TruthModification::Snp { position, .. } => *position,
+                TruthModification::Insertion { point, .. } => *point,
+                TruthModification::Deletion { start, .. } => *start,
+            };
+            modifications.push(modification);
+            modifications.sort_by_key(start);
+            moved += 1;
+        }
+        assert_eq!(moved, 1, "the event lives in exactly one copy");
+    }
+
+    /// Bases insertadas que ningún evento del historial ni ningún caso
+    /// explican. Sin la comprobación de que todo fragmento insertado tenga su
+    /// evento, el caso quitado no lo echaría en falta nadie.
+    #[test]
+    fn insertion_moved_to_segments_without_its_case_is_rejected() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    move_event_to_segments(document, "seg-ins");
+                }),
+                "MissingCase",
+            );
+        }
+    }
+
+    /// Bases de referencia que faltan en el estado heredado de la copia, sin
+    /// deleción del historial ni caso que lo explique. Solo la comprobación del
+    /// estado heredado lo ve.
+    #[test]
+    fn deletion_moved_to_segments_without_its_case_is_rejected() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    move_event_to_segments(document, "extra-del");
+                }),
+                "MissingCase",
+            );
+        }
+    }
+
+    /// Control de los escenarios anteriores: sin alteración, publican.
+    #[test]
+    fn case_set_scenario_publishes_untampered_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            run_case_set_scenario(with_vcf, |document| {
+                all_reference_case(document);
+            })
+            .expect("the untampered scenario publishes");
+        }
+    }
+
+    // ---- Segunda revisión de DT-020 y DT-021 ----
+
+    fn snp_case_mut<'a>(
+        document: &'a mut TruthDocument,
+        individual: &str,
+        position_1based: u64,
+    ) -> &'a mut GenotypeRecord {
+        genotypes_mut(document)
+            .into_iter()
+            .find(|genotype| {
+                genotype.case_kind == GenotypeCaseKind::Snp
+                    && genotype.individual_id == individual
+                    && genotype.locus.start == position_1based - 1
+            })
+            .unwrap_or_else(|| panic!("no SNP case of {individual} at {position_1based}"))
+    }
+
+    const WRONG_ALLELES: &str = "los alelos del caso SNP no son";
+
+    /// Un caso todo-REF atado a su posición pero con otro alternativo que el
+    /// de su fila: nadie lo lleva, así que el contraste de portadores no lo
+    /// ve, y la posición sigue siendo la de la fila.
+    #[test]
+    fn all_reference_case_with_another_alternate_is_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    all_reference_case(document);
+                    let genotype = snp_case_mut(document, "ind-1", ALL_REFERENCE_LOCUS_1BASED);
+                    let TruthAllele::Snp { base } = &mut genotype.alleles[1] else {
+                        panic!("the row alternate");
+                    };
+                    *base = if base == "G" { "T" } else { "G" }.to_owned();
+                }),
+                WRONG_ALLELES,
+            );
+        }
+    }
+
+    /// Un alternativo de más, que no lleva ninguna copia, en el caso de un
+    /// cambio de base directo y en el de una fila de la matriz.
+    #[test]
+    fn snp_case_with_an_extra_alternate_is_rejected_with_and_without_vcf() {
+        for (individual, position) in [
+            ("ind-2", DIRECT_SNP_1BASED),
+            ("ind-1", ALL_REFERENCE_LOCUS_1BASED),
+        ] {
+            for with_vcf in [false, true] {
+                assert_case_set_rejects(
+                    run_case_set_scenario(with_vcf, move |document| {
+                        let genotype = snp_case_mut(document, individual, position);
+                        let present = genotype
+                            .alleles
+                            .iter()
+                            .filter_map(|allele| match allele {
+                                TruthAllele::Snp { base } => Some(base.clone()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>();
+                        let extra = ["A", "C", "G", "T"]
+                            .into_iter()
+                            .find(|base| !present.iter().any(|known| known == base))
+                            .expect("a free base");
+                        genotype.alleles.push(TruthAllele::Snp {
+                            base: extra.to_owned(),
+                        });
+                        genotype.allele_dosages.push(0);
+                    }),
+                    WRONG_ALLELES,
+                );
+            }
+        }
+    }
+
+    /// Una deleción heredada de un segmento escondida dentro de otra del
+    /// historial: la del historial se acorta una base y la del segmento quita
+    /// la que falta, de modo que la copia y el locus son los mismos. El locus
+    /// de la del historial abarca la base escondida; solo mirar el estado
+    /// heredado lo ve.
+    #[test]
+    fn inherited_deletion_hidden_inside_a_history_deletion_is_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    let locus = genotypes_mut(document)
+                        .into_iter()
+                        .find(|genotype| alternate_event_id(genotype) == Some("extra-del"))
+                        .expect("extra-del case")
+                        .locus
+                        .clone();
+                    for genotype in genotypes_mut(document) {
+                        for allele in &mut genotype.alleles {
+                            if let TruthAllele::Deletion {
+                                event_id,
+                                end,
+                                source_event:
+                                    TruthStructuralEvent::Deletion {
+                                        end: source_end, ..
+                                    },
+                                ..
+                            } = allele
+                                && event_id == "extra-del"
+                            {
+                                *end -= 1;
+                                *source_end -= 1;
+                            }
+                        }
+                    }
+                    let mut hidden = 0;
+                    for record in &mut document.records {
+                        let TruthRecord::HaplotypeCopy(copy) = record else {
+                            continue;
+                        };
+                        let mut provenance = None;
+                        for event in &mut copy.history {
+                            if let TruthHistoryEvent::Deletion {
+                                event_id,
+                                end,
+                                provenance: source,
+                                ..
+                            } = event
+                                && event_id == "extra-del"
+                            {
+                                *end -= 1;
+                                provenance = Some(source.clone());
+                            }
+                        }
+                        let Some(provenance) = provenance else {
+                            continue;
+                        };
+                        let modifications = &mut copy.segments[0].modifications;
+                        modifications.push(TruthModification::Deletion {
+                            event_id: "hidden".to_owned(),
+                            start: locus.start + 1,
+                            end: locus.start + 2,
+                            provenance,
+                        });
+                        modifications.sort_by_key(|modification| match modification {
+                            TruthModification::Snp { position, .. } => *position,
+                            TruthModification::Insertion { point, .. } => *point,
+                            TruthModification::Deletion { start, .. } => *start,
+                        });
+                        hidden += 1;
+                    }
+                    assert_eq!(hidden, 1, "one copy carries extra-del");
+                }),
+                "estado heredado",
+            );
+        }
+    }
+
+    /// Las copias de `ind-1` declaran otra población que la suya: todas, o
+    /// solo la última, para que mirar solo la primera no baste.
+    #[test]
+    fn copies_declaring_another_population_are_rejected_with_and_without_vcf() {
+        for only_last in [false, true] {
+            for with_vcf in [false, true] {
+                assert_case_set_rejects(
+                    run_case_set_scenario(with_vcf, move |document| {
+                        for record in &mut document.records {
+                            if let TruthRecord::HaplotypeCopy(copy) = record
+                                && copy.identity.individual_id == "ind-1"
+                                && (!only_last || copy.identity.copy_index == 3)
+                            {
+                                copy.provenance.origin = "initial_population:P2".to_owned();
+                            }
+                        }
+                    }),
+                    "CopyOriginMismatch",
+                );
+            }
+        }
+    }
+
+    /// Los casos todo-REF de dos individuos en la misma fila intercambiados:
+    /// alelos, portadores y dosis cuadran en los dos, y solo los delata que el
+    /// identificador de cada caso es el del otro individuo.
+    #[test]
+    fn all_reference_cases_swapped_between_individuals_are_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    let first = snp_case_mut(document, "ind-1", ALL_REFERENCE_LOCUS_1BASED).clone();
+                    let second =
+                        snp_case_mut(document, "ind-2", ALL_REFERENCE_LOCUS_1BASED).clone();
+                    assert_ne!(first.case_id, second.case_id);
+                    assert!(
+                        [&first, &second].iter().all(|genotype| genotype
+                            .allele_dosages
+                            .iter()
+                            .skip(1)
+                            .all(|dosage| *dosage == 0)),
+                        "both cases are all-REF"
+                    );
+                    snp_case_mut(document, "ind-1", ALL_REFERENCE_LOCUS_1BASED)
+                        .case_id
+                        .clone_from(&second.case_id);
+                    snp_case_mut(document, "ind-2", ALL_REFERENCE_LOCUS_1BASED)
+                        .case_id
+                        .clone_from(&first.case_id);
+                }),
+                "el identificador del caso no es",
+            );
+        }
+    }
+
+    /// Un caso de repetición inventado en un intervalo en que ninguna copia
+    /// lleva un tracto: todas sus copias son referencia ahí, así que el
+    /// contraste caso a caso lo acepta, y solo el conjunto lo rechaza.
+    #[test]
+    fn fabricated_repeat_case_is_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    let mut fabricated = genotypes_mut(document)
+                        .into_iter()
+                        .find(|genotype| genotype.case_kind == GenotypeCaseKind::Repeat)
+                        .expect("a repeat case")
+                        .clone();
+                    fabricated.case_id = "CASE_fabricated_repeat".to_owned();
+                    fabricated.locus.start += 1;
+                    fabricated.locus.end += 1;
+                    for carrier in &mut fabricated.carriers {
+                        carrier.allele_index = 0;
+                    }
+                    let copies = u8::try_from(fabricated.carriers.len()).expect("ploidy");
+                    fabricated.allele_dosages.fill(0);
+                    fabricated.allele_dosages[0] = copies;
+                    document.records.push(TruthRecord::Genotype(fabricated));
+                    document.header.genotype_count += 1;
+                    sort_genotypes(document);
+                }),
+                UNANCHORED,
+            );
+        }
+    }
+
+    /// Los alelos de un caso de repetición permutados, con sus portadores y su
+    /// identificador rehechos: todo cuadra salvo el orden, que deja de ser el
+    /// del productor y hace que el identificador ya no sea canónico.
+    #[test]
+    fn permuted_repeat_alleles_are_rejected_with_and_without_vcf() {
+        for with_vcf in [false, true] {
+            assert_case_set_rejects(
+                run_case_set_scenario(with_vcf, |document| {
+                    let genotype = genotypes_mut(document)
+                        .into_iter()
+                        .find(|genotype| {
+                            genotype.case_kind == GenotypeCaseKind::Repeat
+                                && genotype.alleles.len() >= 3
+                        })
+                        .expect("a repeat case with two alternates");
+                    genotype.alleles.swap(1, 2);
+                    genotype.allele_dosages.swap(1, 2);
+                    for carrier in &mut genotype.carriers {
+                        carrier.allele_index = match carrier.allele_index {
+                            1 => 2,
+                            2 => 1,
+                            other => other,
+                        };
+                    }
+                    genotype.case_id = crate::truth_projection::case_id(
+                        "P1",
+                        &genotype.individual_id,
+                        &genotype.locus.sequence_id,
+                        genotype.locus.start + 1,
+                        &genotype.alleles,
+                    );
+                    sort_genotypes(document);
+                }),
+                "los alelos del caso de repetición",
+            );
+        }
     }
 }

@@ -417,6 +417,8 @@ fn replay_accepts_inherited_snp_without_history_and_a_later_deleted_snp() {
     lines[3]["carriers"] = json!([
         {"allele_index":0,"copy":{"reference_id":"REF_main","individual_id":"IND_01","sequence_id":"chr1","copy_index":1}}
     ]);
+    // Toda deleción del historial publica su caso (DT-020).
+    push_deletion_case(&mut lines, "DEL_01", (2, 3), (2, 3));
     validate_and_reconstruct_truth_jsonl(&mut Cursor::new(lines_to_jsonl(&lines)), &reference())
         .expect("the SNP is replayed, then removed by its later deletion");
 }
@@ -541,8 +543,46 @@ fn replay_accepts_nested_insertion_with_partial_survival_after_deletion() {
         {"kind":"deletion","event_id":"DEL_01","start":3,"end":5,"provenance":nested_provenance},
     ]);
     lines[3]["alleles"][1]["piece_links"] = json!([{"piece_index":1,"start":2,"end":3}]);
+    // La deleción solo elimina bases insertadas: su locus es el punto vacío
+    // de su ancla, y su caso se publica igual (DT-020). La inserción anidada,
+    // borrada entera, no tiene caso.
+    push_deletion_case(&mut lines, "DEL_01", (2, 2), (3, 5));
     validate_and_reconstruct_truth_jsonl(&mut Cursor::new(lines_to_jsonl(&lines)), &reference())
         .expect("nested insertion and partial deletion replay exactly");
+}
+
+/// Añade el caso de una deleción de la copia 0 de `IND_01`, con su locus de
+/// referencia y sus coordenadas vigentes, y deja los casos en orden canónico.
+fn push_deletion_case(
+    lines: &mut Vec<Value>,
+    event_id: &str,
+    (locus_start, locus_end): (u64, u64),
+    (start, end): (u64, u64),
+) {
+    lines.push(json!({
+        "record_type":"genotype","case_id":format!("CASE_{event_id}"),"reference_id":"REF_main","individual_id":"IND_01",
+        "case_kind":"indel","locus":{"sequence_id":"chr1","start":locus_start,"end":locus_end},
+        "alleles":[
+            {"kind":"reference"},
+            {"kind":"deletion","event_id":event_id,"start":start,"end":end,
+             "source_event":{"kind":"deletion","event_id":event_id,"start":start,"end":end},
+             "piece_links":[]}
+        ],
+        "allele_dosages":[1,1],
+        "carriers":[
+            {"allele_index":1,"copy":{"reference_id":"REF_main","individual_id":"IND_01","sequence_id":"chr1","copy_index":0}},
+            {"allele_index":0,"copy":{"reference_id":"REF_main","individual_id":"IND_01","sequence_id":"chr1","copy_index":1}}
+        ]
+    }));
+    let genotypes = lines[0]["counts"]["genotypes"].as_u64().expect("count") + 1;
+    lines[0]["counts"]["genotypes"] = json!(genotypes);
+    lines[3..].sort_by_key(|line| {
+        (
+            line["locus"]["start"].as_u64(),
+            line["locus"]["end"].as_u64(),
+            line["case_id"].as_str().map(str::to_owned),
+        )
+    });
 }
 
 fn source_piece(source: &Value, start: u64, end: u64) -> Value {
@@ -560,4 +600,168 @@ fn lines_to_jsonl(lines: &[Value]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n"
+}
+
+// ---- DT-020 y DT-021: el conjunto de casos, en los dos lectores ----
+
+/// Las dos formas de leer una verdad, completa y por flujo, sobre los mismos
+/// bytes.
+fn both_readers(jsonl: &str) -> [Result<(), TruthValidationError>; 2] {
+    [
+        validate_and_reconstruct_truth_jsonl(&mut Cursor::new(jsonl.to_owned()), &reference())
+            .map(|_| ()),
+        validate_truth_jsonl_streaming(&mut Cursor::new(jsonl.to_owned()), &reference(), |_, _| {})
+            .map(|_| ()),
+    ]
+}
+
+/// La verdad de la deleción con un segundo individuo, `IND_02`, igual que el
+/// primero salvo el identificador de su deleción, `DEL_02`: así, juzgar a un
+/// individuo con las copias del otro le exigiría un caso que no tiene.
+fn two_individual_deletion_lines() -> Vec<Value> {
+    let lines = deletion_fixture()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("fixture JSON"))
+        .collect::<Vec<_>>();
+    let rename = |line: &Value| {
+        let text = serde_json::to_string(line)
+            .expect("JSON")
+            .replace("IND_01", "IND_02")
+            .replace("CASE_DEL", "CASE_DEL_2")
+            .replace("DEL_01", "DEL_02");
+        serde_json::from_str::<Value>(&text).expect("JSON")
+    };
+    let mut two = vec![lines[0].clone(), lines[1].clone(), lines[2].clone()];
+    two[0]["source_digests"]
+        .as_array_mut()
+        .expect("digests")
+        .push(json!({"source":{"kind":"explicit","source_id":"DEL_02"},"sha256":"d".repeat(64)}));
+    two.push(rename(&lines[1]));
+    two.push(rename(&lines[2]));
+    two.push(lines[3].clone());
+    two.push(rename(&lines[3]));
+    two[0]["counts"] = json!({"copies": 4, "genotypes": 2});
+    two
+}
+
+/// Control de las dos pruebas siguientes: con dos individuos completos, los
+/// dos lectores aceptan. El lector por flujo juzga a cada individuo al pasar
+/// al siguiente; si lo juzgara sin sus casos, rechazaría aquí.
+#[test]
+fn both_readers_accept_two_complete_individuals() {
+    for result in both_readers(&lines_to_jsonl(&two_individual_deletion_lines())) {
+        result.expect("both individuals publish every case");
+    }
+}
+
+/// DT-020. Una deleción del historial sin su caso: la copia pierde una base
+/// de referencia que nada explica. Sin casos en el documento, el lector por
+/// flujo solo la ve al final, al juzgar a los individuos que no aparecieron.
+#[test]
+fn both_readers_reject_a_deletion_without_its_case() {
+    let mut lines = deletion_fixture()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("fixture JSON"))
+        .collect::<Vec<_>>();
+    lines.truncate(3);
+    lines[0]["counts"]["genotypes"] = json!(0);
+    for result in both_readers(&lines_to_jsonl(&lines)) {
+        assert!(
+            matches!(result, Err(TruthValidationError::MissingCase { ref individual_id, start: 3, end: 4, .. }) if individual_id == "IND_01"),
+            "{result:?}"
+        );
+    }
+}
+
+/// DT-021. El caso de un individuo publicado dos veces con otro
+/// identificador, primero en `IND_01` y después en `IND_02`. El lector por
+/// flujo tiene que juzgar a `IND_01` al pasar a `IND_02`, y a `IND_02`, el
+/// último, al acabar el flujo: los dos momentos, no solo uno.
+#[test]
+fn both_readers_reject_a_case_published_twice_in_any_individual() {
+    for duplicated in [5, 6] {
+        let mut lines = two_individual_deletion_lines();
+        let mut duplicate = lines[duplicated].clone();
+        duplicate["case_id"] = json!("CASE_DEL_DUPLICATE");
+        lines.insert(duplicated + 1, duplicate);
+        lines[0]["counts"]["genotypes"] = json!(3);
+        for result in both_readers(&lines_to_jsonl(&lines)) {
+            assert!(
+                matches!(result, Err(TruthValidationError::GenotypeMismatch { ref case_id, detail })
+                    if case_id.starts_with("CASE_DEL") && detail.contains("ya ese locus")),
+                "duplicated line {duplicated}: {result:?}"
+            );
+        }
+    }
+}
+
+/// Un caso *indel* cuyo evento no está en el historial de ninguna copia: el
+/// contraste de portadores lo da por todo-REF —ninguna copia lleva el
+/// evento— y solo el conjunto lo rechaza, porque no corresponde a nada.
+#[test]
+fn both_readers_reject_an_indel_case_without_its_event() {
+    let mut lines = two_individual_deletion_lines();
+    let mut invented = lines[5].clone();
+    invented["case_id"] = json!("CASE_INVENTED");
+    invented["locus"] = json!({"sequence_id":"chr1","start":5,"end":6});
+    invented["alleles"][1] = json!({"kind":"deletion","event_id":"DEL_99","start":5,"end":6,
+        "source_event":{"kind":"deletion","event_id":"DEL_99","start":5,"end":6},"piece_links":[]});
+    invented["allele_dosages"] = json!([2, 0]);
+    invented["carriers"][0]["allele_index"] = json!(0);
+    lines.insert(6, invented);
+    lines[0]["counts"]["genotypes"] = json!(3);
+    for result in both_readers(&lines_to_jsonl(&lines)) {
+        assert!(
+            matches!(result, Err(TruthValidationError::GenotypeMismatch { ref case_id, detail })
+                if case_id == "CASE_INVENTED" && detail.contains("no corresponde")),
+            "{result:?}"
+        );
+    }
+}
+
+/// DT-021, segunda limitación, en los lectores: sin la matriz, el caso de un
+/// cambio de base vigente solo lo exige que la copia lo lleve. Quitarlo deja
+/// la base cambiada sin caso.
+#[test]
+fn both_readers_reject_a_base_change_without_its_case() {
+    let mut lines = fixture()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("fixture JSON"))
+        .collect::<Vec<_>>();
+    assert_eq!(lines[1]["current_pieces"][0]["snps"][0]["position"], 2);
+    lines.truncate(3);
+    lines[0]["counts"]["genotypes"] = json!(0);
+    for result in both_readers(&lines_to_jsonl(&lines)) {
+        assert!(
+            matches!(result, Err(TruthValidationError::MissingCase { start: 2, end: 3, detail, .. })
+                if detail.contains("cambio de base")),
+            "{result:?}"
+        );
+    }
+}
+
+/// Un segmento recortado al principio o al final: la copia pierde bases de la
+/// referencia en su estado heredado, sin ninguna deleción del historial ni
+/// caso que lo explique. La copia 1 de la verdad de la deleción no lleva
+/// ningún cambio, de modo que nada más la toca.
+#[test]
+fn both_readers_reject_a_segment_trimmed_at_either_end() {
+    for (trim, expected) in [("head", (0, 2)), ("tail", (6, 8))] {
+        let mut lines = deletion_fixture()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("fixture JSON"))
+            .collect::<Vec<_>>();
+        assert_eq!(lines[2]["identity"]["copy_index"], 1);
+        let field = if trim == "head" { "start" } else { "end" };
+        let value = if trim == "head" { 2 } else { 6 };
+        lines[2]["segments"][0]["source"][field] = json!(value);
+        lines[2]["current_pieces"][0]["source"][field] = json!(value);
+        for result in both_readers(&lines_to_jsonl(&lines)) {
+            assert!(
+                matches!(result, Err(TruthValidationError::MissingCase { start, end, detail, .. })
+                    if (start, end) == expected && detail.contains("estado heredado")),
+                "{trim}: {result:?}"
+            );
+        }
+    }
 }

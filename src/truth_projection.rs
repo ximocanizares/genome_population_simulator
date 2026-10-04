@@ -38,8 +38,8 @@ use crate::truth_schema::{
     TruthSourceKind, TruthSourceRef, TruthStructuralEvent, records_carry_repeat_alleles,
 };
 use crate::truth_validation::{
-    InspectedValidationError, TruthValidationError, reference_content_sha256,
-    validate_truth_with_copy_inspection,
+    CaseSetCheck, InspectedValidationError, MatrixCaseLoci, TruthValidationError,
+    reference_content_sha256, validate_truth_with_copy_inspection,
 };
 
 pub const TRUTH_ARTIFACT_ID: &str = "truth-jsonl";
@@ -224,7 +224,12 @@ pub fn project_truth(
     document
         .validate_structure()
         .map_err(TruthProjectionError::Contract)?;
-    verify_publication_against_simulation(&document, input.reference, input.individuals)?;
+    verify_publication_against_simulation(
+        &document,
+        input.reference,
+        input.individuals,
+        input.matrix,
+    )?;
     Ok(document)
 }
 
@@ -277,7 +282,12 @@ pub(crate) mod test_tamper {
 ///    registro publicado.
 /// 2. Ejecuta el juez semántico de la verdad sobre el documento ya proyectado:
 ///    locus, alelos, portadores y dosis de cada caso genotípico contra las
-///    copias reconstruidas.
+///    copias reconstruidas, y además el **conjunto** de casos —que no falte
+///    ni sobre ninguno, incluidos los todo-REF de cada fila de la matriz—,
+///    con los alelos exactos de cada caso SNP, la población de cada copia y
+///    el identificador de cada caso (DT-020 y DT-021). `truth.jsonl` no lleva
+///    las filas de la matriz: van en su propio artefacto del paquete, y aquí
+///    se toman de la matriz preparada en memoria.
 ///
 /// Hasta el 30/09/2026 el primero lo hacía, de rebote y solo para las copias
 /// con *indels*, la secuencia final que cada alelo estructural copiaba en
@@ -290,7 +300,22 @@ pub(crate) fn verify_publication_against_simulation(
     document: &TruthDocument,
     reference: &Reference,
     individuals: &InitialIndividualsMaterialization,
+    matrix: &PreparedPopulationSnvs,
 ) -> Result<(), TruthProjectionError> {
+    // `truth.jsonl` no lleva las filas de la matriz: el juez las recibe de
+    // aquí, con la población de cada individuo, para exigir cada caso
+    // todo-REF, atar a su fila cualquier caso SNP que no sea cambio de una
+    // copia y comprobar sus alelos y su identificador (DT-021). El juez de
+    // los recursos publicados hace lo mismo con la matriz del paquete.
+    let matrix_loci = MatrixCaseLoci::from_matrix(
+        matrix,
+        individuals.individuals().iter().map(|individual| {
+            (
+                individual.individual().id().as_str(),
+                individual.population_id().as_str(),
+            )
+        }),
+    );
     let simulated = individuals
         .individuals()
         .iter()
@@ -299,22 +324,27 @@ pub(crate) fn verify_publication_against_simulation(
         .map(|copy| (copy_identity(copy), copy))
         .collect::<BTreeMap<_, _>>();
     let mut published = 0_usize;
-    validate_truth_with_copy_inspection(document, reference, |record, reconstructed| {
-        published += 1;
-        let copy = simulated
-            .get(&record.identity)
-            .ok_or(TruthProjectionError::CopySetMismatch)?;
-        let materialized: [u8; 32] = Sha256::digest(
-            materialize_copy(copy, reference).map_err(TruthProjectionError::Materialization)?,
-        )
-        .into();
-        if reconstructed != materialized {
-            return Err(TruthProjectionError::ReconstructionMismatch {
-                identity: record.identity.clone(),
-            });
-        }
-        Ok(())
-    })
+    validate_truth_with_copy_inspection(
+        document,
+        reference,
+        CaseSetCheck::Judge(Some(&matrix_loci)),
+        |record, reconstructed| {
+            published += 1;
+            let copy = simulated
+                .get(&record.identity)
+                .ok_or(TruthProjectionError::CopySetMismatch)?;
+            let materialized: [u8; 32] = Sha256::digest(
+                materialize_copy(copy, reference).map_err(TruthProjectionError::Materialization)?,
+            )
+            .into();
+            if reconstructed != materialized {
+                return Err(TruthProjectionError::ReconstructionMismatch {
+                    identity: record.identity.clone(),
+                });
+            }
+            Ok(())
+        },
+    )
     .map_err(|error| match error {
         InspectedValidationError::CopyReconstruction { identity, error } => {
             TruthProjectionError::IndependentReconstruction { identity, error }
@@ -2137,7 +2167,7 @@ genotype_model = "hwe""#
         .expect("the true projection agrees with its own state");
 
         assert!(matches!(
-            verify_publication_against_simulation(&document, &reference, &other_state),
+            verify_publication_against_simulation(&document, &reference, &other_state, &matrix),
             Err(TruthProjectionError::ReconstructionMismatch { identity }) if identity.copy_index == 0
         ));
 
@@ -2175,7 +2205,7 @@ genotype_model = "hwe""#
         }
         assert_eq!(changed, 2, "the SNP of copy 1 must change in both views");
         assert!(matches!(
-            verify_publication_against_simulation(&tampered, &reference, &state),
+            verify_publication_against_simulation(&tampered, &reference, &state, &matrix),
             Err(TruthProjectionError::ReconstructionMismatch { identity }) if identity.copy_index == 1
         ));
     }

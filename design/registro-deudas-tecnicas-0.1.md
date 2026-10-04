@@ -47,8 +47,10 @@ documenta mejor.
 | DT-017 | El juez de los recursos publicados cita el esquema efectivo v4 en sus rechazos aunque el documento sea v6 | Baja | 01/10/2026 | Abierta, corregida para la regeneración de la referencia simulada |
 | DT-018 | Una copia con cambios de base aplicados fuera de orden de posición aborta la ejecución al reconstruir la verdad | **Grave** | 02/10/2026; redefinida el 03/10/2026 | **Cerrada (03/10/2026)** |
 | DT-019 | Sin VCF, nadie juzga los genotipos de la verdad al publicar | **Grave** | 02/10/2026 | **Cerrada (03/10/2026)** |
-| DT-020 | Sin VCF, quitar un caso indel o de repetición de la verdad se publica | Media | 03/10/2026 | Abierta |
-| DT-021 | El juez de la verdad no ancla los casos todo-REF, deja pasar un SNP quitado y clasifica mal una corrupción estructural | Media | 03/10/2026 | Abierta |
+| DT-020 | Sin VCF, quitar un caso indel o de repetición de la verdad se publica | Media | 03/10/2026 | **Cerrada (03/10/2026)** |
+| DT-021 | El juez de la verdad no ancla los casos todo-REF, deja pasar un SNP quitado y clasifica mal una corrupción estructural | Media | 03/10/2026 | **Cerrada (04/10/2026)** |
+| DT-022 | El juez de los recursos publicados resuelve la ruta de una matriz reutilizada respecto al directorio de trabajo, no al paquete | Media | 04/10/2026 | Abierta |
+| DT-023 | Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete | Baja | 04/10/2026 | Abierta |
 
 ---
 
@@ -1252,6 +1254,8 @@ un caso entero (DT-020) y tres limitaciones anteriores del juez (DT-021).
 
 ## DT-020. Sin VCF, quitar un caso indel o de repetición de la verdad se publica
 
+**Estado: cerrada el 3 de octubre de 2026**, junto con DT-021; reabierta y cerrada de nuevo el 4 de octubre tras dos revisiones adversariales.
+
 **Gravedad: media.** Aparece al revisar DT-019. El juez semántico contrasta cada
 caso **que está** con las copias, pero no exige que estén **todos**.
 
@@ -1270,9 +1274,15 @@ No basta con exigir un caso por evento: en un evento insertado y borrado despué
 una comprobación de **completitud basada en la secuencia**, como la del
 agrupador: toda diferencia de una copia con la referencia debe quedar explicada
 por algún caso, salvo las ventanas en que la copia vuelve a ser la referencia.
-No se ha corregido.
+
+### Cómo se cerró
+
+Ver «Cómo se cerraron DT-020 y DT-021», al final de DT-021: las dos se
+cerraron con la misma comprobación del conjunto de casos.
 
 ## DT-021. Tres limitaciones del juez de la verdad anteriores a DT-019
+
+**Estado: cerrada el 3 de octubre de 2026**, junto con DT-020; reabierta y cerrada de nuevo el 4 de octubre tras dos revisiones adversariales.
 
 **Gravedad: media.** Ya estaban antes de DT-019 y valen también con VCF.
 
@@ -1284,5 +1294,369 @@ No se ha corregido.
   identificador fuera de léxico) sale como `GPS-FMT-006`, error de formato, y no
   como defecto interno.
 
-No se han corregido. Las dos primeras pasan por la misma comprobación de
-completitud de DT-020.
+### Cómo se cerraron DT-020 y DT-021
+
+**El contrato.** Qué casos tiene que publicar la verdad estaba escrito a
+trozos: DTC-061 fija que la matriz conserva también los loci todo-REF;
+`schemas/truth-v4.md`, que un caso de efecto nulo sigue en el fichero porque el
+evento ocurrió, y que un locus de repetición sin variantes no publica nada; y
+`schemas/truth-v1.md`, que una inserción solo es válida si conserva algún
+fragmento. El resto —un caso por cambio de base vigente, uno por deleción del
+historial, uno por inserción con bases supervivientes, uno por tracto de
+repetición realizado— solo lo fijaba el productor (`src/truth_projection.rs`).
+No había discrepancia entre los dos; se ha escrito entero en la sección nueva
+«El conjunto de casos» de `schemas/truth-v4.md`, y DTC-061 lo resume.
+
+**El juez** (`src/truth_validation.rs`) juzga ahora, individuo a individuo, el
+**conjunto** de casos, en las dos direcciones y con su propia réplica de las
+copias, sin código del productor ni del oráculo del VCF:
+
+- **del cambio al caso** (DT-020 y la segunda limitación de DT-021): cada
+  cambio de base vigente, cada fragmento de bases insertadas, cada tracto de
+  repetición y cada deleción del historial tienen su caso; las bases
+  insertadas tienen que proceder de una inserción del historial, y el estado
+  heredado de la copia —sus segmentos, antes del historial— tiene que
+  conservar la referencia entera, de modo que toda base que falte la quitó
+  una deleción del historial (en la primera versión se pedía que el hueco
+  cayera en el locus de alguna deleción, y eso dejaba esconder una pérdida
+  heredada; ver «Segunda revisión»); y, cuando se conoce la matriz, cada fila
+  tiene el caso de cada individuo de su población;
+- **del caso a su fuente** (primera limitación de DT-021): cada caso es una de
+  esas fuentes, y dos casos con la misma —posición SNP, evento o intervalo de
+  repetición— son un duplicado, aunque lleven `case_id` distintos.
+
+Se trabaja sobre los fragmentos que el juez ya replicaba y no sobre las bases,
+de modo que no cambia lo que se retiene en memoria por copia (DT-019): las
+bases se siguen soltando antes de la inspección.
+
+No hacía falta la excepción de «las ventanas en que la copia vuelve a ser la
+referencia» que preveía la entrada: el juez compara **fragmentos**, no
+secuencia alineada, y en la inserción borrada entera la copia no conserva
+ningún fragmento de ella, así que no hay cambio que explicar. Lo que sí queda
+es la deleción, cuyo caso se exige por estar en el historial.
+
+**`truth.jsonl` no lleva las filas de la matriz**, solo su huella; las filas
+van en su propio artefacto del paquete (`population_snvs.tsv` y sus
+metadatos, ligados por SHA-256 en el manifiesto y en `group_digests`), y la
+población de cada individuo está en la configuración efectiva. Con ellas
+(`MatrixCaseLoci`) el juez exige los casos todo-REF y ata a su fila un caso
+SNP que no es cambio de ninguna copia, en dos momentos que corren siempre,
+con VCF o sin él: al proyectar la verdad
+(`verify_publication_against_simulation`, en `src/truth_projection.rs`), con
+la matriz en memoria, y —desde la segunda revisión— en el juez de los
+recursos publicados (`validate_physical_truth`, en `src/results.rs`), sobre
+los bytes del paquete. Los lectores de solo `truth.jsonl` (el lector completo,
+`validate_and_reconstruct_truth`, que usa en las pruebas el oráculo del VCF
+`validate_published_vcf_semantics`, y el lector por flujo, que además rechaza
+toda verdad v5 por DT-015) comprueban el conjunto **sin** la matriz: un caso
+SNP sin cambio en ninguna copia lo aceptan sin poder comprobarlo. Las
+fronteras internas del VCF (`validate_truth_for_vcf`) no juzgan el conjunto:
+solo reciben el documento y corren después de la publicación de la verdad.
+
+*Corregido en la segunda revisión*: la primera versión de esta entrada decía
+que «las filas de la matriz no se publican», y era falso; por esa premisa el
+juez de los recursos publicados se quedó sin juzgar el conjunto.
+
+**La clasificación** (tercera limitación): en `src/execution.rs`, un rechazo
+del contrato estructural sobre el documento recién proyectado, un `case_id`
+duplicado o un alelo de repetición fuera de su catálogo son ahora defecto
+interno (`GPS-INTERNAL-001`, operación `truth_projection`). El resto de
+errores de la proyección sigue saliendo como `GPS-FMT-006`, y la coincidencia
+es ahora exhaustiva, de modo que una variante nueva obliga a decidir. La
+lectura de una verdad suministrada no pasa por ese camino.
+
+### Pruebas
+
+En `src/execution.rs`, de extremo a extremo con el gancho de alteración del
+productor, **cada una con VCF y sin él**, y todas exigen el error concreto del
+juez del conjunto (`MissingCase` o `GenotypeMismatch` dentro de
+`GenotypeJudgement`), no un rechazo cualquiera:
+
+- quitar el caso de una inserción, de una deleción, de una repetición y de un
+  SNP `[0,4]` cubierto por otro individuo;
+- desplazar, fabricar y duplicar con otro `case_id` un caso todo-REF (el
+  escenario añade una fila de matriz de frecuencia 0,01; una fila de
+  frecuencia 0 la retira la preparación);
+- quitar el caso de la deleción que borra entera una inserción
+  (`inserted-then-deleted`), que ninguna diferencia de secuencia delata;
+- **dos escenarios saturados**: llevar una inserción, o una deleción, del
+  historial a los segmentos y quitar su caso. La copia reconstruida es la
+  misma y el historial ya no tiene el evento, así que solo la comprobación de
+  bases insertadas sin evento, o la del estado heredado, lo ve;
+- un portador de otro individuo, que sale como defecto interno;
+- controles: el escenario sin alterar y `inserted-then-deleted` publican, con
+  VCF y sin él.
+
+En `tests/truth_validation.rs`, los dos lectores (completo y por flujo) sobre
+verdades escritas a mano: una deleción sin caso, un cambio de base sin caso,
+un caso duplicado en el primer individuo y en el último, un caso *indel*
+inventado y, como control, dos individuos completos. Dos pruebas antiguas
+que construían a mano una verdad con una deleción en el historial y sin su
+caso se completaron con él.
+
+Las once pruebas de extremo a extremo de rechazo fallan contra el código de
+`9c1fb5f`, con VCF y sin él. Sin VCF, diez publican y la del portador de otro
+individuo sale como `GPS-FMT-006`. Con VCF, cinco publican (el SNP `[0,4]`,
+los tres ataques al caso todo-REF y la deleción de efecto nulo), cinco
+abortan por el agrupador del VCF (`AlternateWithoutCase`) y no por el juez
+—la prueba lo distingue— y la del portador sale como `GPS-FMT-006`.
+
+**Mutantes**, repetidos sobre el árbol final de la tercera revisión, en una
+copia con su propio directorio de compilación y comprobando la huella SHA-256
+del fichero antes, mutado y restaurado: treinta y ocho. **Mueren treinta y
+siete.** Quitan o aflojan, uno a uno: la detección de duplicados; la
+exigencia de caso para un cambio de base (dos formas), un tracto, unas bases
+insertadas o una deleción del historial; el rechazo de bases insertadas sin
+evento; la exigencia de las filas de la matriz; el rechazo de un caso sin
+fuente, en general y solo para las repeticiones; la matriz o el conjunto
+entero al proyectar; el conjunto en el lector completo; cada uno de los tres
+momentos en que el lector por flujo juzga a un individuo, y su rango de
+copias; la clasificación como defecto interno; el hueco inicial, el final y
+la deleción de segmento del estado heredado; los alelos exactos de un caso
+SNP, con y sin la fila, sin ordenar los observados o tomándolos de otras
+secuencias; el orden de los alelos de repetición y sus tractos de otras
+secuencias; la población de las copias, quitada o mirada solo en la
+primera; el identificador de caso, quitado y con la posición en base 0; el
+juez de la verdad en los recursos publicados y su matriz; la copia que falta,
+la que sobra y la ploidía en ese juez; y uno común a las dos construcciones
+de las filas: la posición sin pasar a base 0.
+
+**Sobrevive uno, y se sabe por qué**: no añadir al catálogo de un caso SNP de
+una fila los observados que la fila no tiene. Esa rama no se alcanza desde
+una configuración (`ExplicitSnpAlleleOutsideMatrix`), y así lo dice su
+comentario. En rondas anteriores sobrevivieron otros, y se corrigieron: una
+mutación del juez de los recursos publicados que conservaba el `?` de la
+llamada —no mutaba nada—; el rango del lector por flujo, que la prueba de dos
+individuos no veía porque el segundo era un clon del primero; y, en la
+tercera ronda, los tractos de otras secuencias, que necesitaron una prueba
+con dos loci de repetición en las mismas coordenadas de dos secuencias.
+
+Lo que **no** se ejercita, dicho también en su comentario: el rechazo de un
+caso *indel* sin evento estructural, que el contrato estructural rechaza
+antes. *Corregido en la tercera revisión*: aquí se decía lo mismo del
+rechazo «el individuo no tiene población conocida», y era falso para el juez
+de los recursos publicados, donde un paquete con un individuo renombrado
+llega a él; ahora lo ejercita una prueba.
+
+### Segunda revisión adversarial (3 de octubre de 2026)
+
+La revisión del cierre confirmó que la publicación funcionaba —ningún aborto
+nuevo, salidas idénticas, ninguno de sus 48 ataques en publicación pasaba—,
+pero encontró el cierre incompleto. Lo que se corrigió:
+
+- **La premisa de que la matriz no se publica era falsa.** La matriz generada
+  o suministrada se publica en el paquete (`population_snvs.tsv` y sus
+  metadatos, `publish_population_snvs` en `src/execution.rs`), y la
+  reutilizada la lee de su ruta el juez de los recursos publicados. Ese juez
+  (`validate_published_resources`) solo miraba la cabecera de la verdad, y los
+  lectores de un paquete ya escrito aceptaban un caso todo-REF inventado,
+  desplazado u omitido, un portador cambiado con su dosis y un caso *indel*
+  quitado. Ahora ese juez, en `validate_physical_truth`
+  (`src/results.rs`), lee el `truth.jsonl` del paquete y le pasa el juez
+  completo con la matriz publicada y la población de cada individuo según la
+  configuración efectiva (`MatrixCaseLoci::from_matrix`, la misma
+  construcción que usa la proyección). Corre al publicar, desde
+  `src/publication.rs`, siempre que haya poblaciones iniciales; sin ellas la
+  verdad no lleva copias ni casos. Sus rechazos salen como el resto de los de
+  ese juez, `GPS-FMT-006`. Es una comprobación más del juez que vigila la
+  puerta de cobertura: `src/results.rs` pasa de 538 a 539 en
+  `scripts/guard-coverage-baseline.tsv`, con el techo de sin disparar en 425.
+- **Un caso todo-REF estaba atado a su posición, pero no a sus alelos.**
+  `MatrixCaseLoci` guarda ahora los alternativos de cada fila, y el juez exige
+  el catálogo exacto de cada caso SNP en el orden del productor: la
+  referencia, los alternativos de la fila en orden de base y después los
+  observados que la fila no tiene; sin fila, solo los observados, en orden de
+  base. Cambiar el ALT de un caso todo-REF o añadir uno que nadie lleva se
+  rechaza. La rama de «observados que la fila no tiene» no se alcanza desde
+  una configuración: un cambio de base directo en una fila con otro
+  alternativo se rechaza antes de simular (`ExplicitSnpAlleleOutsideMatrix`,
+  comprobado ejecutándolo).
+- **Una deleción heredada podía esconderse dentro de otra del historial.** La
+  comprobación de huecos aceptaba un hueco si caía en el locus de alguna
+  deleción del historial, y ese locus va de la primera a la última base que
+  la deleción elimina, aunque entre medias haya un hueco anterior. Se
+  sustituyó por una más simple y exacta: el estado heredado de la copia —sus
+  segmentos, antes del historial— tiene que conservar la referencia entera,
+  sin deleciones de segmento ni tramos que ningún segmento cubra
+  (`inherited_loss`). Con eso, toda base que falte la quitó una deleción del
+  historial, y esa deleción tiene su caso. El productor no escribe nunca un
+  cambio estructural en los segmentos.
+- **Población e identificador de caso.** Con la población conocida, el juez
+  exige que cada copia declare `provenance.origin =
+  "initial_population:<población>"` de su individuo y recalcula el `case_id`
+  con su propia implementación —unas cuarenta líneas, sin código del
+  productor—: intercambiar entre individuos dos casos todo-REF que solo se
+  distinguen por el identificador ya no pasa. El formato del `case_id` y el
+  del origen, que no estaban escritos, quedan fijados en
+  `schemas/truth-v4.md`.
+- **Mutantes que sobrevivían a la batería entera**: sin el hueco final, sin
+  el hueco inicial (ahora en `inherited_loss`) y con un caso de repetición
+  inventado. Tienen prueba propia. Los de `DuplicateCaseId` y
+  `RepeatAlleleOutsideItsCase` devueltos a error de formato son
+  inalcanzables, y así se dice ahora en el comentario de la clasificación.
+- **Guardas sin ejercitar, dichas en su comentario** y no solo aquí: «un
+  caso indel nombra su evento estructural». (Se decía también de «el
+  individuo no tiene población conocida»; era falso, ver la tercera
+  revisión.)
+- **El lector por flujo** filtraba todas las copias para cada individuo, con
+  coste cuadrático; ahora toma las del individuo por rango. Recuérdese que
+  rechaza toda verdad v5 (DT-015): su juicio del conjunto solo vale para la
+  v4.
+
+Pruebas nuevas, además de las de la primera ronda:
+
+- en `src/execution.rs`, con VCF y sin él: el ALT de un caso todo-REF
+  cambiado; un ALT de más en el caso de un cambio de base directo y en el de
+  una fila; la deleción heredada escondida dentro de otra del historial; las
+  copias de un individuo con otra población; dos casos todo-REF
+  intercambiados entre individuos; y un caso de repetición inventado. El
+  escenario gana un cambio de base directo fuera de la matriz;
+- en `tests/truth_validation.rs`, los dos lectores con un segmento recortado
+  al principio y al final;
+- en `tests/published_resource_validation.rs`, el juez de los recursos
+  publicados sobre un paquete real alterado: caso todo-REF inventado,
+  desplazado y omitido, portador cambiado con su dosis y caso *indel*
+  quitado. Exige el motivo exacto del juez de la verdad.
+
+Los ataques de la revisión se repitieron: los 48 de la primera tanda más la
+deleción escondida y el caso de repetición inventado, cada uno con VCF y sin
+él (100 ejecuciones), se rechazan todos; solo publica el escenario sin
+alterar. Los 26 paquetes alterados de la revisión los rechaza el juez de los
+recursos publicados con el motivo del juez de la verdad, y acepta el paquete
+sin alterar.
+
+### Tercera revisión adversarial (4 de octubre de 2026)
+
+Sin ningún rechazo falso en más de 9000 escenarios, la revisión encontró dos
+defectos graves y algunos huecos. Lo que se corrigió:
+
+- **El juez de los recursos publicados no comprobaba qué copias hay.** El
+  juez de la verdad recorre los individuos y las copias que el documento
+  trae; al proyectar, el contraste con lo simulado exige que estén todas
+  (`CopySetMismatch`), pero en el paquete no hay estado simulado, y se
+  aceptaba un paquete sin un individuo entero o sin una copia de un
+  triploide con sus portadores rehechos. `validate_physical_truth` exige
+  ahora que las identidades de copia sean exactamente cada individuo de la
+  configuración efectiva por cada secuencia de la referencia por cada copia
+  de la ploidía de su población, con un rechazo propio para la que falta y
+  otro para la que sobra. Son dos comprobaciones más que vigila la puerta de
+  cobertura: `src/results.rs` pasa de 539 a 541, con el techo en 425.
+- **La memoria subía un 41 %, no un 27 %.** La medida anterior se hizo con
+  un binario de las 21:53, anterior a los últimos cambios de las 22:12; no
+  era el del árbol final. La causa real: la verdad en memoria seguía viva
+  mientras el juez de los recursos publicados releía la del paquete. Se
+  suelta ahora (`drop(truth)` en `src/execution.rs`, junto a la liberación de
+  la referencia). La afirmación de que «solo lo arreglaría juzgar por flujo»
+  era también falsa. Las cifras medidas con el binario final están en «Coste».
+- **Una guarda que se daba por inalcanzable se alcanza**: «el individuo no
+  tiene población conocida», con un paquete en que un individuo se renombra.
+  Su comentario lo dice ahora y la prueba del juez de los recursos publicados
+  lo ejercita.
+- **Tres mutantes sobrevivían a la batería entera**: ordenar los observados
+  de un caso SNP sin fila, filtrar los observados por secuencia y comprobar el
+  origen de todas las copias y no solo de la primera. Pruebas nuevas: dos
+  copias de `ind-2` con cambios directos distintos en la misma posición, la
+  mayor en la primera copia; dos secuencias con un cambio en el mismo
+  desplazamiento en el paquete del juez de los recursos publicados; y el
+  origen cambiado solo en la última copia.
+- **El orden de los alelos de un caso de repetición** queda fijado en
+  `schemas/truth-v4.md` —la referencia y después cada tracto distinto en el
+  orden en que aparece de la primera copia a la última— y el juez lo exige
+  cuando conoce la población. Antes, permutar los alelos y rehacer el
+  `case_id` se aceptaba: era equivalente, pero el identificador dejaba de ser
+  canónico.
+
+Pruebas nuevas: en `tests/published_resource_validation.rs`, el paquete gana
+una segunda secuencia y dos cambios de base directos, y las alteraciones
+pasan de cinco a nueve —un individuo quitado, una copia quitada con sus
+portadores rehechos, una copia de más y un individuo renombrado—, y una
+prueba nueva publica dos loci de repetición en las mismas coordenadas de dos
+secuencias; en
+`src/execution.rs`, el origen cambiado solo en la última copia y los alelos
+de repetición permutados, con VCF y sin él.
+
+Dos deficiencias anteriores que encontró la revisión se registran aparte,
+como DT-022 y DT-023.
+
+### Exploración y coste
+
+**Todo lo que sigue se midió con el binario del árbol final**, SHA-256
+`25047a1db5718d9af1f9fb8edf3d9b8199c6b8c0da69f950b8ac2e70faa4049d`, frente al
+de `9c1fb5f`, `1af436eaa4d6addb4d96a84fa42df915052a48fdc4adeea2092656754bae8bb2`.
+Las cifras de las dos primeras rondas se hicieron con binarios intermedios y
+se sustituyen; las de memoria de la segunda eran además falsas (ver la
+tercera revisión).
+
+**Exploración.** Cinco generadores: los dos de la revisión de DT-018 (SNP
+directos densos y desordenados con *indels* y la matriz, ploidía 1 a 4), el de
+la primera ronda (repeticiones declaradas, una o dos poblaciones, filas de
+frecuencia 0,01, eventos alrededor del tracto), el del primer revisor de esta
+deuda (inserciones anidadas, deleciones que borran bases insertadas o cubren
+filas, SNP directos en filas, dos secuencias, hasta tres poblaciones, VCF de
+texto, BGZF o ninguno) y el del segundo (matriz generada, referencia simulada
+con varios cromosomas, tracto insertado en una referencia suministrada,
+fundadores por clave, identificadores con puntos, guiones y subrayados,
+alelos de repetición por deslizamiento). En total 6900 ejecuciones (2000,
+2000, 1500, 700 y 700), de las que 5098 publican con la base. **Ninguna que
+publicaba con la base aborta ahora, y ninguna publica distinto**: verdad y VCF
+idénticos byte a byte. Las catorce rutas de publicación de la revisión de
+DT-019 —referencia con tracto insertado y lecturas, loci con *indels* y
+lecturas, referencia reducida, referencia existente, los tres casos de efecto
+nulo; con VCF y sin él— publican con todos sus ficheros idénticos.
+
+**Coste**, `/usr/bin/time -v`, ejecuciones alternadas de cada binario:
+
+| Escenario | Tiempo base | Tiempo nuevo | Memoria máxima base | nueva |
+|---|---|---|---|---|
+| 100 Mb, un haploide, 10 filas, sin VCF (mediana de 3) | 12,8 s | 13,6 s | 204,0 MB | 204,7 MB |
+| 2 Mb, 60 diploides, 1000 filas, 40 *indels* (60 040 casos), sin VCF (mediana de 3) | 31,2 s | 34,7 s | 307,7 MB | 313,9 MB |
+| 2 Mb, 120 diploides, 2500 filas, 40 *indels* (300 040 casos), sin VCF (2 de cada) | 310,4 y 310,9 s | 320,6 y 324,1 s | 1303,8 MB | 1273,3 y 1273,6 MB |
+
+El tiempo sube entre un 3 y un 11 %: el juez de los recursos publicados lee y
+juzga la verdad entera una segunda vez. La memoria máxima sube un 2 % en el
+segundo escenario y **baja** un 2 % en el tercero, porque la verdad en memoria
+se suelta antes de esa segunda lectura. Las salidas de todas las parejas son
+idénticas byte a byte.
+
+## DT-022. El juez de los recursos publicados resuelve la ruta de una matriz reutilizada respecto al directorio de trabajo
+
+**Gravedad: media.** La encontró la tercera revisión adversarial de DT-020 y
+DT-021, el 4 de octubre de 2026; es anterior a ellas.
+
+### Qué pasa
+
+Cuando la matriz de SNV se reutiliza (`population_snvs.mode = "reuse"`), el
+juez de los recursos publicados reconstruye la configuración desde el TOML
+copiado en el paquete, y la ruta de los metadatos de la matriz
+(`metadata_path`) se resuelve respecto a la carpeta del TOML **original**
+(`resolve_link` en `src/application.rs`, con la ruta de
+`configuration_input.original_path` del manifiesto). Si esa ruta original es
+relativa, acaba resuelta respecto al directorio de trabajo del proceso y no
+al paquete: el mismo paquete se acepta o se rechaza según desde dónde se
+lance el juez. Lo reprodujo el revisor ejecutándolo; aquí solo se ha seguido
+el camino en el código.
+
+### Qué haría falta
+
+Decidir de dónde lee el juez una matriz reutilizada: del paquete, si se
+copia en él, o de una ruta absoluta registrada al publicar. No se ha
+corregido.
+
+## DT-023. Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete
+
+**Gravedad: baja.** Anotada en la tercera revisión adversarial de DT-020 y
+DT-021, el 4 de octubre de 2026.
+
+### Qué pasa
+
+`resolve_manifest_reference` (`src/results.rs`) llama a
+`validate_published_resources` sobre el paquete del que toma la referencia.
+Desde DT-020 y DT-021 ese juez lee y juzga además la verdad entera del
+paquete, de modo que resolver una referencia cuesta ahora, en tiempo y en
+memoria, lo que juzgar aquella verdad (el coste de ese juicio está medido en
+DT-020 y DT-021). No se ha medido aquí. No es un fallo de corrección; es un coste que antes no estaba.
+
+### Qué haría falta
+
+Decidir si resolver una referencia necesita el juez completo de aquel
+paquete o basta con el de su referencia. No se ha corregido.

@@ -636,3 +636,337 @@ fn temporary(label: &str) -> PathBuf {
         NONCE.fetch_add(1, Ordering::Relaxed)
     ))
 }
+
+/// DT-020 y DT-021 sobre los **bytes publicados**: el juez de los recursos
+/// publicados lee la matriz publicada y la población de cada individuo de la
+/// configuración efectiva y pasa el juez completo de la verdad sobre el
+/// `truth.jsonl` del paquete, y exige además exactamente las copias de la
+/// simulación. Hasta el 3 de octubre de 2026 solo miraba su cabecera, y
+/// aceptaba un caso todo-REF inventado, desplazado u omitido, un portador
+/// cambiado con su dosis, un caso *indel* quitado, un individuo o una copia
+/// quitados y un individuo renombrado.
+#[test]
+fn published_truth_is_judged_with_the_published_matrix() {
+    let fixture_root = temporary("truth-judge-fixture");
+    fs::create_dir(&fixture_root).expect("fixture root");
+    let config = write_truth_judge_fixture(&fixture_root);
+    type Tamper = fn(&mut Vec<Value>);
+    let cases: [(&str, Tamper, &str); 9] = [
+        (
+            "fabricated-all-ref",
+            |records| {
+                let mut fabricated = records[all_reference_index(records)].clone();
+                fabricated["case_id"] = json!(format!("CASE_{}", "f".repeat(59)));
+                fabricated["locus"]["start"] = json!(10);
+                fabricated["locus"]["end"] = json!(11);
+                records.push(fabricated);
+            },
+            "no corresponde",
+        ),
+        (
+            "shifted-all-ref",
+            |records| {
+                let index = all_reference_index(records);
+                records[index]["locus"]["start"] = json!(10);
+                records[index]["locus"]["end"] = json!(11);
+            },
+            "MissingCase",
+        ),
+        (
+            "omitted-all-ref",
+            |records| {
+                let index = all_reference_index(records);
+                records.remove(index);
+            },
+            "MissingCase",
+        ),
+        (
+            "flipped-carrier-and-dosage",
+            |records| {
+                let case = records
+                    .iter_mut()
+                    .find(|record| {
+                        record["case_kind"] == "snp"
+                            && record["allele_dosages"][1].as_u64().unwrap_or(0) > 0
+                    })
+                    .expect("a SNP case with the alternate");
+                let index = case["carriers"][0]["allele_index"].as_u64().expect("index");
+                case["carriers"][0]["allele_index"] = json!(1 - index);
+                recount(case);
+            },
+            "las copias portadoras no coinciden",
+        ),
+        (
+            "omitted-indel",
+            |records| {
+                let index = records
+                    .iter()
+                    .position(|record| record["case_kind"] == "indel")
+                    .expect("an indel case");
+                records.remove(index);
+            },
+            "MissingCase",
+        ),
+        (
+            "dropped-individual",
+            |records| {
+                records.retain(|record| individual_of(record) != "I2");
+            },
+            "le falta una copia",
+        ),
+        (
+            "dropped-copy-with-rebuilt-carriers",
+            |records| {
+                records.retain(|record| {
+                    !(record["record_type"] == "haplotype_copy"
+                        && record["identity"]["individual_id"] == "I1"
+                        && record["identity"]["sequence_id"] == "chr1"
+                        && record["identity"]["copy_index"] == 1)
+                });
+                for record in records.iter_mut() {
+                    if record["record_type"] == "genotype"
+                        && record["individual_id"] == "I1"
+                        && record["locus"]["sequence_id"] == "chr1"
+                    {
+                        record["carriers"]
+                            .as_array_mut()
+                            .expect("carriers")
+                            .retain(|carrier| carrier["copy"]["copy_index"] != 1);
+                        recount(record);
+                    }
+                }
+            },
+            "le falta una copia",
+        ),
+        (
+            "extra-copy",
+            |records| {
+                let mut extra = records
+                    .iter()
+                    .find(|record| {
+                        record["record_type"] == "haplotype_copy"
+                            && record["identity"]["individual_id"] == "I1"
+                            && record["identity"]["sequence_id"] == "chr2"
+                            && record["identity"]["copy_index"] == 1
+                    })
+                    .expect("copy 1 of I1 on chr2")
+                    .clone();
+                extra["identity"]["copy_index"] = json!(2);
+                extra["phase"] = json!(2);
+                records.push(extra);
+            },
+            "trae una copia que la simulación no tiene",
+        ),
+        (
+            "unknown-individual",
+            |records| {
+                for record in records.iter_mut() {
+                    if record["record_type"] == "haplotype_copy"
+                        && record["identity"]["individual_id"] == "I2"
+                    {
+                        record["identity"]["individual_id"] = json!("I9");
+                    }
+                    if record["record_type"] == "genotype" && record["individual_id"] == "I2" {
+                        record["individual_id"] = json!("I9");
+                        for carrier in record["carriers"].as_array_mut().expect("carriers") {
+                            carrier["copy"]["individual_id"] = json!("I9");
+                        }
+                    }
+                }
+            },
+            "el individuo no tiene población conocida",
+        ),
+    ];
+    for (label, tamper, reason) in cases {
+        let parent = temporary(label);
+        fs::create_dir(&parent).expect("temporary root");
+        let destination = parent.join("result");
+        let effective_config = load_and_validate_config(&config).expect("valid fixture");
+        execute_validated_config(&effective_config, &destination).expect("complete baseline");
+        let effective_path = destination.join("effective-config.json");
+        let manifest_path = destination.join("manifest.json");
+        let mut manifest = read_json(&manifest_path);
+        let truth_path = destination.join(artifact_path(&manifest, "truth-jsonl"));
+        let mut lines = fs::read_to_string(&truth_path)
+            .expect("truth")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("truth line"))
+            .collect::<Vec<_>>();
+        let mut records = lines.split_off(1);
+        tamper(&mut records);
+        let (mut copies, mut genotypes): (Vec<_>, Vec<_>) = records
+            .into_iter()
+            .partition(|record| record["record_type"] == "haplotype_copy");
+        let identity = |copy: &Value| {
+            (
+                copy["identity"]["individual_id"]
+                    .as_str()
+                    .map(str::to_owned),
+                copy["identity"]["sequence_id"].as_str().map(str::to_owned),
+                copy["identity"]["copy_index"].as_u64(),
+            )
+        };
+        copies.sort_by_key(identity);
+        genotypes.sort_by_key(|genotype| {
+            (
+                genotype["individual_id"].as_str().map(str::to_owned),
+                genotype["locus"]["sequence_id"].as_str().map(str::to_owned),
+                genotype["locus"]["start"].as_u64(),
+                genotype["locus"]["end"].as_u64(),
+                genotype["case_id"].as_str().map(str::to_owned),
+            )
+        });
+        lines[0]["counts"]["copies"] = json!(copies.len());
+        lines[0]["counts"]["genotypes"] = json!(genotypes.len());
+        lines.extend(copies);
+        lines.extend(genotypes);
+        let text = lines
+            .iter()
+            .map(|line| serde_json::to_string(line).expect("line") + "\n")
+            .collect::<String>();
+        fs::write(&truth_path, text).expect("tampered truth");
+        refresh_artifact(&destination, &mut manifest, "truth-jsonl");
+        write_json(&manifest_path, &manifest);
+        let effective_bytes = fs::read(&effective_path).expect("effective bytes");
+        let manifest_bytes = fs::read(&manifest_path).expect("manifest bytes");
+        let error = validate_published_resources(
+            &destination,
+            &effective_path,
+            &effective_bytes,
+            &manifest_path,
+            &manifest_bytes,
+        )
+        .expect_err(label);
+        let debug = format!("{error:?}");
+        assert!(debug.contains(reason), "case {label}: {error:?}");
+        fs::remove_dir_all(parent).expect("cleanup");
+    }
+    fs::remove_dir_all(fixture_root).expect("fixture cleanup");
+}
+
+fn individual_of(record: &Value) -> &str {
+    if record["record_type"] == "haplotype_copy" {
+        record["identity"]["individual_id"]
+            .as_str()
+            .expect("individual")
+    } else {
+        record["individual_id"].as_str().expect("individual")
+    }
+}
+
+fn recount(case: &mut Value) {
+    let mut dosages = vec![0_u64; case["alleles"].as_array().expect("alleles").len()];
+    for carrier in case["carriers"].as_array().expect("carriers") {
+        dosages
+            [usize::try_from(carrier["allele_index"].as_u64().expect("index")).expect("index")] +=
+            1;
+    }
+    case["allele_dosages"] = json!(dosages);
+}
+
+/// El caso todo-REF de `I1` en la fila de frecuencia casi nula.
+fn all_reference_index(records: &[Value]) -> usize {
+    records
+        .iter()
+        .position(|record| {
+            record["case_kind"] == "snp"
+                && record["individual_id"] == "I1"
+                && record["locus"]["sequence_id"] == "chr1"
+                && record["locus"]["start"] == 7
+        })
+        .inspect(|index| {
+            assert!(
+                records[*index]["allele_dosages"][1] == 0,
+                "the low-frequency row must stay all-REF: {}",
+                records[*index]
+            );
+        })
+        .expect("the all-REF case")
+}
+
+/// Dos individuos diploides, dos secuencias, una fila de matriz frecuente y
+/// otra de frecuencia 0,01 (caso todo-REF), una deleción directa y, en `I2`,
+/// un cambio de base directo en el mismo desplazamiento de cada secuencia, con
+/// alternativos distintos: un juez que mezclara las copias de las dos
+/// secuencias al catalogar los alelos de un caso rechazaría el paquete bueno.
+fn write_truth_judge_fixture(root: &Path) -> PathBuf {
+    let fasta = root.join("reference.fa");
+    let matrix = root.join("matrix.tsv");
+    fs::write(&fasta, b">chr1\nACGTACGTACGT\n>chr2\nACGTACGTACGT\n").expect("reference");
+    fs::write(
+        &matrix,
+        "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t2\tC\tG\tP1\t0.5\nchr1\t8\tT\tA\tP1\t0.01\n",
+    )
+    .expect("matrix");
+    let config = root.join("general.toml");
+    fs::write(
+        &config,
+        format!(
+            "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
+             [population_snvs]\nmode = \"supplied\"\ninput_path = \"{}\"\n\
+             [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 2\nindividual_ids = [\"I1\", \"I2\"]\nploidy = 2\ngenotype_model = \"hwe\"\n\
+             [[direct_events]]\nevent_id = \"event-del\"\nindividual_id = \"I1\"\nphase = 0\nkind = \"deletion\"\ncontig = \"chr1\"\nstart = 4\nend = 6\n\
+             [[direct_events]]\nevent_id = \"snp-chr1\"\nindividual_id = \"I2\"\nphase = 0\nkind = \"snp\"\ncontig = \"chr1\"\nposition_1based = 11\nref = \"G\"\nalt = \"T\"\n\
+             [[direct_events]]\nevent_id = \"snp-chr2\"\nindividual_id = \"I2\"\nphase = 1\nkind = \"snp\"\ncontig = \"chr2\"\nposition_1based = 11\nref = \"G\"\nalt = \"A\"\n\
+             [reference]\nkind = \"supplied\"\nid = \"ref-main\"\nfasta = \"{}\"\n\
+             [[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 12\n\
+             [[reference.sequences]]\nid = \"chr2\"\nclass = \"chromosome\"\nlength = 12\n",
+            "0".repeat(64),
+            matrix.display(),
+            fasta.display(),
+        ),
+    )
+    .expect("truth judge config");
+    config
+}
+
+/// Dos loci de repetición en las mismas coordenadas de dos secuencias, con
+/// tractos distintos: cada caso cataloga solo los tractos de su secuencia. Un
+/// juez que mezclara las copias de las dos al ordenar los alelos de un caso
+/// de repetición rechazaría este escenario, que es válido.
+#[test]
+fn repeat_loci_at_the_same_coordinates_on_two_sequences_publish() {
+    let root = temporary("two-sequence-repeats");
+    fs::create_dir(&root).expect("root");
+    let flank = "GTTGATGTTGATGTTGATGTTG";
+    let sequence = format!("GTTGATGTTG{}{flank}", "CA".repeat(4));
+    fs::write(
+        root.join("reference.fa"),
+        format!(">chr1\n{sequence}\n>chr2\n{sequence}\n"),
+    )
+    .expect("reference");
+    fs::write(
+        root.join("matrix.tsv"),
+        "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t2\tT\tC\tP1\t0.5\n",
+    )
+    .expect("matrix");
+    let length = sequence.len();
+    let config = root.join("general.toml");
+    fs::write(
+        &config,
+        format!(
+            "config_kind = \"general\"\nschema_version = \"4\"\nseed = \"{}\"\n\
+             [population_snvs]\nmode = \"supplied\"\ninput_path = \"matrix.tsv\"\n\
+             [reference]\nkind = \"supplied\"\nid = \"ref-main\"\nfasta = \"reference.fa\"\n\
+             [[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = {length}\n\
+             [[reference.sequences]]\nid = \"chr2\"\nclass = \"chromosome\"\nlength = {length}\n\
+             [[reference.repeat_loci]]\nid = \"STR-1\"\nsequence = \"chr1\"\nstart = 11\nend = 18\nmotif = \"CA\"\n\
+             [[reference.repeat_loci.alleles]]\nunits = 5\nfrequency = 1.0\n\
+             [[reference.repeat_loci]]\nid = \"STR-2\"\nsequence = \"chr2\"\nstart = 11\nend = 18\nmotif = \"CA\"\n\
+             [[reference.repeat_loci.alleles]]\nunits = 6\nfrequency = 1.0\n\
+             [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"I1\"]\nploidy = 2\ngenotype_model = \"hwe\"\n",
+            "0".repeat(64),
+        ),
+    )
+    .expect("config");
+    let destination = root.join("result");
+    let effective = load_and_validate_config(&config).expect("valid config");
+    execute_validated_config(&effective, &destination).expect("a valid scenario publishes");
+    let truth = fs::read_to_string(destination.join("outputs/truth.jsonl")).expect("truth");
+    let repeat_cases = truth
+        .lines()
+        .filter(|line| line.contains("\"case_kind\":\"repeat\""))
+        .count();
+    assert_eq!(repeat_cases, 2, "one repeat case per sequence");
+    fs::remove_dir_all(root).expect("cleanup");
+}

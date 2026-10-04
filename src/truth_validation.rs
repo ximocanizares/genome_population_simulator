@@ -12,6 +12,7 @@ use serde::{Deserialize, Deserializer, de::Error as _};
 use serde_json::Number;
 use sha2::{Digest, Sha256};
 
+use crate::population_snvs::PreparedPopulationSnvs;
 use crate::reference::{Reference, ReferenceSequence};
 use crate::truth_schema::{
     AlleleCarrier, CopyIdentity, CopyProvenance, GenotypeCaseKind, GenotypeRecord,
@@ -126,6 +127,25 @@ pub enum TruthValidationError {
     },
     GenotypeMismatch {
         case_id: String,
+        detail: &'static str,
+    },
+    /// Falta un caso que la verdad tiene que publicar: un cambio de una copia
+    /// con la referencia que ningún caso explica, un evento estructural del
+    /// historial sin su caso o una fila de la matriz sin el caso del individuo
+    /// (DT-020 y DT-021). El intervalo está en coordenadas de la referencia,
+    /// salvo para unas bases insertadas sin evento, que no tienen coordenada
+    /// de referencia: entonces es su tramo en la copia.
+    /// Una copia declara en su procedencia (`provenance.origin`) una
+    /// población que no es la de su individuo.
+    CopyOriginMismatch {
+        identity: CopyIdentity,
+        expected: String,
+    },
+    MissingCase {
+        individual_id: String,
+        sequence_id: String,
+        start: u64,
+        end: u64,
         detail: &'static str,
     },
 }
@@ -334,7 +354,11 @@ pub(crate) fn validate_truth_for_vcf<'truth>(
 ) -> Result<ValidatedTruthForVcf<'truth>, TruthValidationError> {
     // Una sola implementación del juez: la de la publicación, con una
     // inspección que no hace nada, para que las dos no puedan divergir.
-    validate_truth_with_copy_inspection(document, reference, |_, _| {
+    // El conjunto de casos no se juzga aquí: lo juzga, con la matriz, la
+    // publicación de la verdad, que corre siempre antes que cualquier VCF.
+    // Estas fronteras solo reciben el documento y no conocen las filas de la
+    // matriz.
+    validate_truth_with_copy_inspection(document, reference, CaseSetCheck::Skip, |_, _| {
         Ok::<(), std::convert::Infallible>(())
     })
     .map_err(|error| match error {
@@ -346,6 +370,31 @@ pub(crate) fn validate_truth_for_vcf<'truth>(
         document,
         reference_id: &document.header.reference_id,
         reference_content_sha256: &document.header.reference_content_sha256,
+    })
+}
+
+/// El juez completo de la verdad sobre una verdad **ya escrita**, con las
+/// filas de la matriz y la población de cada individuo: cada caso y el
+/// conjunto de casos, con los todo-REF de cada fila.
+///
+/// Lo usa el juez de los recursos publicados, que tiene la matriz publicada
+/// y la configuración efectiva, para juzgar los bytes que de verdad quedaron
+/// en el paquete y no solo el documento en memoria del que salieron.
+pub(crate) fn validate_published_truth(
+    document: &TruthDocument,
+    reference: &Reference,
+    matrix: &MatrixCaseLoci,
+) -> Result<(), TruthValidationError> {
+    validate_truth_with_copy_inspection(
+        document,
+        reference,
+        CaseSetCheck::Judge(Some(matrix)),
+        |_, _| Ok::<(), std::convert::Infallible>(()),
+    )
+    .map_err(|error| match error {
+        InspectedValidationError::CopyReconstruction { error, .. }
+        | InspectedValidationError::Semantics(error) => *error,
+        InspectedValidationError::Inspection(never) => match never {},
     })
 }
 
@@ -371,9 +420,13 @@ pub(crate) enum InspectedValidationError<E> {
 /// los casos genotípicos con **una sola** reconstrucción por copia, en lugar de
 /// reconstruir una vez para cada cosa. Las bases no se retienen: solo los
 /// resúmenes compactos que el contraste de genotipos necesita.
+///
+/// Con [`CaseSetCheck::Judge`] juzga además el **conjunto** de casos (DT-020
+/// y DT-021): que no falte ni sobre ninguno.
 pub(crate) fn validate_truth_with_copy_inspection<E>(
     document: &TruthDocument,
     reference: &Reference,
+    case_set: CaseSetCheck<'_>,
     mut inspect: impl FnMut(&HaplotypeCopyRecord, [u8; 32]) -> Result<(), E>,
 ) -> Result<(), InspectedValidationError<E>> {
     if document.header.reference_id != reference.id().as_str() {
@@ -401,6 +454,7 @@ pub(crate) fn validate_truth_with_copy_inspection<E>(
                 source_slices,
                 pieces,
                 event_loci,
+                inherited_loss,
             } = result;
             // La huella se calcula y las bases se sueltan **antes** de la
             // inspección: esta materializa la copia del productor, y con las
@@ -416,6 +470,8 @@ pub(crate) fn validate_truth_with_copy_inspection<E>(
                     pieces,
                     history: Cow::Borrowed(&copy.history),
                     event_loci,
+                    inherited_loss,
+                    origin: Cow::Borrowed(&copy.provenance.origin),
                 },
             );
         }
@@ -426,7 +482,32 @@ pub(crate) fn validate_truth_with_copy_inspection<E>(
                 .map_err(|error| InspectedValidationError::Semantics(Box::new(error)))?;
         }
     }
+    if let CaseSetCheck::Judge(matrix) = case_set {
+        validate_case_set(document_genotypes(document), &details, matrix)
+            .map_err(|error| InspectedValidationError::Semantics(Box::new(error)))?;
+    }
     Ok(())
+}
+
+/// Si el juez comprueba también el **conjunto** de casos —que no falte ni
+/// sobre ninguno— además de cada caso.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CaseSetCheck<'a> {
+    /// Solo cada caso. Es lo que hacen las fronteras del VCF, que solo
+    /// reciben el documento y corren después de que la publicación de la
+    /// verdad haya juzgado ya el conjunto.
+    Skip,
+    /// También el conjunto. Con los loci de la matriz, exige además el caso
+    /// todo-REF de cada fila y ata a su fila todo caso SNP que no sea cambio
+    /// de una copia; sin ellos, ese caso se acepta sin poder comprobarlo.
+    Judge(Option<&'a MatrixCaseLoci>),
+}
+
+fn document_genotypes(document: &TruthDocument) -> impl Iterator<Item = &GenotypeRecord> {
+    document.records.iter().filter_map(|record| match record {
+        TruthRecord::Genotype(genotype) => Some(genotype),
+        TruthRecord::HaplotypeCopy(_) => None,
+    })
 }
 
 /// Valida y reconstruye por flujo, reteniendo únicamente metadatos compactos
@@ -447,6 +528,33 @@ pub fn validate_truth_jsonl_streaming(
     let mut summaries = BTreeMap::<CopyIdentity, CopySummary>::new();
     let mut copy_identities = BTreeSet::new();
     let mut seen_genotypes = BTreeSet::new();
+    // El conjunto de casos se juzga individuo a individuo: el orden canónico
+    // trae juntos los casos de cada uno, y solo se retienen los del actual.
+    let mut individual_cases = Vec::<GenotypeRecord>::new();
+    let mut judged_individuals = BTreeSet::<String>::new();
+    let judge_individual =
+        |cases: &[GenotypeRecord],
+         individual_id: &str,
+         summaries: &BTreeMap<CopyIdentity, CopySummary<'_>>| {
+            // Las copias de un individuo son contiguas en el orden de las
+            // identidades: se toman por rango, sin recorrer las de todos.
+            let first = CopyIdentity {
+                reference_id: reference.id().as_str().to_owned(),
+                individual_id: individual_id.to_owned(),
+                sequence_id: String::new(),
+                copy_index: 0,
+            };
+            let copies = summaries
+                .range(first..)
+                .take_while(|(identity, _)| identity.individual_id == individual_id)
+                .collect::<Vec<_>>();
+            validate_individual_case_set(
+                individual_id,
+                &cases.iter().collect::<Vec<_>>(),
+                &copies,
+                None,
+            )
+        };
     while read_jsonl_line(reader, &mut raw, line_number.saturating_add(1))? {
         line_number = line_number.saturating_add(1);
         let value = parse_wire_line(&raw, line_number)?;
@@ -505,7 +613,11 @@ pub fn validate_truth_jsonl_streaming(
                 let copy_identity = copy.identity.clone();
                 summaries.insert(
                     copy_identity.clone(),
-                    CopySummary::from_reconstructed(result, Cow::Owned(copy.history)),
+                    CopySummary::from_reconstructed(
+                        result,
+                        Cow::Owned(copy.history),
+                        Cow::Owned(copy.provenance.origin),
+                    ),
                 );
                 copy_identities.insert(copy_identity.clone());
                 previous_copy = Some(copy_identity);
@@ -544,6 +656,15 @@ pub fn validate_truth_jsonl_streaming(
                 crate::truth_schema::validate_genotype(&genotype, header, &copy_identities)
                     .map_err(TruthValidationError::Contract)?;
                 validate_genotype_semantics(&genotype, reference, &summaries)?;
+                if let Some(previous) = individual_cases.first()
+                    && previous.individual_id != genotype.individual_id
+                {
+                    let individual_id = previous.individual_id.clone();
+                    judge_individual(&individual_cases, &individual_id, &summaries)?;
+                    judged_individuals.insert(individual_id);
+                    individual_cases.clear();
+                }
+                individual_cases.push(genotype);
                 previous_genotype = Some(key);
                 genotype_count =
                     genotype_count
@@ -558,6 +679,19 @@ pub fn validate_truth_jsonl_streaming(
         }
     }
     let header = header.ok_or(TruthValidationError::EmptyDocument)?;
+    if let Some(last) = individual_cases.first() {
+        let individual_id = last.individual_id.clone();
+        judge_individual(&individual_cases, &individual_id, &summaries)?;
+        judged_individuals.insert(individual_id);
+    }
+    let without_cases = summaries
+        .keys()
+        .map(|identity| identity.individual_id.as_str())
+        .filter(|individual_id| !judged_individuals.contains(*individual_id))
+        .collect::<BTreeSet<_>>();
+    for individual_id in without_cases {
+        judge_individual(&[], individual_id, &summaries)?;
+    }
     if header.copy_count != copy_count {
         return Err(TruthValidationError::Contract(
             TruthContractError::CopyCountMismatch {
@@ -602,6 +736,7 @@ pub fn validate_and_reconstruct_truth(
                 source_slices,
                 pieces,
                 event_loci,
+                inherited_loss,
             } = result;
             reconstructed.insert(copy.identity.clone(), bases);
             details.insert(
@@ -611,6 +746,8 @@ pub fn validate_and_reconstruct_truth(
                     pieces,
                     history: Cow::Borrowed(&copy.history),
                     event_loci,
+                    inherited_loss,
+                    origin: Cow::Borrowed(&copy.provenance.origin),
                 },
             );
         }
@@ -620,6 +757,7 @@ pub fn validate_and_reconstruct_truth(
             validate_genotype_semantics(genotype, reference, &details)?;
         }
     }
+    validate_case_set(document_genotypes(&document), &details, None)?;
     Ok(ReconstructedTruth {
         document,
         copies: reconstructed,
@@ -634,6 +772,11 @@ struct ReconstructedCopy {
     source_slices: Vec<SourceSlice>,
     pieces: Vec<PieceLayout>,
     event_loci: EventLoci,
+    /// Primer tramo de la referencia que falta en el estado **heredado** de
+    /// la copia —el de sus segmentos, antes del historial—: una deleción de
+    /// segmento o un tramo que ningún segmento cubre. Ningún caso puede
+    /// explicarlo, porque un caso *indel* exige su evento en el historial.
+    inherited_loss: Option<(u64, u64)>,
 }
 
 /// Locus en coordenadas de la referencia de cada inserción y deleción del
@@ -646,18 +789,24 @@ struct CopySummary<'truth> {
     pieces: Vec<PieceLayout>,
     history: Cow<'truth, [TruthHistoryEvent]>,
     event_loci: EventLoci,
+    inherited_loss: Option<(u64, u64)>,
+    /// Procedencia declarada de la copia (`provenance.origin`).
+    origin: Cow<'truth, str>,
 }
 
 impl<'truth> CopySummary<'truth> {
     fn from_reconstructed(
         value: ReconstructedCopy,
         history: Cow<'truth, [TruthHistoryEvent]>,
+        origin: Cow<'truth, str>,
     ) -> Self {
         Self {
             source_slices: value.source_slices,
             pieces: value.pieces,
             history,
             event_loci: value.event_loci,
+            inherited_loss: value.inherited_loss,
+            origin,
         }
     }
 }
@@ -1185,6 +1334,9 @@ struct PieceLayout {
     start: u64,
     end: u64,
     inserted_provenance: Option<ModificationProvenance>,
+    /// El fragmento es un tracto de repetición, no bases insertadas, aunque
+    /// también lleve procedencia.
+    tract: bool,
 }
 
 fn reconstruct_copy(
@@ -1210,7 +1362,52 @@ fn reconstruct_copy(
     }
     let mut result = materialize_replayed_copy(copy, reference, &pieces)?;
     result.event_loci = event_loci;
+    result.inherited_loss = inherited_loss(copy, reference);
     Ok(result)
+}
+
+/// Primer tramo de la referencia que el estado heredado de la copia no
+/// conserva: una deleción de segmento, o un tramo entre segmentos o en un
+/// extremo que ninguno cubre.
+///
+/// Con el estado heredado completo, cada base de referencia que falta en la
+/// copia final la quitó una deleción del historial, y esa deleción tiene su
+/// caso. Por eso basta con mirar los segmentos, y no los loci de las
+/// deleciones: el locus de una deleción va de la primera a la última base que
+/// elimina y puede abarcar un hueco anterior, de modo que una pérdida heredada
+/// escondida dentro de él pasaría por explicada.
+fn inherited_loss(copy: &HaplotypeCopyRecord, reference: &Reference) -> Option<(u64, u64)> {
+    let deleted = copy
+        .segments
+        .iter()
+        .flat_map(|segment| segment.modifications.iter())
+        .find_map(|modification| match modification {
+            TruthModification::Deletion { start, end, .. } => Some((*start, *end)),
+            TruthModification::Snp { .. } | TruthModification::Insertion { .. } => None,
+        });
+    if deleted.is_some() {
+        return deleted;
+    }
+    let length = reference
+        .sequences()
+        .iter()
+        .find(|sequence| sequence.id().as_str() == copy.identity.sequence_id)
+        .map(ReferenceSequence::length)?;
+    let mut covered = copy
+        .segments
+        .iter()
+        .map(|segment| (segment.source.start, segment.source.end))
+        .collect::<Vec<_>>();
+    covered.sort_unstable();
+    covered.push((length, length));
+    let mut cursor = 0;
+    for (start, end) in covered {
+        if start > cursor {
+            return Some((cursor, start));
+        }
+        cursor = cursor.max(end);
+    }
+    None
 }
 
 fn history_event_id(event: &TruthHistoryEvent) -> &str {
@@ -1550,6 +1747,7 @@ fn materialize_replayed_copy(
             start,
             end,
             inserted_provenance,
+            tract: matches!(piece, ReplayPiece::RepeatAllele { .. }),
         });
     }
     Ok(ReconstructedCopy {
@@ -1557,6 +1755,7 @@ fn materialize_replayed_copy(
         source_slices,
         pieces: layouts,
         event_loci: EventLoci::new(),
+        inherited_loss: None,
     })
 }
 
@@ -1912,6 +2111,547 @@ fn mismatch(genotype: &GenotypeRecord, detail: &'static str) -> TruthValidationE
         case_id: genotype.case_id.clone(),
         detail,
     }
+}
+
+/// Loci de la matriz de SNV en que **cada** individuo de la población publica
+/// un caso SNP, aunque ninguna de sus copias lleve el alternativo (DTC-061: la
+/// matriz «conserva también loci todo-REF»).
+///
+/// `truth.jsonl` no lleva las filas de la matriz, solo su huella: las filas
+/// se publican en su propio artefacto (`population_snvs.tsv` y sus metadatos,
+/// ligados por SHA-256 en el manifiesto y en `group_digests`), y la población
+/// de cada individuo está en la configuración efectiva. Por eso este dato no
+/// se lee del documento: se lo dan al juez la publicación de la verdad, desde
+/// la matriz preparada en memoria, y el juez de los recursos publicados, desde
+/// la matriz del paquete. Con él, el juez exige el caso de cada fila, rechaza
+/// cualquier caso SNP que no sea ni fila ni cambio de una copia, exige los
+/// alelos exactos de cada caso SNP y comprueba la población de las copias y
+/// el identificador de cada caso. Sin él —al derivar el VCF o al leer solo
+/// `truth.jsonl`— nada de eso puede comprobarse, y un caso SNP sin cambio en
+/// ninguna copia se acepta.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MatrixCaseLoci {
+    /// Alternativos de cada fila, por población y por secuencia y posición en
+    /// base 0. Un locus multialélico ocupa varias filas.
+    loci_by_population: BTreeMap<String, BTreeMap<(String, u64), BTreeSet<String>>>,
+    population_by_individual: BTreeMap<String, String>,
+}
+
+impl MatrixCaseLoci {
+    /// Las filas de la matriz preparada y la población de cada individuo.
+    ///
+    /// Es lo que necesitan los dos jueces que conocen la matriz —la
+    /// publicación de la verdad y el de los recursos publicados—, y los dos
+    /// la construyen aquí, con una sola regla para pasar la posición de la
+    /// fila, en base 1, a la del caso, en base 0.
+    pub(crate) fn from_matrix<'a>(
+        matrix: &PreparedPopulationSnvs,
+        individuals: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Self {
+        let mut loci = Self::default();
+        for row in matrix.rows() {
+            loci.loci_by_population
+                .entry(row.population_id().as_str().to_owned())
+                .or_default()
+                .entry((
+                    row.contig().as_str().to_owned(),
+                    row.position_1based().saturating_sub(1),
+                ))
+                .or_default()
+                .insert(char::from(row.alternate()).to_string());
+        }
+        loci.add_populations(individuals);
+        loci
+    }
+
+    /// Solo la población de cada individuo, para una simulación sin matriz.
+    pub(crate) fn from_populations<'a>(
+        individuals: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Self {
+        let mut loci = Self::default();
+        loci.add_populations(individuals);
+        loci
+    }
+
+    fn add_populations<'a>(&mut self, individuals: impl IntoIterator<Item = (&'a str, &'a str)>) {
+        for (individual_id, population_id) in individuals {
+            self.population_by_individual
+                .insert(individual_id.to_owned(), population_id.to_owned());
+        }
+    }
+}
+
+/// Lo que ata un caso a su fuente, dentro de un individuo: el locus de un
+/// SNP, el evento de un *indel* o el intervalo de una repetición. Dos casos
+/// del mismo individuo con la misma clave serían el mismo caso publicado dos
+/// veces.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum CaseAnchor<'a> {
+    Snp {
+        sequence: &'a str,
+        position: u64,
+    },
+    Event {
+        sequence: &'a str,
+        event_id: &'a str,
+    },
+    Repeat {
+        sequence: &'a str,
+        start: u64,
+        end: u64,
+    },
+}
+
+fn case_anchor(genotype: &GenotypeRecord) -> Result<CaseAnchor<'_>, TruthValidationError> {
+    let sequence = genotype.locus.sequence_id.as_str();
+    match genotype.case_kind {
+        GenotypeCaseKind::Snp => Ok(CaseAnchor::Snp {
+            sequence,
+            position: genotype.locus.start,
+        }),
+        GenotypeCaseKind::Repeat => Ok(CaseAnchor::Repeat {
+            sequence,
+            start: genotype.locus.start,
+            end: genotype.locus.end,
+        }),
+        GenotypeCaseKind::Indel => genotype
+            .alleles
+            .iter()
+            .find_map(|allele| match allele {
+                TruthAllele::Insertion { event_id, .. }
+                | TruthAllele::Deletion { event_id, .. } => Some(CaseAnchor::Event {
+                    sequence,
+                    event_id: event_id.as_str(),
+                }),
+                TruthAllele::Reference | TruthAllele::Snp { .. } | TruthAllele::Repeat { .. } => {
+                    None
+                }
+            })
+            // No se ejercita: el contrato estructural rechaza antes un caso
+            // indel sin alelo de inserción ni de deleción. Es defensiva.
+            .ok_or_else(|| mismatch(genotype, "un caso indel nombra su evento estructural")),
+    }
+}
+
+/// **El conjunto de casos**, no cada caso: la verdad publica todos los casos
+/// que debe y ninguno más (DT-020 y DT-021).
+///
+/// El contraste caso a caso (`validate_genotype_semantics`) comprueba que cada
+/// caso **que está** concuerda con las copias. Esto comprueba lo que aquel no
+/// puede ver, individuo a individuo:
+///
+/// - **del cambio al caso**: cada diferencia de una copia con la referencia
+///   —cambio de base, bases insertadas, bases de referencia que faltan, tracto
+///   de repetición—, leída de los fragmentos que el juez replica por su
+///   cuenta, tiene su caso; también cada deleción del historial, aunque ya no
+///   cambie la copia (una que borra entera una inserción anterior), y cada
+///   fila de la matriz cuando se conoce;
+/// - **del caso a su fuente**: cada caso es uno de esos —un cambio de alguna
+///   copia del individuo, un evento de su historial o una fila de la matriz—,
+///   y ninguno se publica dos veces.
+///
+/// Un caso SNP que no es cambio de ninguna copia solo puede ser una fila de la
+/// matriz; si `matrix` no se conoce, se acepta sin poder comprobarlo.
+///
+/// Recibe los casos y las copias de **un** individuo; quien la llama agrupa.
+fn validate_individual_case_set<'a>(
+    individual_id: &str,
+    cases: &[&'a GenotypeRecord],
+    copies: &[(&'a CopyIdentity, &'a CopySummary<'a>)],
+    matrix: Option<&'a MatrixCaseLoci>,
+) -> Result<(), TruthValidationError> {
+    let mut published = BTreeMap::<CaseAnchor<'a>, (&'a GenotypeRecord, bool)>::new();
+    for genotype in cases {
+        if published
+            .insert(case_anchor(genotype)?, (*genotype, false))
+            .is_some()
+        {
+            return Err(mismatch(
+                genotype,
+                "otro caso del individuo publica ya ese locus o ese evento",
+            ));
+        }
+    }
+    let missing = |sequence: &str, start: u64, end: u64, detail: &'static str| {
+        TruthValidationError::MissingCase {
+            individual_id: individual_id.to_owned(),
+            sequence_id: sequence.to_owned(),
+            start,
+            end,
+            detail,
+        }
+    };
+    let mut require =
+        |anchor: CaseAnchor<'a>, start: u64, end: u64, detail: &'static str| match published
+            .get_mut(&anchor)
+        {
+            Some((_, required)) => {
+                *required = true;
+                Ok(())
+            }
+            None => {
+                let sequence = match anchor {
+                    CaseAnchor::Snp { sequence, .. }
+                    | CaseAnchor::Event { sequence, .. }
+                    | CaseAnchor::Repeat { sequence, .. } => sequence,
+                };
+                Err(missing(sequence, start, end, detail))
+            }
+        };
+    for (identity, copy) in copies {
+        let sequence = identity.sequence_id.as_str();
+        for slice in &copy.source_slices {
+            if slice.replaced_by_repeat {
+                require(
+                    CaseAnchor::Repeat {
+                        sequence,
+                        start: slice.start,
+                        end: slice.end,
+                    },
+                    slice.start,
+                    slice.end,
+                    "un tracto de repetición de la copia no tiene caso",
+                )?;
+            } else {
+                for snp in &slice.snps {
+                    require(
+                        CaseAnchor::Snp {
+                            sequence,
+                            position: snp.position,
+                        },
+                        snp.position,
+                        snp.position.saturating_add(1),
+                        "un cambio de base de la copia no tiene caso",
+                    )?;
+                }
+            }
+        }
+        // Inserciones del historial por la fuente de su procedencia, para no
+        // recorrer el historial entero por cada fragmento insertado.
+        let mut insertions = BTreeMap::<&TruthSourceRef, Vec<_>>::new();
+        for event in copy.history.iter() {
+            if let TruthHistoryEvent::Insertion {
+                event_id,
+                provenance,
+                ..
+            } = event
+            {
+                insertions
+                    .entry(&provenance.source)
+                    .or_default()
+                    .push((provenance, event_id.as_str()));
+            }
+        }
+        for piece in copy.pieces.iter().filter(|piece| !piece.tract) {
+            let Some(provenance) = &piece.inserted_provenance else {
+                continue;
+            };
+            let event_id = insertions.get(&provenance.source).and_then(|candidates| {
+                candidates
+                    .iter()
+                    .find(|(historical, _)| *historical == provenance)
+                    .map(|(_, event_id)| *event_id)
+            });
+            // Bases insertadas sin evento en el historial solo pueden venir de
+            // un segmento heredado, y ningún caso puede explicarlas: un caso
+            // indel exige su evento en el historial.
+            let event_id = event_id.ok_or_else(|| {
+                missing(
+                    sequence,
+                    piece.start,
+                    piece.end,
+                    "unas bases insertadas de la copia no tienen evento ni caso",
+                )
+            })?;
+            let (start, end) = copy.event_loci.get(event_id).copied().unwrap_or_default();
+            require(
+                CaseAnchor::Event { sequence, event_id },
+                start,
+                end,
+                "unas bases insertadas de la copia no tienen caso",
+            )?;
+        }
+        for event in copy.history.iter() {
+            if let TruthHistoryEvent::Deletion { event_id, .. } = event {
+                let (start, end) = copy.event_loci.get(event_id).copied().unwrap_or_default();
+                require(
+                    CaseAnchor::Event {
+                        sequence,
+                        event_id: event_id.as_str(),
+                    },
+                    start,
+                    end,
+                    "una deleción del historial no tiene caso",
+                )?;
+            }
+        }
+        if let Some((start, end)) = copy.inherited_loss {
+            return Err(missing(
+                sequence,
+                start,
+                end,
+                "faltan bases de referencia en el estado heredado de los segmentos, sin evento ni caso",
+            ));
+        }
+    }
+    let mut population = None;
+    if let Some(matrix) = matrix {
+        // Un individuo del documento que no es de la simulación. Al proyectar
+        // no se alcanza —el contraste de las copias con lo simulado lo
+        // rechaza antes—, pero en el juez de los recursos publicados sí: un
+        // paquete con un individuo renombrado y sus identificadores de caso
+        // rehechos llega aquí, y lo ejercita
+        // `published_truth_is_judged_with_the_published_matrix`.
+        let known = matrix
+            .population_by_individual
+            .get(individual_id)
+            .ok_or_else(|| missing("", 0, 0, "el individuo no tiene población conocida"))?;
+        population = Some(known.as_str());
+        let rows = matrix.loci_by_population.get(known.as_str());
+        for (sequence, position) in rows.into_iter().flat_map(BTreeMap::keys) {
+            require(
+                CaseAnchor::Snp {
+                    sequence,
+                    position: *position,
+                },
+                *position,
+                position.saturating_add(1),
+                "una fila de la matriz no tiene el caso del individuo",
+            )?;
+        }
+    }
+    for (anchor, (genotype, required)) in &published {
+        if *required || (matrix.is_none() && matches!(anchor, CaseAnchor::Snp { .. })) {
+            continue;
+        }
+        return Err(mismatch(
+            genotype,
+            "el caso no corresponde a ningún cambio de las copias, evento del historial ni fila de la matriz",
+        ));
+    }
+    if let Some((matrix, population)) = matrix.zip(population) {
+        let rows = matrix.loci_by_population.get(population);
+        // La población que declaran las copias es la del individuo.
+        let origin = format!("{COPY_ORIGIN_PREFIX}{population}");
+        if let Some((identity, _)) = copies.iter().find(|(_, copy)| copy.origin != origin) {
+            return Err(TruthValidationError::CopyOriginMismatch {
+                identity: (*identity).clone(),
+                expected: origin,
+            });
+        }
+        for genotype in cases {
+            if genotype.case_kind == GenotypeCaseKind::Snp {
+                let rows = rows.and_then(|rows| {
+                    rows.get(&(genotype.locus.sequence_id.clone(), genotype.locus.start))
+                });
+                if genotype.alleles != expected_snp_alleles(genotype, copies, rows) {
+                    return Err(mismatch(
+                        genotype,
+                        "los alelos del caso SNP no son los de la fila de la matriz y los observados en las copias",
+                    ));
+                }
+            }
+            if genotype.case_kind == GenotypeCaseKind::Repeat
+                && genotype.alleles != expected_repeat_alleles(genotype, copies)
+            {
+                return Err(mismatch(
+                    genotype,
+                    "los alelos del caso de repetición no son los de sus copias en su orden",
+                ));
+            }
+            if genotype.case_id != expected_case_id(population, genotype) {
+                return Err(mismatch(
+                    genotype,
+                    "el identificador del caso no es el que dan su población, individuo, locus y alelos",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Prefijo de `provenance.origin` en las copias de una población inicial; le
+/// sigue el identificador de la población (`schemas/truth-v4.md`).
+const COPY_ORIGIN_PREFIX: &str = "initial_population:";
+
+/// Catálogo exacto de un caso SNP: la referencia; después, si el locus es una
+/// fila de la matriz, sus alternativos en orden de base, y a continuación los
+/// observados en las copias que la fila no tiene, en el orden en que aparecen
+/// de la primera copia a la última; si no es fila, solo los observados, en
+/// orden de base.
+///
+/// La rama de «observados que la fila no tiene» **no se alcanza** desde una
+/// configuración: un cambio de base directo en una fila de la matriz con un
+/// alternativo que la fila no tiene se rechaza antes de simular
+/// (`ExplicitSnpAlleleOutsideMatrix`, comprobado ejecutándolo). Se conserva
+/// porque es la regla del productor, y ninguna prueba distingue si esos
+/// observados se añaden o no.
+fn expected_snp_alleles(
+    genotype: &GenotypeRecord,
+    copies: &[(&CopyIdentity, &CopySummary<'_>)],
+    rows: Option<&BTreeSet<String>>,
+) -> Vec<TruthAllele> {
+    let mut observed = Vec::<String>::new();
+    for (identity, copy) in copies {
+        if identity.sequence_id != genotype.locus.sequence_id {
+            continue;
+        }
+        let alternate = copy
+            .source_slices
+            .iter()
+            .find(|slice| {
+                !slice.replaced_by_repeat
+                    && slice.start <= genotype.locus.start
+                    && genotype.locus.start < slice.end
+            })
+            .and_then(|slice| {
+                slice
+                    .snps
+                    .binary_search_by_key(&genotype.locus.start, |snp| snp.position)
+                    .ok()
+                    .map(|index| slice.snps[index].alternate.clone())
+            });
+        if let Some(alternate) = alternate
+            && !observed.contains(&alternate)
+        {
+            observed.push(alternate);
+        }
+    }
+    let alternates = match rows {
+        Some(rows) => {
+            let mut alternates = rows.iter().cloned().collect::<Vec<_>>();
+            alternates.extend(observed.into_iter().filter(|base| !rows.contains(base)));
+            alternates
+        }
+        None => {
+            observed.sort_unstable();
+            observed
+        }
+    };
+    std::iter::once(TruthAllele::Reference)
+        .chain(alternates.into_iter().map(|base| TruthAllele::Snp { base }))
+        .collect()
+}
+
+/// Catálogo exacto de un caso de repetición: la referencia y después cada
+/// tracto distinto que llevan las copias del individuo en ese intervalo, en el
+/// orden en que aparece de la primera copia a la última.
+fn expected_repeat_alleles(
+    genotype: &GenotypeRecord,
+    copies: &[(&CopyIdentity, &CopySummary<'_>)],
+) -> Vec<TruthAllele> {
+    let mut alleles = vec![TruthAllele::Reference];
+    for (identity, copy) in copies {
+        if identity.sequence_id != genotype.locus.sequence_id {
+            continue;
+        }
+        let tract = copy.history.iter().find_map(|event| match event {
+            TruthHistoryEvent::RepeatAllele {
+                locus_id,
+                start,
+                end,
+                bases,
+                blocks,
+                ..
+            } if *start == genotype.locus.start && *end == genotype.locus.end => {
+                Some(TruthAllele::Repeat {
+                    locus_id: locus_id.clone(),
+                    bases: bases.clone(),
+                    blocks: blocks.clone(),
+                })
+            }
+            TruthHistoryEvent::RepeatAllele { .. }
+            | TruthHistoryEvent::Snp { .. }
+            | TruthHistoryEvent::Insertion { .. }
+            | TruthHistoryEvent::Deletion { .. } => None,
+        });
+        if let Some(tract) = tract
+            && !alleles.contains(&tract)
+        {
+            alleles.push(tract);
+        }
+    }
+    alleles
+}
+
+/// El `case_id` que corresponde a un caso: `CASE_` seguido de los 59
+/// primeros dígitos hexadecimales del SHA-256 de población, individuo,
+/// secuencia, posición en base 1 del inicio del locus y la lista de claves de
+/// sus alelos separadas por comas, cada campo terminado en un byte nulo
+/// (`schemas/truth-v4.md`). Implementación propia del juez.
+fn expected_case_id(population: &str, genotype: &GenotypeRecord) -> String {
+    let alleles = genotype
+        .alleles
+        .iter()
+        .map(|allele| match allele {
+            TruthAllele::Reference => "REF".to_owned(),
+            TruthAllele::Snp { base } => format!("SNP:{base}"),
+            TruthAllele::Insertion {
+                event_id, bases, ..
+            } => format!("INS:{event_id}:{bases}"),
+            TruthAllele::Deletion {
+                event_id,
+                start,
+                end,
+                ..
+            } => format!("DEL:{event_id}:{start}:{end}"),
+            TruthAllele::Repeat {
+                locus_id, bases, ..
+            } => format!("STR:{locus_id}:{bases}"),
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let position = genotype.locus.start.saturating_add(1).to_string();
+    let mut hasher = Sha256::new();
+    for field in [
+        population,
+        genotype.individual_id.as_str(),
+        genotype.locus.sequence_id.as_str(),
+        position.as_str(),
+        alleles.as_str(),
+    ] {
+        hasher.update(field.as_bytes());
+        hasher.update([0]);
+    }
+    let digest = format!("{:x}", hasher.finalize());
+    format!("CASE_{}", &digest[..59])
+}
+
+/// Agrupa por individuo los casos y las copias de un documento completo y
+/// juzga el conjunto de casos de cada uno.
+fn validate_case_set<'truth>(
+    genotypes: impl Iterator<Item = &'truth GenotypeRecord>,
+    copies: &BTreeMap<CopyIdentity, CopySummary<'_>>,
+    matrix: Option<&MatrixCaseLoci>,
+) -> Result<(), TruthValidationError> {
+    let mut cases = BTreeMap::<&str, Vec<&GenotypeRecord>>::new();
+    for genotype in genotypes {
+        cases
+            .entry(genotype.individual_id.as_str())
+            .or_default()
+            .push(genotype);
+    }
+    let mut by_individual = BTreeMap::<&str, Vec<(&CopyIdentity, &CopySummary<'_>)>>::new();
+    for (identity, copy) in copies {
+        by_individual
+            .entry(identity.individual_id.as_str())
+            .or_default()
+            .push((identity, copy));
+    }
+    let individuals = cases
+        .keys()
+        .chain(by_individual.keys())
+        .copied()
+        .collect::<BTreeSet<_>>();
+    for individual_id in individuals {
+        validate_individual_case_set(
+            individual_id,
+            cases.get(individual_id).map_or(&[], Vec::as_slice),
+            by_individual.get(individual_id).map_or(&[], Vec::as_slice),
+            matrix,
+        )?;
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]

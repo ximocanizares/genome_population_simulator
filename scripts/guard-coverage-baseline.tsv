@@ -142,6 +142,21 @@
 # unitaria `a_case_without_an_alternate_needs_an_unchanged_copy`, que exige su
 # motivo.
 #
+# **El 03/10/2026 `src/results.rs` pasa de 538 a 539 comprobaciones; el techo
+# sigue en 425.** Entra el rechazo del juez de los recursos publicados cuando
+# la verdad del paquete no supera el juez completo de la verdad
+# (`validate_physical_truth`, DT-020 y DT-021): hasta ese día ese juez solo
+# miraba la cabecera de la verdad. Lo dispara
+# `published_truth_is_judged_with_the_published_matrix`, que exige el motivo
+# exacto en cinco alteraciones de un paquete real.
+#
+# **El 04/10/2026 `src/results.rs` pasa de 539 a 541; el techo sigue en
+# 425.** Entran los dos rechazos del mismo juez cuando las copias de la verdad
+# publicada no son exactamente las de la simulación —falta una, o sobra una—,
+# que al proyectar cubría el contraste con lo simulado y aquí no cubría nadie.
+# Los dispara la misma prueba, con un individuo quitado, una copia quitada y
+# una copia de más.
+#
 # Medido el 23/09/2026; oráculo y verificador del VCF remedidos el 29/09/2026
 # (168 a 52 y 25 a 22, con el mismo número de comprobaciones); `results.rs` y
 # `event_manifest.rs` medidos por primera vez el 29/09/2026.
@@ -149,5 +164,5 @@
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	109	22
 src/f5_closure.rs	42	5
-src/results.rs	538	425
+src/results.rs	541	425
 src/event_manifest.rs	147	117

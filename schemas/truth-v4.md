@@ -184,3 +184,120 @@ portadora es la referencia alrededor del locus, de una de dos maneras:
   ninguna otra copia cambia: no queda cambio alguno y no se compone ventana.
 
 Un caso cuya copia difiere y no tiene ALT sigue siendo un defecto interno.
+
+## El conjunto de casos
+
+**Desde el 3 de octubre de 2026** el juez de la verdad comprueba no solo que
+cada caso publicado concuerde con las copias, sino que estén **todos los
+casos que deben estar y ninguno más** (DT-020 y DT-021). Hasta esa fecha un
+productor que omitiera un caso —y bajara el recuento de la cabecera— publicaba
+sin error si no había VCF, y un caso sin ningún alternativo se podía
+desplazar, inventar o duplicar.
+
+Lo que la verdad publica, por **individuo**, es exactamente esto:
+
+- **un caso SNP por cada fila de la matriz de su población**, en su secuencia
+  y posición, aunque ninguna de sus copias lleve el alternativo (caso
+  todo-REF; DTC-061: la matriz «conserva también loci todo-REF»);
+- **un caso SNP por cada posición en que alguna de sus copias lleva un cambio
+  de base vigente**, salvo que ya la cubra el caso de una fila de la matriz.
+  Un cambio de base que una deleción posterior eliminó sigue en el historial,
+  pero deja de ser vigente y no tiene caso propio;
+- **un caso *indel* por cada deleción del historial** de sus copias, también
+  cuando ya no cambia la copia —una deleción que borra entera una inserción
+  anterior—, porque el evento ocurrió (sección anterior);
+- **un caso *indel* por cada inserción de la que alguna de sus copias
+  conserve bases**. Una inserción que una deleción posterior borró entera no
+  tiene caso: sus `piece_links` estarían vacíos, y una inserción solo es
+  válida si conserva alguno;
+- **un caso de repetición por cada intervalo en que alguna de sus copias
+  lleva un tracto realizado** distinto del de la referencia. Un locus cuyas
+  copias conservan todas el tracto de la referencia no publica caso.
+
+Cada caso se identifica, dentro de su individuo, por su **fuente**: la
+posición de un caso SNP, el evento de un caso *indel*, el intervalo de un caso
+de repetición. Dos casos con la misma fuente son el mismo caso publicado dos
+veces, aunque lleven `case_id` distintos, y se rechazan.
+
+**Los alelos de un caso SNP** son exactamente estos y en este orden: la
+referencia; después, si el locus es una fila de la matriz de la población del
+individuo, los alternativos de esa fila en orden de base, seguidos de los que
+llevan sus copias y la fila no tiene, en el orden en que aparecen de la
+primera copia a la última; si no es fila, los que llevan sus copias, en orden
+de base. Un alternativo que nadie lleva solo puede venir de la fila.
+
+**Los alelos de un caso de repetición** son la referencia y después cada
+tracto distinto que llevan las copias del individuo en ese intervalo, en el
+orden en que aparece de la primera copia a la última (por `copy_index`). Es
+el orden que produce el productor, y el identificador del caso depende de él.
+
+**La población de cada copia** se declara en su procedencia como
+`provenance.origin = "initial_population:<población>"`, y es la de su
+individuo.
+
+**El identificador de un caso** (`case_id`) es `CASE_` seguido de los 59
+primeros dígitos hexadecimales del SHA-256 de cinco campos, cada uno seguido
+de un byte nulo: la población del individuo, el individuo, la secuencia, la
+posición en base 1 del inicio del locus y la lista de claves de sus alelos,
+en su orden y separadas por comas. Las claves son `REF`, `SNP:<base>`,
+`INS:<evento>:<bases>`, `DEL:<evento>:<inicio>:<fin>` (coordenadas del evento
+fuente) y `STR:<locus>:<bases>`.
+
+El juez lo comprueba en las dos direcciones, con su propia réplica de las
+copias y sin usar código del productor:
+
+- **del cambio al caso.** Cada diferencia de una copia con la referencia,
+  leída de los fragmentos que el juez replica —un cambio de base, unas bases
+  insertadas, un tracto de repetición, unas bases de la referencia que
+  faltan—, tiene que quedar explicada por un caso. Las bases insertadas
+  tienen que proceder de una inserción del historial. Las bases de la
+  referencia solo pueden faltar porque las quitó una deleción del historial,
+  y cada deleción del historial tiene su caso: el estado **heredado** de la
+  copia —el de sus segmentos, antes del historial— tiene que conservar la
+  referencia entera, sin deleciones de segmento ni tramos que ningún segmento
+  cubra. El productor no escribe nunca un cambio estructural en los
+  segmentos. Cuando se conocen, cada fila de la matriz tiene el caso de cada
+  individuo de su población;
+- **del caso a su fuente.** Cada caso tiene que ser uno de los anteriores.
+  Un caso *indel* o de repetición que no corresponde a ningún cambio ni
+  evento de las copias del individuo se rechaza, aunque todas sus copias sean
+  referencia.
+
+**Las filas de la matriz no van en `truth.jsonl`**, solo su huella; se
+publican en su propio artefacto (`population_snvs.tsv` y sus metadatos,
+ligados por SHA-256 en el manifiesto y en `group_digests`), y la población de
+cada individuo está en la configuración efectiva. El juez comprueba con ellas
+los casos todo-REF, el ancla de un caso SNP que no es cambio de ninguna copia,
+los alelos exactos y en orden de cada caso SNP y de repetición, la población
+de las copias y el identificador de cada caso, en dos momentos que corren siempre, con VCF o
+sin él:
+
+- **al proyectar la verdad**, sobre el documento en memoria, con la matriz
+  preparada y la población de cada individuo simulado;
+- **en el juez de los recursos publicados**, sobre los bytes de `truth.jsonl`
+  que quedaron en el paquete, con la matriz publicada —también la
+  reutilizada, que lee de su ruta— y la población de cada individuo según la
+  configuración efectiva. Hasta el 3 de octubre de 2026 este juez solo miraba
+  la cabecera de la verdad. Como aquí no hay estado simulado con el que
+  contrastar las copias, exige además que las copias sean exactamente cada
+  individuo de la configuración efectiva, por cada secuencia de la
+  referencia, por cada copia de la ploidía de su población: ni falta ni
+  sobra ninguna.
+
+Quien lee solo `truth.jsonl` —el lector completo y el lector por flujo—
+comprueba el conjunto sin la matriz: un caso SNP sin cambio en ninguna copia
+lo acepta sin poder comprobarlo, y no comprueba alelos exactos, población ni
+identificador. El lector por flujo, además, rechaza toda verdad v5 (DT-015).
+Las fronteras internas que derivan el VCF no juzgan el conjunto: solo reciben
+el documento y corren después de la publicación de la verdad.
+
+Si el juez rechaza el conjunto al proyectar, la ejecución falla con un
+defecto interno (`GPS-INTERNAL-001`); si lo rechaza el juez de los recursos
+publicados, con el error de documento producido de ese juez
+(`GPS-FMT-006`), como el resto de sus rechazos. También es defecto interno,
+desde la misma fecha, que el documento recién proyectado incumpla el contrato
+estructural de la verdad —un portador que es copia de otro individuo, un
+identificador fuera de léxico—: antes salía como `GPS-FMT-006`, un error de
+formato que apuntaba a la entrada del usuario cuando el documento lo había
+escrito el propio programa. No cambia la versión ni ningún campo: lo que se
+escribe es lo mismo que antes, byte a byte.

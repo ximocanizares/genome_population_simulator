@@ -2376,6 +2376,14 @@ fn validate_published_resources_v3(
         matrix.as_ref(),
         effective_path,
     )?;
+    validate_physical_truth(
+        root,
+        &artifacts,
+        &physical_config,
+        source_reference,
+        matrix.as_ref(),
+        effective_path,
+    )?;
     if reference_value.get("source").and_then(Value::as_str) == Some("simulated") {
         validate_generated_reference(
             reference_value,
@@ -4095,6 +4103,120 @@ fn validate_physical_initial_population_statistics(
         return Err(effective_error(
             effective_path,
             "estadísticas iniciales no coinciden con matriz, semilla y eventos físicos",
+        ));
+    }
+    Ok(())
+}
+
+/// **El juez completo de la verdad sobre los bytes publicados** (DT-020 y
+/// DT-021), con la matriz publicada y la población de cada individuo según la
+/// configuración efectiva: cada caso contra las copias que reconstruye por su
+/// cuenta, y el conjunto de casos, todo-REF incluidos.
+///
+/// La publicación de la verdad ya juzgó el documento en memoria; esto juzga
+/// lo que quedó escrito en el paquete, que es lo que leerá quien lo use. Hasta
+/// el 3 de octubre de 2026 este juez solo miraba la cabecera de la verdad.
+fn validate_physical_truth(
+    root: &Path,
+    artifacts: &[ArtifactRecord],
+    physical_config: &EffectiveConfig,
+    reference: &Reference,
+    matrix: Option<&PreparedPopulationSnvs>,
+    effective_path: &Path,
+) -> Result<(), Diagnostic> {
+    // Sin poblaciones iniciales la verdad no lleva copias ni casos, y la
+    // referencia puede haberse leído sin bases: su cabecera la juzga ya
+    // `validate_published_reference_names`.
+    let Some(truth) = artifacts
+        .iter()
+        .find(|artifact| artifact.id == "truth-jsonl")
+        .filter(|_| !physical_config.initial_populations().is_empty())
+    else {
+        return Ok(());
+    };
+    let populations = physical_config
+        .initial_populations()
+        .iter()
+        .flat_map(|population| {
+            population
+                .individual_ids()
+                .iter()
+                .map(move |individual| (individual.as_str(), population.population_id().as_str()))
+        });
+    let case_loci = match matrix {
+        Some(matrix) => crate::truth_validation::MatrixCaseLoci::from_matrix(matrix, populations),
+        None => crate::truth_validation::MatrixCaseLoci::from_populations(populations),
+    };
+    let path = root.join(&truth.path);
+    let document = std::fs::File::open(&path)
+        .map_err(|error| format!("{error}"))
+        .and_then(|file| {
+            crate::truth_validation::read_truth_jsonl(&mut std::io::BufReader::new(file))
+                .and_then(|document| {
+                    crate::truth_validation::validate_published_truth(
+                        &document, reference, &case_loci,
+                    )
+                    .map(|()| document)
+                })
+                .map_err(|error| format!("{error:?}"))
+        })
+        .map_err(|detail| {
+            effective_error(
+                effective_path,
+                format!("la verdad publicada no supera el juez de la verdad: {detail}"),
+            )
+        })?;
+    // **Qué copias hay.** El juez de la verdad recorre los individuos y las
+    // copias que el documento trae; al proyectar, el contraste con lo simulado
+    // exige además que estén todas, pero aquí no hay estado simulado. Las
+    // copias tienen que ser exactamente cada individuo de la configuración
+    // efectiva, por cada secuencia de la referencia, por cada copia de la
+    // ploidía de su población.
+    let expected = physical_config
+        .initial_populations()
+        .iter()
+        .flat_map(|population| {
+            population
+                .individual_ids()
+                .iter()
+                .flat_map(move |individual| {
+                    reference.sequences().iter().flat_map(move |sequence| {
+                        (0..population.ploidy().copy_count()).map(move |copy_index| {
+                            crate::truth_schema::CopyIdentity {
+                                reference_id: reference.id().as_str().to_owned(),
+                                individual_id: individual.as_str().to_owned(),
+                                sequence_id: sequence.id().as_str().to_owned(),
+                                copy_index,
+                            }
+                        })
+                    })
+                })
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let published = document
+        .records
+        .iter()
+        .filter_map(|record| match record {
+            crate::truth_schema::TruthRecord::HaplotypeCopy(copy) => Some(&copy.identity),
+            crate::truth_schema::TruthRecord::Genotype(_) => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    if let Some(missing) = expected
+        .iter()
+        .find(|identity| !published.contains(identity))
+    {
+        return Err(effective_error(
+            effective_path,
+            format!("a la verdad publicada le falta una copia de la simulación: {missing:?}"),
+        ));
+    }
+    if let Some(extra) = published
+        .iter()
+        .find(|identity| !expected.contains(**identity))
+    {
+        return Err(effective_error(
+            effective_path,
+            format!("la verdad publicada trae una copia que la simulación no tiene: {extra:?}"),
         ));
     }
     Ok(())
