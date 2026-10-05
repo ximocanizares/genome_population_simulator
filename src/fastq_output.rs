@@ -351,16 +351,14 @@ impl FinalPairedFastqStream {
             r2,
             ..
         } = self;
-        let record_r1 = workspace.finish_streamed_artifact(r1, |temporary| {
-            crate::fastq_validation::validate_final_fastq_mate(temporary, TechnicalMate::R1)
-                .map_err(|error| invariant("write_final_paired_fastq", &error.to_string()))
-        })?;
-        let record_r2 = match maybe_inject_final_r2_failure().and_then(|()| {
-            workspace.finish_streamed_artifact(r2, |temporary| {
-                crate::fastq_validation::validate_final_fastq_mate(temporary, TechnicalMate::R2)
-                    .map_err(|error| invariant("write_final_paired_fastq", &error.to_string()))
-            })
-        }) {
+        // Cada mate se juzga una sola vez, dentro de `validate_final_paired_fastq`
+        // más abajo, que empieza por el juez de cada mate y descarta los dos
+        // artefactos si algo falla. Juzgarlos también aquí los descomprimía dos
+        // veces enteras sin añadir ninguna comprobación.
+        let record_r1 = workspace.finish_streamed_artifact(r1, |_| Ok(()))?;
+        let record_r2 = match maybe_inject_final_r2_failure()
+            .and_then(|()| workspace.finish_streamed_artifact(r2, |_| Ok(())))
+        {
             Ok(record) => record,
             Err(error) => {
                 workspace.discard_last_artifact(&record_r1)?;

@@ -53,9 +53,12 @@ documenta mejor.
 | DT-023 | Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete | Baja | 04/10/2026 | **Cerrada por aceptación (04/10/2026)** |
 | DT-024 | `validate_published_resources` no termina con `lineages` = 18446744073709551615 en la configuración efectiva | Media | 04/10/2026 | Abierta |
 | DT-025 | `validate_published_resources` aborta con `capacity overflow` si `reference_units[1]` = 18446744073709551615 en la efectiva | Media | 04/10/2026 | Abierta |
-| DT-026 | El juez del FASTQ final por pareja no lee ni un registro: toda la validación de registros es código muerto en producción | **Grave** | 05/10/2026 | Abierta |
+| DT-026 | El juez de cada mate del FASTQ final no leía ni un registro: toda la validación de registros era código muerto en producción | **Grave** | 05/10/2026 | **Cerrada (05/10/2026)** |
 | DT-027 | La verdad de un paquete sin poblaciones no se juzga: 31 alteraciones de la cabecera pasan el juez de los recursos publicados | Media | 05/10/2026 | Abierta |
 | DT-028 | Sospecha: un alelo de referencia con una clave desconocida se acepta, el alelo SNP las rechaza | Baja | 05/10/2026 | Abierta, sin reproducir del todo |
+| DT-029 | El juez del FASTQ final no comprueba siete propiedades del contrato: identidad del fichero, unicidad de la pareja, formato de los identificadores, longitud, `N` con Phred 0, R1 frente a R2 y resúmenes del manifiesto | Media | 05/10/2026 | Abierta; destino F4.5.3 |
+| DT-030 | Un bloque BGZF que declara más de 64 KiB descomprimidos hace abortar al juez con un pánico en vez de rechazar el fichero | Media | 05/10/2026 | Abierta; bloqueada por la versión de `noodles-bgzf` |
+| DT-031 | Una referencia corta con tasa de quimeras alta aborta como «invariante imposible» en vez de rechazarse como configuración | Baja | 05/10/2026 | Abierta |
 
 ---
 
@@ -1923,29 +1926,140 @@ pánico `capacity overflow` en vez de rechazar el documento. **Igual en la base
 
 ---
 
-## DT-026. El juez del FASTQ final por pareja no lee ningún registro
+## DT-026. El juez de cada mate del FASTQ final no leía ningún registro
 
-**Gravedad: grave.** El juez que debía decidir si el FASTQ final publicado es
-correcto da por bueno cualquier contenido.
+**Gravedad: grave. Estado: cerrada el 5 de octubre de 2026, el mismo día en que
+se anotó.**
+
+El juez que debía decidir si cada mate del FASTQ final publicado era correcto
+daba por bueno cualquier contenido.
 
 Lo encontró el corpus de la revisión adversarial del 05/10/2026, al comparar la
-ampliación de la puerta con la base `a4beae1`. **Es anterior a ese cambio**:
-la base da el mismo resultado. En `validate_final_fastq_mate`
-(`src/fastq_validation.rs`, líneas 234-242), `file.try_clone()` **comparte la
-posición de lectura** con el fichero original; `validate_canonical_bgzf_eof` la
-deja al final del fichero, y el lector BGZF que viene después lee cero líneas y
-devuelve `Ok`. Por tanto **toda `validate_final_record`** —la estructura de
-cuatro líneas, el alfabeto de las bases y el de las calidades— **es código
-muerto en producción**.
+ampliación de la puerta con la base `a4beae1`, y era anterior a ese cambio. En
+`validate_final_fastq_mate` (`src/fastq_validation.rs`, entonces líneas
+234-242), `file.try_clone()` **compartía la posición de lectura** con el
+fichero original; `validate_canonical_bgzf_eof` la dejaba al final del fichero,
+y el lector BGZF que venía después leía cero líneas y devolvía `Ok`. Por tanto
+**toda `validate_final_record`** —la estructura de cuatro líneas, el alfabeto
+de las bases y el de las calidades— **era código muerto en producción**.
 
-*Reproducción.* `printf 'hello\nworld\n+\nxx\n' | bgzip -c > a.fq.gz` y
-`validate_final_fastq_mate` sobre ese fichero devuelve `Ok`. De los 268 FASTQ
-corruptos del corpus, 260 pasan. El mutante «`validate_final_record` devuelve
-`Ok`» sobrevive a la batería entera.
+*Reproducción, sobre el código de entonces.* `printf 'hello\nworld\n+\nxx\n' |
+bgzip -c > a.fq.gz` y `validate_final_fastq_mate` sobre ese fichero devolvía
+`Ok`. De los 268 FASTQ corruptos del corpus pasaban 260, y el mutante
+«`validate_final_record` devuelve `Ok`» sobrevivía a la batería entera.
 
-*Arreglo probable, que no se aplica aquí.* Rebobinar el fichero tras la
-comprobación del marcador de fin, como ya hace `validate_wgs_fastq` hacia la
-línea 644. Irá en un encargo aparte, con su regresión verificada fallando.
+### Cómo se cerró
+
+**Corrección.** Se abre el fichero una sola vez, se comprueba el marcador de
+fin sobre ese descriptor y se **rebobina** al principio antes de leerlo, igual
+que ya hacía el juez del FASTQ WGS de F3 (`validate_wgs_fastq`). Desaparece el
+`try_clone`; no queda ninguno en `src/`.
+
+**Una sola pasada del juez de cada mate.** Encendido el juez, cada mate se
+juzgaba dos veces enteras al publicar: una en el escritor
+(`src/fastq_output.rs`, al catalogar cada mate) y otra al empezar el juez de la
+pareja (`validate_final_paired_fastq`). Se quita la del escritor. Queda la del
+juez de la pareja, que es la única ruta por la que pasa toda publicación —el
+escritor por flujo y el de colección acaban en el mismo cierre— y que, si algo
+falla, descarta los dos artefactos. Ningún contrato se rompe: la comprobación
+sigue ocurriendo antes de la publicación atómica (REQ-DAT-17). El juez de la
+pareja sigue releyendo después las cabeceras de los dos mates para
+compararlas; esa segunda lectura no se ha fundido con la primera.
+
+**Lo más importante era que el juez encendido no rechazara nada válido**,
+porque su código no se había ejecutado nunca fuera de las pruebas. Se comprobó
+de tres formas:
+
+- **la batería entera**, que publica FASTQ finales en decenas de escenarios y
+  ahora los pasa todos por el juez de registros: con el rebobinado solo, 1670
+  pasan, 0 fallan y 11 ignoradas, las mismas cifras que sin él; con todo el
+  cambio, 1690, 0 y 11;
+- **una exploración de 2240 escenarios con lecturas** (240 + 1000 + 1000,
+  generados al azar con tres semillas fijas), ejecutados con el binario de la
+  base `2eaced4` (SHA-256 `9e0c07e1…802bf0`) y con el del árbol final
+  (`e5a38618…f9e684`). Combinan referencia simulada y suministrada —esta con
+  minúsculas y tiradas de `N`—, microsatélites de tracto existente, insertados
+  en la referencia, colocados en la simulada y con deslizamiento germinal,
+  referencia reducida, tartamudeo técnico, PCR con y sin tartamudeo clonal,
+  quimeras, contaminación, saltos de índice, errores de secuenciación
+  encendidos y apagados, y longitudes de lectura de 1 a 150. **Ninguno cambia
+  de resultado**: los 2201 que publican en la base publican con el juez
+  encendido, con los FASTQ **idénticos byte a byte**, y los 39 que la
+  configuración rechaza se rechazan igual en los dos. Se midió dos veces: con
+  el rebobinado solo (binario `79125208…cc90f9`) y con el árbol final. En las
+  dos tandas de mil, 1613 escenarios publican al menos una pareja (5 485 685
+  parejas); el resto pide cobertura cero. La revisión adversarial añadió 804
+  escenarios propios, con lecturas extremas, sin ningún cambio de resultado,
+  y 46 casos BGZF límite, cada uno con el veredicto que el juez debe dar hoy
+  (dos son el pánico de DT-030; nueve, huecos de DT-029; y uno, una calidad
+  Q93 por encima del perfil, la admite el contrato, que con un desplazamiento
+  de calidad permite cualquier Phred de 0 a 93);
+- **dos jueces externos en Python** sobre las dos tandas de mil: uno con la
+  cabecera de REQ-DAT-68, el alfabeto `ACGTN`, el separador y las calidades
+  Sanger (8068 FASTQ, 10 971 370 registros), y el juez estricto de la
+  revisión, que mira además las siete propiedades de DT-029 (los 2000
+  paquetes en orden: 5 485 685 parejas y 1 811 988 `N`).
+  Ningún registro incumple el contrato. El escritor era correcto; lo que
+  faltaba era el juez.
+
+**Pruebas.** En `tests/final_fastq_record_validation.rs`, diecinueve:
+
+- una por cada clase de rechazo del juez del mate y del analizador de su
+  cabecera, que exige el **motivo exacto** —varias guardas se solapan y sin el
+  motivo una guarda borrada quedaría tapada por la siguiente—, incluido el
+  caso de la reproducción y el de unos registros válidos **sin el marcador de
+  fin**, que es la única comprobación del marcador en este camino;
+- un control positivo con los dos extremos de las calidades (`!` y `~`), y un
+  FASTQ publicado de verdad, con `N` de plantilla y errores de secuenciación,
+  que se acepta, mientras que la misma copia con un byte de calidad cambiado
+  se rechaza;
+- cinco del juez de la pareja: un control positivo, dos mates que nombran
+  parejas distintas, un artefacto con el SHA-256 o el tamaño alterados, y una
+  pareja cuyas cabeceras y artefactos coinciden pero con un registro inválido
+  en R1, que solo el juicio de los mates puede rechazar.
+
+Y en `tests/f4_final_fastq_provenance.rs`, una más: el escritor rechaza y
+descarta una pareja cuyos registros incumplen el contrato, sin dejar ningún
+mate ni ninguna entrada en el catálogo. Es la que impide quitar la llamada del
+escritor al juez de la pareja, que desde este cambio es la única pasada.
+
+Contra el código de la base `2eaced4`, extraída con `git archive`, fallaban
+trece de las catorce pruebas de la primera ronda —todas menos el control
+positivo—.
+
+**Mutantes**, sobre una copia del árbol, con SHA-256 antes, mutado y
+restaurado: veintinueve. Mueren veintiséis:
+
+- quitar el rebobinado, `validate_final_record` devolviendo `Ok`, cada guarda
+  de estructura y de alfabeto, sacar la `N` del alfabeto, mover un extremo del
+  intervalo de calidades y cada guarda del analizador de la cabecera;
+- de la revisión: quitar la comprobación del marcador de fin, que el juez de la
+  pareja no juzgue los mates, que no compare las cabeceras de R1 y R2, que no
+  compare el SHA-256 publicado; y además que no compare el tamaño y que el
+  escritor no llame al juez de la pareja.
+
+**Sobreviven tres, y son inalcanzables desde un fichero**: las comprobaciones
+de que la cabecera, la secuencia y las calidades terminan en salto de línea.
+El lector de líneas rechaza antes toda línea final sin salto y el bucle
+rechaza antes todo registro con una línea vacía; se dice así en la cabecera
+del fichero de pruebas.
+
+**Corpus de corrupciones.** El de la revisión ya no estaba disponible al
+cerrar la primera ronda, así que se rehízo: 334 corrupciones de un solo cambio
+sobre dos mates publicados de verdad, en el primer registro, en uno
+intermedio y en el último, más los dos mates intactos. Con la base se aceptan
+los 336. Con el juez encendido se rechazan 328 y se aceptan los dos controles
+y seis corrupciones, las que cambian `TP_` por `XX_` (DT-029).
+
+**Puerta de cobertura.** `src/fastq_validation.rs` pasa de 57 a **36**
+comprobaciones sin disparar, con las mismas 71. El techo baja a 36.
+
+**Lo que el juez sigue sin mirar** no vive aquí: son siete propiedades del
+contrato, reunidas en DT-029, abierta. La revisión encontró además que un
+bloque BGZF con un tamaño declarado imposible hace abortar al juez en vez de
+rechazar el fichero (DT-030), y que una referencia corta con muchas quimeras
+aborta como defecto interno (DT-031). Ninguna de las tres es parte de este
+defecto.
 
 ---
 
@@ -1970,3 +2084,104 @@ Un alelo `{"kind":"reference","zz_extra":1}` se acepta, mientras que el alelo
 `snp` rechaza las claves desconocidas. Lo anotó la revisión adversarial del
 05/10/2026 como sospecha; no se ha investigado si el contrato de la verdad
 quiere ese rechazo también para el alelo de referencia.
+
+---
+
+## DT-029. El juez del FASTQ final no comprueba siete propiedades del contrato
+
+**Gravedad: media. Destino: F4.5.3**, la validación de cada pareja final
+contra la reconstrucción independiente de su clave técnica
+(`design/plan-implementacion-f4-0.1.md`).
+
+Al cerrar DT-026, el juez del FASTQ final —el de cada mate y el de la pareja,
+en `src/fastq_validation.rs`— exige la forma de cada registro: cabecera,
+separador, alfabeto de bases y de calidades, y longitud igual de secuencia y
+calidades. **Hoy nada se publica mal por estas siete**: el juez estricto de la
+revisión adversarial del 05/10/2026 (`judge_full.py`) no encontró ningún
+incumplimiento en 16,4 millones de parejas, ni en las 5 485 685 de la
+exploración del cierre de DT-026. Pero si el escritor las incumpliera, el juez
+no lo vería.
+
+1. **La identidad del fichero no se ata a lo esperado.** El juez del mate no
+   recibe el evento, la biblioteca ni el UDI que el fichero debe llevar
+   (`validate_final_fastq_mate`, `src/fastq_validation.rs:230`), y el de la
+   pareja solo compara R1 con R2 (`:301`). Un mismo fichero con registros de
+   eventos, bibliotecas o UDI mezclados pasa (casos `undecl_mixed_*` de la
+   revisión). Va contra REQ-DAT-33, REQ-DAT-68 y DTC-083.
+2. **Un identificador de pareja repetido en el fichero pasa**
+   (`undecl_duplicate_pair_id`). Va contra REQ-DAT-68 y REQ-DAT-71.
+3. **El identificador de pareja y el de biblioteca solo se validan como
+   identificadores genéricos** (`:528` y `:530`, con las reglas de
+   `validate_provided_id` de `src/identity.rs`). DTC-086 y DTC-087 fijan para
+   la pareja el prefijo `TP_` y veintiséis caracteres Base32, y el catálogo de
+   identificadores fija `LIB_` para la biblioteca. Por eso pasan las seis
+   corrupciones del corpus de DT-026 que cambian `TP_` por `XX_`.
+4. **La longitud de lectura no se compara con el perfil.** El contrato fija una
+   longitud común de 1 a 150 bases (DTPD-106 y `read_length_bases`); el juez
+   admite hasta 255 (el límite de línea de 256 bytes, `:37`) y longitudes
+   distintas dentro de un fichero.
+5. **Una `N` no se exige con Phred 0.** REQ-DAT-72 lo pide; el juez solo
+   comprueba que la calidad esté entre `!` y `~`.
+6. **R1 y R2 de una pareja no se comparan en longitud.**
+7. **Nadie compara los recuentos del resumen del manifiesto** —parejas, bases
+   y `N`— **con el contenido de los ficheros.** `validate_final_fastq_summary`
+   (`src/event_manifest.rs:1267`) solo mira su coherencia interna. El plan de
+   F4 da por hecho F4.5.2 diciendo que «el validador independiente comprueba
+   FASTQ, pareja, hashes y resúmenes», y lo de los resúmenes no es cierto.
+
+En sentido contrario, el juez es **más estricto que el formato FASTQ general**
+en un punto: exige que el separador sea `+` a secas, cuando el formato admite
+repetir el nombre tras el `+`. Es lo que el escritor publica y ningún documento
+normativo dice otra cosa, así que no hay nada que decidir.
+
+---
+
+## DT-030. Un bloque BGZF con un tamaño imposible hace abortar al juez
+
+**Gravedad: media.**
+
+`noodles-bgzf` 0.47 no acota el tamaño descomprimido que declara el pie de cada
+bloque. Un bloque que declara más de 64 KiB hace que el lector **entre en
+pánico** —«range end index 65537 out of range for slice of length 65536», en
+`noodles-bgzf-0.47.0/src/io/block/data.rs:51`— y el programa termina con
+código 101 en vez de rechazar el fichero con un diagnóstico. Lo encontró la
+revisión adversarial del 05/10/2026 (casos `panic_isize_65537` y
+`rej_truncated_compressed_block_plus_eof`) y se reprodujo al cerrar DT-026
+con el juez de cada mate ya corregido.
+
+- **Afectados confirmados**: el juez de cada mate del FASTQ final y la
+  relectura de cabeceras del juez de la pareja
+  (`src/fastq_validation.rs:436`), que ya podía abortar así antes de DT-026.
+- **Posibles afectados, sin reproducir**: los dos lectores de VCF comprimidos
+  del juez de los recursos publicados (`src/results.rs:659` y `:2689`), que
+  usan el mismo lector.
+
+El fichero lo produce el propio simulador, así que el riesgo real es un
+fichero corrompido entre la escritura y la relectura, no una entrada del
+usuario. Aun así, un juez no debería abortar.
+
+**Por qué no se corrige ya.** La 0.51 acota el tamaño, pero `noodles-csi` y
+`noodles-tabix` dependen de la 0.47, y DTC-043 y DTC-048 fijan las versiones
+exactas del grafo. Las salidas son subir el grafo de `noodles` entero, en
+encargo propio, o comprobar el pie de cada bloque antes de entregarlo al
+lector.
+
+---
+
+## DT-031. Una referencia corta con muchas quimeras aborta como defecto interno
+
+**Gravedad: baja.**
+
+En 3 de los 804 escenarios válidos de la revisión adversarial del 05/10/2026
+—referencias de 1200 bases o menos con una tasa de quimeras alta—, la
+ejecución termina con «Una invariante interna considerada imposible se ha
+roto» (`GPS-INTERNAL-001`, `Chimera(NoSecondSource)`, salida 70). La base
+`2eaced4` hace lo mismo, así que no es efecto de DT-026. Se reprodujo al
+cerrarla con el caso `x0028` de la revisión: referencia simulada de 600 bases,
+lecturas de 2 bases, cobertura 0,5 y `chimera_rate = 1`.
+
+DTC-084 prevé el fallo: «una candidata ausente para una pareja seleccionada
+falla antes de publicar, sin reintento ni reducción silenciosa de la tasa».
+Lo que no prevé es que se presente como un **defecto interno** del programa:
+para quien lo ejecuta, es una configuración que no cabe en su referencia y
+debería recibir un diagnóstico de configuración que lo diga.

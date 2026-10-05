@@ -231,14 +231,13 @@ pub fn validate_final_fastq_mate(
     path: &Path,
     expected_mate: crate::technical_identity::TechnicalMate,
 ) -> Result<(), FastqValidationError> {
-    let file = File::open(path).map_err(|error| io_error(path, "open_final_fastq", error))?;
-    validate_canonical_bgzf_eof(
-        &mut file
-            .try_clone()
-            .map_err(|error| io_error(path, "clone_final_fastq", error))?,
-        path,
-        0,
-    )?;
+    let mut file = File::open(path).map_err(|error| io_error(path, "open_final_fastq", error))?;
+    validate_canonical_bgzf_eof(&mut file, path, 0)?;
+    // La comprobación del marcador deja la posición al final del fichero. Sin
+    // rebobinar, el lector BGZF vería cero bytes y daría por bueno cualquier
+    // contenido sin leer un solo registro (DT-026).
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| io_error(path, "rewind_after_eof_check", error))?;
     let mut reader = bgzf::io::Reader::new(file);
     let mut lines = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
     let mut ordinal = 0_u64;

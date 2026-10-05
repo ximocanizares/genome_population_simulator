@@ -227,6 +227,25 @@
 # bajarlo es DT-001, no este cambio. `src/f5_artifacts.rs` queda fuera porque
 # escribe y no juzga, y no se vigilan los rechazos por fallo de entrada/salida
 # ni el generador de matrices de `population_snvs.rs` (DT-001 explica por qué).
+# **El 05/10/2026 `src/fastq_validation.rs` baja de 57 a 36 sin disparar;
+# las comprobaciones siguen en 71.** Es el cierre de DT-026: el juez de cada
+# mate del FASTQ final comprobaba el marcador de fin BGZF con un descriptor
+# clonado que compartía la posición de lectura, la dejaba al final del fichero
+# y el lector posterior no leía ningún registro. Al rebobinar, y con las
+# pruebas de `tests/final_fastq_record_validation.rs`, que exigen el motivo
+# exacto de cada rechazo, pasan a dispararse siete comprobaciones del recorrido
+# de registros del mate (registro truncado, línea demasiado larga, línea sin
+# salto final, cabecera no UTF-8, cabecera sin `@`, estructura y alfabeto),
+# once del analizador de la cabecera —que sí se ejecutaba en producción, porque
+# lo comparte el juez de la pareja, pero no lo disparaba ninguna prueba— y
+# tres del juez de la pareja: mates que nombran parejas distintas (línea 302)
+# y un artefacto cuyo tamaño (328) o SHA-256 (336) no son los de los bytes
+# publicados. En el camino del mate quedan cuatro sin disparar, las cuatro
+# inalcanzables desde un fichero: el desbordamiento del contador de registros
+# (línea 262), el del contador de longitud de línea (367), «la cabecera no
+# termina en salto de línea» (407; el lector de líneas rechaza antes toda línea
+# final sin salto) y «la cabecera no tiene identidad» (503; partir por espacios
+# siempre da un primer trozo).
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	109	22
@@ -235,7 +254,7 @@ src/results.rs	773	619
 src/event_manifest.rs	147	117
 src/truth_validation.rs	118	95
 src/truth_schema.rs	69	46
-src/fastq_validation.rs	71	57
+src/fastq_validation.rs	71	36
 src/population_snvs.rs	143	123
 src/f5_publication.rs	52	36
 src/reference_fasta.rs	41	30

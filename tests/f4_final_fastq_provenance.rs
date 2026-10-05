@@ -430,3 +430,108 @@ fn temporary(label: &str) -> PathBuf {
         TEMPORARY_COUNTER.fetch_add(1, Ordering::Relaxed)
     ))
 }
+
+/// El escritor juzga lo que publica: si un registro no cumple el contrato, la
+/// pareja no se cataloga y no queda ningún mate.
+///
+/// Desde el 05/10/2026 el escritor juzga cada mate una sola vez, dentro del
+/// juez de la pareja (DT-026). Esta prueba es la que impide quitar esa
+/// llamada sin que nadie se entere: el escritor recibe el evento como texto y
+/// no lo valida, así que un evento que no es un identificador válido produce
+/// una cabecera que solo el juez puede rechazar.
+#[test]
+fn the_writer_rejects_and_discards_a_pair_whose_records_break_the_contract() {
+    let root = temporary("writer-judges");
+    fs::create_dir_all(&root).expect("root");
+    let effective = build_effective_config(&declared()).expect("effective configuration");
+    let event = effective.technical_event().expect("technical event");
+    let reference = reference();
+    let individual = Individual::from_reference(
+        IndividualId::parse("sample-A", "test").expect("individual"),
+        &reference,
+        Ploidy::new(1).expect("ploidy"),
+    );
+    let seed = RootSeed::parse("root", ROOT).expect("root seed");
+    let identities = derive_technical_identity_plan(
+        seed,
+        reference.id(),
+        event.event_id().clone(),
+        &[individual.id().clone()],
+    )
+    .expect("identities");
+    let library = identities.library(individual.id()).expect("library");
+    let profile = resolve_f4_technical_profile(event.profile()).expect("profile");
+    let pair = WgsPairedEndSampler::new_for_pair_count(
+        &reference,
+        &individual,
+        &identities,
+        profile,
+        event.read_length(),
+        1,
+    )
+    .expect("sampler")
+    .next()
+    .expect("one pair")
+    .expect("sampled pair");
+    let observed = transform_paired_end(
+        seed,
+        event.event_id(),
+        &pair,
+        profile,
+        ErrorQualitySettings::default(),
+    )
+    .expect("observed pair")
+    .observed()
+    .clone();
+    let udi = Udi::new("ACGTACGT", "TGCATGCA").expect("UDI");
+    let mut demultiplexer = Demultiplexer::new(
+        seed,
+        event.event_id().clone(),
+        0.0,
+        vec![DemultiplexingLibrary::new(
+            library.library_id().clone(),
+            udi.clone(),
+        )],
+    )
+    .expect("demultiplexer");
+    let pairs = demultiplexer
+        .demultiplex(vec![PostContaminationPair::new(
+            library.library_id().clone(),
+            pair.pre_hop_identity().pre_hop_instance_id().clone(),
+            udi,
+            false,
+            observed,
+        )])
+        .expect("demultiplex")
+        .into_final_libraries()
+        .remove(library.library_id())
+        .expect("final library");
+
+    let destination = root.join("published");
+    let mut workspace = ExecutionWorkspace::create(&destination).expect("workspace");
+    let error = write_final_paired_fastq(
+        &mut workspace,
+        "-not-an-event-id",
+        individual.id().as_str(),
+        library.library_id(),
+        pairs,
+    )
+    .expect_err("the judge must reject a header with an invalid event ID");
+    assert!(
+        format!("{error:?}").contains("FASTQ final event ID is invalid"),
+        "the rejection must come from the record judge: {error:?}"
+    );
+    assert!(
+        workspace.artifacts().is_empty(),
+        "a rejected pair must not be catalogued"
+    );
+    for mate in ["R1", "R2"] {
+        let path = artifact_path(
+            &root,
+            &destination,
+            &format!("outputs/fastq/-not-an-event-id/sample-A_{mate}.fastq.gz"),
+        );
+        assert!(!path.exists(), "a rejected pair must not leave {mate}");
+    }
+    fs::remove_dir_all(root).ok();
+}
