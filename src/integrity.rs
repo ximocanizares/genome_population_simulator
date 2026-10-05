@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::diagnostics::Diagnostic;
+use crate::guard_trace::rejected;
 
 pub const INTEGRITY_ALGORITHM: &str = "sha256";
 
@@ -110,15 +111,17 @@ pub fn verify_identity(path: &Path, expected: &ArtifactIdentity) -> Result<(), D
     if observed.size_bytes == expected.size_bytes && observed.digest == expected.digest {
         return Ok(());
     }
-    Err(Diagnostic::io(
-        "GPS-IO-002",
-        "El tamaño o SHA-256 de un artefacto no coincide con el valor esperado.",
-    )
-    .with("path", path.display().to_string())
-    .with("expected_size", expected.size_bytes.to_string())
-    .with("observed_size", observed.size_bytes.to_string())
-    .with("expected_digest", &expected.digest)
-    .with("observed_digest", observed.digest))
+    Err(rejected(
+        Diagnostic::io(
+            "GPS-IO-002",
+            "El tamaño o SHA-256 de un artefacto no coincide con el valor esperado.",
+        )
+        .with("path", path.display().to_string())
+        .with("expected_size", expected.size_bytes.to_string())
+        .with("observed_size", observed.size_bytes.to_string())
+        .with("expected_digest", &expected.digest)
+        .with("observed_digest", observed.digest),
+    ))
 }
 
 fn size_error() -> Diagnostic {

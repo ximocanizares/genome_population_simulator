@@ -4,6 +4,7 @@
 //! a derivar cada origen desde la subsemilla de su plantilla y compara el
 //! registro FASTQ contra esa vista de solo lectura del estado haplotípico.
 
+use crate::guard_trace::rejected;
 use std::fs::File;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -75,13 +76,13 @@ impl F4CoverageReport {
         n_bases: u64,
     ) -> Result<Self, FastqValidationError> {
         if !target_x.is_finite() || target_x < 0.0 {
-            return Err(FastqValidationError::InvalidCoverageSummary);
+            return Err(rejected(FastqValidationError::InvalidCoverageSummary));
         }
         let final_fastq_bases = final_fastq_own_bases
             .checked_add(final_fastq_contaminant_bases)
-            .ok_or(FastqValidationError::CounterOverflow)?;
+            .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
         if denominator_bases == 0 || n_bases > final_fastq_bases {
-            return Err(FastqValidationError::InvalidCoverageSummary);
+            return Err(rejected(FastqValidationError::InvalidCoverageSummary));
         }
         let denominator = denominator_bases as f64;
         Ok(Self {
@@ -250,16 +251,16 @@ pub fn validate_final_fastq_mate(
             return Ok(());
         }
         if lines.iter().any(Vec::is_empty) {
-            return Err(FastqValidationError::Structural {
+            return Err(rejected(FastqValidationError::Structural {
                 path: path.display().to_string(),
                 record_ordinal: ordinal,
                 detail: "FASTQ final has a truncated record",
-            });
+            }));
         }
         validate_final_record(path, ordinal, &lines, expected_mate)?;
         ordinal = ordinal
             .checked_add(1)
-            .ok_or(FastqValidationError::CounterOverflow)?;
+            .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
     }
 }
 
@@ -299,15 +300,15 @@ pub fn validate_final_paired_fastq(
             return Ok(());
         }
         if left.is_none() || right.is_none() || left != right {
-            return Err(FastqValidationError::Structural {
+            return Err(rejected(FastqValidationError::Structural {
                 path: format!("{} / {}", r1_path.display(), r2_path.display()),
                 record_ordinal: ordinal,
                 detail: "FASTQ final mates are orphaned or have different pair IDs",
-            });
+            }));
         }
         ordinal = ordinal
             .checked_add(1)
-            .ok_or(FastqValidationError::CounterOverflow)?;
+            .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
     }
 }
 
@@ -317,28 +318,28 @@ fn validate_final_artifact(
 ) -> Result<(), FastqValidationError> {
     let identity =
         crate::integrity::identify_file(path, Path::new(&artifact.path)).map_err(|error| {
-            FastqValidationError::Artifact {
+            rejected(FastqValidationError::Artifact {
                 path: path.display().to_string(),
                 field: "sha256",
                 expected: artifact.digest.clone(),
                 observed: error.render_human(),
-            }
+            })
         })?;
     if identity.size_bytes() != artifact.size_bytes {
-        return Err(FastqValidationError::Artifact {
+        return Err(rejected(FastqValidationError::Artifact {
             path: path.display().to_string(),
             field: "size_bytes",
             expected: artifact.size_bytes.to_string(),
             observed: identity.size_bytes().to_string(),
-        });
+        }));
     }
     if identity.digest() != artifact.digest {
-        return Err(FastqValidationError::Artifact {
+        return Err(rejected(FastqValidationError::Artifact {
             path: path.display().to_string(),
             field: "sha256",
             expected: artifact.digest.clone(),
             observed: identity.digest().to_owned(),
-        });
+        }));
     }
     Ok(())
 }
@@ -364,14 +365,14 @@ fn read_final_line(
         if line
             .len()
             .checked_add(take)
-            .ok_or(FastqValidationError::CounterOverflow)?
+            .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?
             > FINAL_FASTQ_MAXIMUM_LINE_LENGTH
         {
-            return Err(FastqValidationError::Structural {
+            return Err(rejected(FastqValidationError::Structural {
                 path: path.display().to_string(),
                 record_ordinal: ordinal,
                 detail: "FASTQ final line exceeds the profile bound",
-            });
+            }));
         }
         line.extend_from_slice(&buffer[..take]);
         let reached_newline = buffer[take - 1] == b'\n';
@@ -381,11 +382,11 @@ fn read_final_line(
         }
     }
     if !line.is_empty() && line.last() != Some(&b'\n') {
-        return Err(FastqValidationError::Structural {
+        return Err(rejected(FastqValidationError::Structural {
             path: path.display().to_string(),
             record_ordinal: ordinal,
             detail: "FASTQ final line is truncated",
-        });
+        }));
     }
     Ok(())
 }
@@ -402,11 +403,11 @@ fn validate_final_record(
         detail,
     };
     let header = std::str::from_utf8(&lines[0])
-        .map_err(|_| structural("FASTQ final header is not UTF-8"))?
+        .map_err(|_| rejected(structural("FASTQ final header is not UTF-8")))?
         .strip_suffix('\n')
-        .ok_or_else(|| structural("FASTQ final header is truncated"))?;
+        .ok_or_else(|| rejected(structural("FASTQ final header is truncated")))?;
     let Some(header) = header.strip_prefix('@') else {
-        return Err(structural("FASTQ final header lacks @"));
+        return Err(rejected(structural("FASTQ final header lacks @")));
     };
     parse_final_header(header, expected_mate).map_err(structural)?;
     if lines[2] != b"+\n"
@@ -415,7 +416,9 @@ fn validate_final_record(
         || lines[3].len() != lines[1].len()
         || lines[3].last() != Some(&b'\n')
     {
-        return Err(structural("FASTQ final record structure is invalid"));
+        return Err(rejected(structural(
+            "FASTQ final record structure is invalid",
+        )));
     }
     if !lines[1][..lines[1].len() - 1]
         .iter()
@@ -424,9 +427,9 @@ fn validate_final_record(
             .iter()
             .all(|quality| (b'!'..=b'~').contains(quality))
     {
-        return Err(structural(
+        return Err(rejected(structural(
             "FASTQ final sequence or quality alphabet is invalid",
-        ));
+        )));
     }
     Ok(())
 }
@@ -445,31 +448,33 @@ fn read_final_header(
         return Ok(None);
     }
     if lines.iter().any(Vec::is_empty) {
-        return Err(FastqValidationError::Structural {
+        return Err(rejected(FastqValidationError::Structural {
             path: path.display().to_string(),
             record_ordinal: ordinal,
             detail: "FASTQ final has a truncated record",
-        });
+        }));
     }
-    let header = std::str::from_utf8(&lines[0]).map_err(|_| FastqValidationError::Structural {
-        path: path.display().to_string(),
-        record_ordinal: ordinal,
-        detail: "FASTQ final header is not UTF-8",
+    let header = std::str::from_utf8(&lines[0]).map_err(|_| {
+        rejected(FastqValidationError::Structural {
+            path: path.display().to_string(),
+            record_ordinal: ordinal,
+            detail: "FASTQ final header is not UTF-8",
+        })
     })?;
-    let header = header
-        .strip_suffix('\n')
-        .ok_or_else(|| FastqValidationError::Structural {
+    let header = header.strip_suffix('\n').ok_or_else(|| {
+        rejected(FastqValidationError::Structural {
             path: path.display().to_string(),
             record_ordinal: ordinal,
             detail: "FASTQ final header is truncated",
-        })?;
-    let header = header
-        .strip_prefix('@')
-        .ok_or_else(|| FastqValidationError::Structural {
+        })
+    })?;
+    let header = header.strip_prefix('@').ok_or_else(|| {
+        rejected(FastqValidationError::Structural {
             path: path.display().to_string(),
             record_ordinal: ordinal,
             detail: "FASTQ final header lacks @",
-        })?;
+        })
+    })?;
     parse_final_header(header, expected_mate)
         .map(Some)
         .map_err(|detail| FastqValidationError::Structural {
@@ -494,41 +499,47 @@ fn parse_final_header(
     expected_mate: crate::technical_identity::TechnicalMate,
 ) -> Result<FinalFastqHeader, &'static str> {
     let mut fields = header.split(' ');
-    let identity = fields.next().ok_or("FASTQ final header lacks identity")?;
+    let identity = fields
+        .next()
+        .ok_or_else(|| rejected("FASTQ final header lacks identity"))?;
     let mate = fields
         .next()
-        .ok_or("FASTQ final header lacks mate metadata")?;
+        .ok_or_else(|| rejected("FASTQ final header lacks mate metadata"))?;
     if fields.next().is_some() {
-        return Err("FASTQ final header has extra fields");
+        return Err(rejected("FASTQ final header has extra fields"));
     }
     let mut identity = identity.split(':');
     if identity.next() != Some("GPS") {
-        return Err("FASTQ final header lacks GPS prefix");
+        return Err(rejected("FASTQ final header lacks GPS prefix"));
     }
-    let event_id = identity.next().ok_or("FASTQ final header lacks event ID")?;
+    let event_id = identity
+        .next()
+        .ok_or_else(|| rejected("FASTQ final header lacks event ID"))?;
     let library_id = identity
         .next()
-        .ok_or("FASTQ final header lacks library ID")?;
+        .ok_or_else(|| rejected("FASTQ final header lacks library ID"))?;
     let technical_pair_id = identity
         .next()
-        .ok_or("FASTQ final header lacks technical pair ID")?;
+        .ok_or_else(|| rejected("FASTQ final header lacks technical pair ID"))?;
     if identity.next().is_some() {
-        return Err("FASTQ final header has invalid identity fields");
+        return Err(rejected("FASTQ final header has invalid identity fields"));
     }
-    EventId::parse(event_id, "final_fastq").map_err(|_| "FASTQ final event ID is invalid")?;
-    LibraryId::parse(library_id, "final_fastq").map_err(|_| "FASTQ final library ID is invalid")?;
+    EventId::parse(event_id, "final_fastq")
+        .map_err(|_| rejected("FASTQ final event ID is invalid"))?;
+    LibraryId::parse(library_id, "final_fastq")
+        .map_err(|_| rejected("FASTQ final library ID is invalid"))?;
     TechnicalPairId::parse(technical_pair_id, "final_fastq")
-        .map_err(|_| "FASTQ final pair ID is invalid")?;
+        .map_err(|_| rejected("FASTQ final pair ID is invalid"))?;
     let expected_prefix = format!("{}:N:0:", expected_mate.number());
     let udi = mate
         .strip_prefix(&expected_prefix)
-        .ok_or("FASTQ final mate metadata is invalid")?;
+        .ok_or_else(|| rejected("FASTQ final mate metadata is invalid"))?;
     let mut udi_components = udi.split('+');
     if !udi_components.next().is_some_and(valid_udi_component)
         || !udi_components.next().is_some_and(valid_udi_component)
         || udi_components.next().is_some()
     {
-        return Err("FASTQ final UDI is invalid");
+        return Err(rejected("FASTQ final UDI is invalid"));
     }
     Ok(FinalFastqHeader {
         event_id: event_id.to_owned(),
@@ -649,7 +660,7 @@ pub fn validate_wgs_fastq(
             .as_str()
             .len()
             .checked_add(2)
-            .ok_or(FastqValidationError::CounterOverflow)?;
+            .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
         read_line(
             &mut reader,
             &mut header,
@@ -692,11 +703,11 @@ pub fn validate_wgs_fastq(
         .map_err(|error| io_error(fastq_path, "check_eof", error))?
         != 0
     {
-        return Err(FastqValidationError::Structural {
+        return Err(rejected(FastqValidationError::Structural {
             path: fastq_path.display().to_string(),
             record_ordinal: expected_count,
             detail: "FASTQ contains records beyond the reproduced read plan",
-        });
+        }));
     }
 
     // La identidad se actualiza desde el mismo descriptor que alimentó al
@@ -706,7 +717,7 @@ pub fn validate_wgs_fastq(
 
     let base_count = expected_count
         .checked_mul(WGS_READ_LENGTH)
-        .ok_or(FastqValidationError::CounterOverflow)?;
+        .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
     let target_coverage = match target {
         EffectiveTechnicalEventTarget::CoverageWgs(value) => Some(value),
         EffectiveTechnicalEventTarget::ReadCount(_) => None,
@@ -771,13 +782,13 @@ fn read_line(
         let new_length = line
             .len()
             .checked_add(take)
-            .ok_or(FastqValidationError::CounterOverflow)?;
+            .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
         if new_length > maximum_length {
-            return Err(FastqValidationError::Structural {
+            return Err(rejected(FastqValidationError::Structural {
                 path: path.display().to_string(),
                 record_ordinal: ordinal,
                 detail: "FASTQ line exceeds the minimal profile bound",
-            });
+            }));
         }
         line.extend_from_slice(&buffer[..take]);
         let reached_newline = buffer[take - 1] == b'\n';
@@ -787,7 +798,7 @@ fn read_line(
         }
     }
     if line.is_empty() || line.last() != Some(&b'\n') {
-        return Err(FastqValidationError::Structural {
+        return Err(rejected(FastqValidationError::Structural {
             path: path.display().to_string(),
             record_ordinal: ordinal,
             detail: match field {
@@ -797,7 +808,7 @@ fn read_line(
                 "quality" => "FASTQ quality line is truncated",
                 _ => "FASTQ line is truncated",
             },
-        });
+        }));
     }
     Ok(())
 }
@@ -845,13 +856,14 @@ fn validate_canonical_bgzf_eof(
         .metadata()
         .map_err(|error| io_error(path, "metadata_eof_marker", error))?
         .len();
-    let marker_length =
-        u64::try_from(BGZF_EOF_MARKER.len()).map_err(|_| FastqValidationError::CounterOverflow)?;
+    let marker_length = u64::try_from(BGZF_EOF_MARKER.len())
+        .map_err(|_| rejected(FastqValidationError::CounterOverflow))?;
     if size < marker_length {
         return Err(missing_canonical_eof(path, expected_count));
     }
     file.seek(SeekFrom::End(
-        -i64::try_from(marker_length).map_err(|_| FastqValidationError::CounterOverflow)?,
+        -i64::try_from(marker_length)
+            .map_err(|_| rejected(FastqValidationError::CounterOverflow))?,
     ))
     .map_err(|error| io_error(path, "seek_eof_marker", error))?;
     let mut observed = [0_u8; BGZF_EOF_MARKER.len()];
@@ -863,7 +875,9 @@ fn validate_canonical_bgzf_eof(
     Ok(())
 }
 
+#[track_caller]
 fn missing_canonical_eof(path: &Path, record_ordinal: u64) -> FastqValidationError {
+    crate::guard_trace::record();
     FastqValidationError::Structural {
         path: path.display().to_string(),
         record_ordinal,
@@ -876,9 +890,10 @@ impl StreamDigest {
         self.size_bytes = self
             .size_bytes
             .checked_add(
-                u64::try_from(bytes.len()).map_err(|_| FastqValidationError::CounterOverflow)?,
+                u64::try_from(bytes.len())
+                    .map_err(|_| rejected(FastqValidationError::CounterOverflow))?,
             )
-            .ok_or(FastqValidationError::CounterOverflow)?;
+            .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
         self.hasher.update(bytes);
         Ok(())
     }
@@ -909,28 +924,28 @@ fn validate_record(
     expected_header.extend_from_slice(expected.template_id.as_str().as_bytes());
     expected_header.push(b'\n');
     if header != expected_header {
-        return Err(structural(
+        return Err(rejected(structural(
             "FASTQ template ID does not match the reproduced origin",
-        ));
+        )));
     }
     let line_length = usize::from(ILLUMINA_SE_MINIMAL_READ_LENGTH) + 1;
     if sequence.len() != line_length || sequence.last() != Some(&b'\n') {
-        return Err(structural(
+        return Err(rejected(structural(
             "FASTQ sequence length does not match the minimal profile",
-        ));
+        )));
     }
     if plus != b"+\n" {
-        return Err(structural("FASTQ separator line is invalid"));
+        return Err(rejected(structural("FASTQ separator line is invalid")));
     }
     if qualities.len() != line_length || qualities.last() != Some(&b'\n') {
-        return Err(structural(
+        return Err(rejected(structural(
             "FASTQ quality length does not match the minimal profile",
-        ));
+        )));
     }
     if sequence[..sequence.len() - 1] != *expected.true_sequence {
-        return Err(structural(
+        return Err(rejected(structural(
             "FASTQ sequence does not match the reproduced haplotype origin",
-        ));
+        )));
     }
     let mut unknowns = unknown_base_count;
     for (base, quality) in sequence[..sequence.len() - 1]
@@ -943,15 +958,19 @@ fn validate_record(
             b'N' => {
                 unknowns = unknowns
                     .checked_add(1)
-                    .ok_or(FastqValidationError::CounterOverflow)?;
+                    .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
                 ILLUMINA_SE_MINIMAL_N_PHRED + b'!'
             }
-            _ => return Err(structural("FASTQ sequence contains a non-ACGTN base")),
+            _ => {
+                return Err(rejected(structural(
+                    "FASTQ sequence contains a non-ACGTN base",
+                )));
+            }
         };
         if quality != expected_quality {
-            return Err(structural(
+            return Err(rejected(structural(
                 "FASTQ Phred quality does not match its literal base",
-            ));
+            )));
         }
     }
     Ok(unknowns)
@@ -984,13 +1003,13 @@ impl<'a> ReplayedWgsPlan<'a> {
         target: EffectiveTechnicalEventTarget,
     ) -> Result<Self, FastqReplayError> {
         if identities.reference_id() != reference.id() {
-            return Err(FastqReplayError::TechnicalPlanReferenceMismatch);
+            return Err(rejected(FastqReplayError::TechnicalPlanReferenceMismatch));
         }
         if individual.reference_id() != reference.id() {
-            return Err(FastqReplayError::IndividualReferenceMismatch);
+            return Err(rejected(FastqReplayError::IndividualReferenceMismatch));
         }
         if identities.library(individual.id()).is_none() {
-            return Err(FastqReplayError::MissingTechnicalLibrary);
+            return Err(rejected(FastqReplayError::MissingTechnicalLibrary));
         }
         let haploid_eligible_length = reference
             .sequences()
@@ -999,7 +1018,7 @@ impl<'a> ReplayedWgsPlan<'a> {
             .try_fold(0_u64, |total, sequence| {
                 total
                     .checked_add(sequence.length())
-                    .ok_or(FastqReplayError::LengthOverflow)
+                    .ok_or_else(|| rejected(FastqReplayError::LengthOverflow))
             })?;
         let mut eligible_copies = Vec::new();
         let mut total_start_count = 0_u64;
@@ -1008,7 +1027,7 @@ impl<'a> ReplayedWgsPlan<'a> {
                 .sequences()
                 .iter()
                 .find(|sequence| sequence.id() == genotype.sequence_id())
-                .ok_or(FastqReplayError::IndividualReferenceMismatch)?;
+                .ok_or_else(|| rejected(FastqReplayError::IndividualReferenceMismatch))?;
             if reference_sequence.length() < WGS_READ_LENGTH {
                 continue;
             }
@@ -1016,7 +1035,7 @@ impl<'a> ReplayedWgsPlan<'a> {
                 let current_length = copy
                     .segments()
                     .current_length()
-                    .map_err(|_| FastqReplayError::LengthOverflow)?;
+                    .map_err(|_| rejected(FastqReplayError::LengthOverflow))?;
                 let Some(start_count) = current_length
                     .checked_sub(WGS_READ_LENGTH)
                     .and_then(|value| value.checked_add(1))
@@ -1025,21 +1044,21 @@ impl<'a> ReplayedWgsPlan<'a> {
                 };
                 total_start_count = total_start_count
                     .checked_add(start_count)
-                    .ok_or(FastqReplayError::LengthOverflow)?;
+                    .ok_or_else(|| rejected(FastqReplayError::LengthOverflow))?;
                 eligible_copies.push(ReplayedEligibleCopy { copy, start_count });
             }
         }
         if total_start_count == 0 {
-            return Err(FastqReplayError::NoEligibleSequence {
+            return Err(rejected(FastqReplayError::NoEligibleSequence {
                 read_length: WGS_READ_LENGTH,
-            });
+            }));
         }
         let read_count = match target {
             EffectiveTechnicalEventTarget::ReadCount(read_count) => read_count,
             EffectiveTechnicalEventTarget::CoverageWgs(coverage) => {
                 let lambda = coverage * (haploid_eligible_length as f64) / (WGS_READ_LENGTH as f64);
                 if !lambda.is_finite() {
-                    return Err(FastqReplayError::InvalidCoverageMean);
+                    return Err(rejected(FastqReplayError::InvalidCoverageMean));
                 }
                 let count_seed = identities
                     .derive_library_count_subseed(individual.id())
@@ -1071,18 +1090,18 @@ impl<'a> ReplayedWgsPlan<'a> {
         for replayed in &self.eligible_copies {
             cursor = cursor
                 .checked_add(replayed.start_count)
-                .ok_or(FastqReplayError::LengthOverflow)?;
+                .ok_or_else(|| rejected(FastqReplayError::LengthOverflow))?;
             if selection < cursor {
                 candidate = Some(replayed);
                 break;
             }
         }
-        let candidate = candidate.ok_or(FastqReplayError::LengthOverflow)?;
+        let candidate = candidate.ok_or_else(|| rejected(FastqReplayError::LengthOverflow))?;
         let start =
             uniform_u64_below(&mut rng, candidate.start_count).map_err(FastqReplayError::Random)?;
         let end = start
             .checked_add(WGS_READ_LENGTH)
-            .ok_or(FastqReplayError::LengthOverflow)?;
+            .ok_or_else(|| rejected(FastqReplayError::LengthOverflow))?;
         let mut true_sequence =
             materialize_copy_interval(candidate.copy, self.reference, start, end)
                 .map_err(FastqReplayError::Materialization)?;
@@ -1115,11 +1134,11 @@ fn validate_declared_artifact(
     identities: &TechnicalIdentityPlan,
     individual: &Individual,
 ) -> Result<(), FastqValidationError> {
-    let library = identities
-        .library(individual.id())
-        .ok_or(FastqValidationError::Replay(
+    let library = identities.library(individual.id()).ok_or_else(|| {
+        rejected(FastqValidationError::Replay(
             FastqReplayError::MissingTechnicalLibrary,
-        ))?;
+        ))
+    })?;
     let expected_id = format!("fastq-{}", library.library_id().as_str());
     let expected_path =
         fastq_relative_path(identities.event_id().as_str(), individual.id().as_str())
@@ -1137,20 +1156,20 @@ fn validate_observed_artifact(
     observed_digest: &str,
 ) -> Result<(), FastqValidationError> {
     if artifact.size_bytes != observed_size_bytes {
-        return Err(FastqValidationError::Artifact {
+        return Err(rejected(FastqValidationError::Artifact {
             path: path.display().to_string(),
             field: "size_bytes",
             expected: artifact.size_bytes.to_string(),
             observed: observed_size_bytes.to_string(),
-        });
+        }));
     }
     if artifact.digest != observed_digest {
-        return Err(FastqValidationError::Artifact {
+        return Err(rejected(FastqValidationError::Artifact {
             path: path.display().to_string(),
             field: "digest",
             expected: artifact.digest.clone(),
             observed: observed_digest.to_owned(),
-        });
+        }));
     }
     Ok(())
 }
@@ -1164,12 +1183,12 @@ fn validate_artifact_field(
     if expected == observed {
         return Ok(());
     }
-    Err(FastqValidationError::Artifact {
+    Err(rejected(FastqValidationError::Artifact {
         path: artifact.path.clone(),
         field,
         expected: expected.to_owned(),
         observed: observed.to_owned(),
-    })
+    }))
 }
 
 fn io_error(path: &Path, operation: &'static str, error: std::io::Error) -> FastqValidationError {

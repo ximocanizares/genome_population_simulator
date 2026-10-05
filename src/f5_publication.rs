@@ -196,7 +196,9 @@ const NORMALIZATION_ORDER: [&str; 4] = [
     "haplotype_weights",
 ];
 
+#[track_caller]
 fn document_error(path: &str, detail: impl Into<String>) -> Diagnostic {
+    crate::guard_trace::record();
     Diagnostic::format(
         "GPS-FMT-006",
         "Un documento JSON producido no satisface su esquema publicado.",
@@ -206,7 +208,9 @@ fn document_error(path: &str, detail: impl Into<String>) -> Diagnostic {
     .with("detail", detail.into())
 }
 
+#[track_caller]
 fn manifest_error(path: &Path, detail: impl Into<String>) -> Diagnostic {
+    crate::guard_trace::record();
     Diagnostic::format(
         "GPS-FMT-006",
         "Un documento JSON producido no satisface su esquema publicado.",
@@ -214,6 +218,18 @@ fn manifest_error(path: &Path, detail: impl Into<String>) -> Diagnostic {
     .with("path", path.display().to_string())
     .with("schema", "manifest-general-v5.schema.json")
     .with("detail", detail.into())
+}
+
+/// Rechazo de un término que el diagnóstico de fallo y el manifiesto publican
+/// distinto. Es una función y no una clausura para que lleve `#[track_caller]`:
+/// cada uso es su propio punto de rechazo para la puerta de cobertura.
+#[track_caller]
+fn failure_mismatch(manifest_path: &Path, term: &str) -> Diagnostic {
+    crate::guard_trace::record();
+    manifest_error(
+        manifest_path,
+        format!("{F5_FAILURE_PATH}/{term}: el diagnóstico y el manifiesto discrepan"),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -2596,17 +2612,11 @@ fn verify_failure_diagnostic(
             ),
         ));
     }
-    let mismatch = |term: &str| {
-        manifest_error(
-            manifest_path,
-            format!("{F5_FAILURE_PATH}/{term}: el diagnóstico y el manifiesto discrepan"),
-        )
-    };
     if document.code != manifest.code {
-        return Err(mismatch("code"));
+        return Err(failure_mismatch(manifest_path, "code"));
     }
     if document.stage != manifest.stage {
-        return Err(mismatch("stage"));
+        return Err(failure_mismatch(manifest_path, "stage"));
     }
     for (term, left, right) in [
         ("scenario_id", &document.scenario_id, &manifest.scenario_id),
@@ -2626,7 +2636,7 @@ fn verify_failure_diagnostic(
         ),
     ] {
         if left != right {
-            return Err(mismatch(term));
+            return Err(failure_mismatch(manifest_path, term));
         }
     }
     Ok(())

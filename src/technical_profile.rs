@@ -6,6 +6,7 @@
 //! calidades, errores, contaminación o FASTQ; esas responsabilidades pertenecen
 //! a hitos posteriores.
 
+use crate::guard_trace::rejected;
 use std::fmt;
 
 use serde_json::Value;
@@ -531,9 +532,9 @@ pub fn resolve_f4_technical_profile(
             verify_pcr_profile_resource()?;
             Ok(PCR_PROFILE)
         }
-        _ => Err(F4TechnicalProfileError::UnknownProfile {
+        _ => Err(rejected(F4TechnicalProfileError::UnknownProfile {
             requested: profile_id.to_owned(),
-        }),
+        })),
     }
 }
 
@@ -550,12 +551,14 @@ pub fn resolve_f4_technical_profile_for(
 pub fn verify_initial_profile_resource() -> Result<(), F4TechnicalProfileError> {
     let observed = format!("{:x}", Sha256::digest(RESOURCE_BYTES));
     if observed != GPS_HISEQX_PCRFREE_PE150_SHA256 {
-        return Err(F4TechnicalProfileError::ResourceDigestMismatch { observed });
+        return Err(rejected(F4TechnicalProfileError::ResourceDigestMismatch {
+            observed,
+        }));
     }
     let value: Value = serde_json::from_slice(RESOURCE_BYTES).map_err(|_| {
-        F4TechnicalProfileError::InvalidResource {
+        rejected(F4TechnicalProfileError::InvalidResource {
             detail: "JSON no legible",
-        }
+        })
     })?;
     validate_resource(&value)
 }
@@ -564,12 +567,14 @@ pub fn verify_initial_profile_resource() -> Result<(), F4TechnicalProfileError> 
 pub fn verify_pcr_profile_resource() -> Result<(), F4TechnicalProfileError> {
     let observed = format!("{:x}", Sha256::digest(PCR_RESOURCE_BYTES));
     if observed != GPS_HISEQX_PCR_PE150_SHA256 {
-        return Err(F4TechnicalProfileError::ResourceDigestMismatch { observed });
+        return Err(rejected(F4TechnicalProfileError::ResourceDigestMismatch {
+            observed,
+        }));
     }
     let value: Value = serde_json::from_slice(PCR_RESOURCE_BYTES).map_err(|_| {
-        F4TechnicalProfileError::InvalidResource {
+        rejected(F4TechnicalProfileError::InvalidResource {
             detail: "JSON no legible",
-        }
+        })
     })?;
     validate_pcr_resource(&value)
 }
@@ -798,11 +803,11 @@ fn validate_quality_segments(
     expected: &[(u64, u64, u64, u64)],
     name: &'static str,
 ) -> Result<(), F4TechnicalProfileError> {
-    let segments = value
-        .as_array()
-        .ok_or(F4TechnicalProfileError::InvalidResource {
+    let segments = value.as_array().ok_or_else(|| {
+        rejected(F4TechnicalProfileError::InvalidResource {
             detail: "los segmentos de calidad deben ser una lista",
-        })?;
+        })
+    })?;
     if segments.len() != expected.len() {
         return invalid("el número de segmentos de calidad no coincide");
     }
@@ -860,25 +865,25 @@ fn object<'a>(
     value: &'a Value,
     name: &'static str,
 ) -> Result<&'a serde_json::Map<String, Value>, F4TechnicalProfileError> {
-    value
-        .as_object()
-        .ok_or(F4TechnicalProfileError::InvalidResource {
+    value.as_object().ok_or_else(|| {
+        rejected(F4TechnicalProfileError::InvalidResource {
             detail: match name {
                 "raíz" => "la raíz debe ser un objeto",
                 _ => "un objeto requerido no es un objeto JSON",
             },
         })
+    })
 }
 
 fn required<'a>(
     object: &'a serde_json::Map<String, Value>,
     field: &'static str,
 ) -> Result<&'a Value, F4TechnicalProfileError> {
-    object
-        .get(field)
-        .ok_or(F4TechnicalProfileError::InvalidResource {
+    object.get(field).ok_or_else(|| {
+        rejected(F4TechnicalProfileError::InvalidResource {
             detail: "falta un campo requerido",
         })
+    })
 }
 
 fn exact_fields(
@@ -887,12 +892,12 @@ fn exact_fields(
     name: &'static str,
 ) -> Result<(), F4TechnicalProfileError> {
     if object.len() != expected.len() || expected.iter().any(|field| !object.contains_key(*field)) {
-        return Err(F4TechnicalProfileError::InvalidResource {
+        return Err(rejected(F4TechnicalProfileError::InvalidResource {
             detail: match name {
                 "raíz" => "los campos de raíz no coinciden con el recurso normativo",
                 _ => "los campos de un objeto no coinciden con el recurso normativo",
             },
-        });
+        }));
     }
     Ok(())
 }
@@ -919,6 +924,10 @@ fn required_u64(
     Ok(())
 }
 
+#[track_caller]
 fn invalid(detail: &'static str) -> Result<(), F4TechnicalProfileError> {
-    Err(F4TechnicalProfileError::InvalidResource { detail })
+    crate::guard_trace::record();
+    Err(rejected(F4TechnicalProfileError::InvalidResource {
+        detail,
+    }))
 }

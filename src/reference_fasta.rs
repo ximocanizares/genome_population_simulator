@@ -1,5 +1,6 @@
 //! Adaptador FASTA síncrono tras el contrato propio de referencia.
 
+use crate::guard_trace::rejected;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Cursor, Read};
@@ -191,12 +192,14 @@ pub(crate) fn stream_fasta_site_bases(
         .map_err(|error| input_error(path, error))?
         .starts_with(&[0x1f, 0x8b])
     {
-        return Err(Diagnostic::format(
-            "GPS-FMT-001",
-            "El FASTA suministrado está comprimido y v1 solo admite texto sin comprimir.",
-        )
-        .with("path", path.display().to_string())
-        .with("detected_format", "gzip"));
+        return Err(rejected(
+            Diagnostic::format(
+                "GPS-FMT-001",
+                "El FASTA suministrado está comprimido y v1 solo admite texto sin comprimir.",
+            )
+            .with("path", path.display().to_string())
+            .with("detected_format", "gzip"),
+        ));
     }
 
     let mut result = Vec::with_capacity(sites.len());
@@ -323,15 +326,17 @@ pub(crate) fn stream_fasta_site_bases(
     }
     let observed = reader.into_inner().into_inner().finish(path);
     if observed_bytes != expected_size_bytes || observed.digest() != expected_sha256 {
-        return Err(Diagnostic::input(
-            "GPS-INPUT-002",
-            "Una entrada cambió durante su copia o no coincide con su identidad declarada.",
-        )
-        .with("path", path.display().to_string())
-        .with("expected_size_bytes", expected_size_bytes.to_string())
-        .with("observed_size_bytes", observed_bytes.to_string())
-        .with("expected_digest", expected_sha256)
-        .with("observed_digest", observed.digest()));
+        return Err(rejected(
+            Diagnostic::input(
+                "GPS-INPUT-002",
+                "Una entrada cambió durante su copia o no coincide con su identidad declarada.",
+            )
+            .with("path", path.display().to_string())
+            .with("expected_size_bytes", expected_size_bytes.to_string())
+            .with("observed_size_bytes", observed_bytes.to_string())
+            .with("expected_digest", expected_sha256)
+            .with("observed_digest", observed.digest()),
+        ));
     }
     if let Some(diagnostic) = deferred {
         return Err(diagnostic);
@@ -417,12 +422,14 @@ fn validate_supplied_fasta_inner(
         .map_err(|error| input_error(read_path, error))?
         .starts_with(&[0x1f, 0x8b])
     {
-        return Err(Diagnostic::format(
-            "GPS-FMT-001",
-            "El FASTA suministrado está comprimido y v1 solo admite texto sin comprimir.",
-        )
-        .with("path", read_path.display().to_string())
-        .with("detected_format", "gzip"));
+        return Err(rejected(
+            Diagnostic::format(
+                "GPS-FMT-001",
+                "El FASTA suministrado está comprimido y v1 solo admite texto sin comprimir.",
+            )
+            .with("path", read_path.display().to_string())
+            .with("detected_format", "gzip"),
+        ));
     }
 
     let expectations = expected.map(|items| {
@@ -695,12 +702,14 @@ pub fn validate_supplied_fasta_summary(
         .map_err(|error| input_error(read_path, error))?
         .starts_with(&[0x1f, 0x8b])
     {
-        return Err(Diagnostic::format(
-            "GPS-FMT-001",
-            "El FASTA suministrado está comprimido y v1 solo admite texto sin comprimir.",
-        )
-        .with("path", read_path.display().to_string())
-        .with("detected_format", "gzip"));
+        return Err(rejected(
+            Diagnostic::format(
+                "GPS-FMT-001",
+                "El FASTA suministrado está comprimido y v1 solo admite texto sin comprimir.",
+            )
+            .with("path", read_path.display().to_string())
+            .with("detected_format", "gzip"),
+        ));
     }
     let expectations = expected
         .iter()
@@ -854,15 +863,17 @@ fn finish_summary(
         return Err(empty_fasta(path).with("sequence", header.id_text()));
     }
     if let Some(first_line) = locations.insert(header.id_text().to_owned(), header_line) {
-        return Err(Diagnostic::format(
-            "GPS-FMT-004",
-            "Un identificador de secuencia FASTA está repetido.",
-        )
-        .with("path", path.display().to_string())
-        .with("identifier", header.id_text())
-        .with(
-            "locations",
-            format!("line {first_line}, line {header_line}"),
+        return Err(rejected(
+            Diagnostic::format(
+                "GPS-FMT-004",
+                "Un identificador de secuencia FASTA está repetido.",
+            )
+            .with("path", path.display().to_string())
+            .with("identifier", header.id_text())
+            .with(
+                "locations",
+                format!("line {first_line}, line {header_line}"),
+            ),
         ));
     }
     let expectation = expected.get(header.id_text()).ok_or_else(|| {
@@ -905,15 +916,17 @@ pub fn create_fai_for_acceptance(
             Ok(Some(record)) => records.push(record),
             Ok(None) => break,
             Err(error) => {
-                return Err(Diagnostic::format(
-                    "GPS-FMT-005",
-                    "Una secuencia contiene un símbolo de DNA no admitido.",
-                )
-                .with("path", fasta_path.display().to_string())
-                .with("sequence", "unknown")
-                .with("position", "unknown")
-                .with("found", error.to_string())
-                .with("accepted", "indexable FASTA validated before FAI creation"));
+                return Err(rejected(
+                    Diagnostic::format(
+                        "GPS-FMT-005",
+                        "Una secuencia contiene un símbolo de DNA no admitido.",
+                    )
+                    .with("path", fasta_path.display().to_string())
+                    .with("sequence", "unknown")
+                    .with("position", "unknown")
+                    .with("found", error.to_string())
+                    .with("accepted", "indexable FASTA validated before FAI creation"),
+                ));
             }
         }
     }
@@ -943,15 +956,17 @@ pub fn query_fai_for_acceptance(
         .build_from_path(fasta_path)
         .map_err(|error| input_error(fasta_path, error))?;
     let region = region.parse().map_err(|error| {
-        Diagnostic::format(
-            "GPS-FMT-005",
-            "Una secuencia contiene un símbolo de DNA no admitido.",
+        rejected(
+            Diagnostic::format(
+                "GPS-FMT-005",
+                "Una secuencia contiene un símbolo de DNA no admitido.",
+            )
+            .with("path", fasta_path.display().to_string())
+            .with("sequence", region)
+            .with("position", "region")
+            .with("found", format!("{error}"))
+            .with("accepted", "valid indexed region"),
         )
-        .with("path", fasta_path.display().to_string())
-        .with("sequence", region)
-        .with("position", "region")
-        .with("found", format!("{error}"))
-        .with("accepted", "valid indexed region")
     })?;
     reader
         .query(&region)
@@ -973,15 +988,17 @@ fn finish_record(
         return Err(empty_fasta(path).with("sequence", header.id_text()));
     }
     if let Some(first_line) = locations.insert(header.id_text().to_owned(), header_line) {
-        return Err(Diagnostic::format(
-            "GPS-FMT-004",
-            "Un identificador de secuencia FASTA está repetido.",
-        )
-        .with("path", path.display().to_string())
-        .with("identifier", header.id_text())
-        .with(
-            "locations",
-            format!("line {first_line}, line {header_line}"),
+        return Err(rejected(
+            Diagnostic::format(
+                "GPS-FMT-004",
+                "Un identificador de secuencia FASTA está repetido.",
+            )
+            .with("path", path.display().to_string())
+            .with("identifier", header.id_text())
+            .with(
+                "locations",
+                format!("line {first_line}, line {header_line}"),
+            ),
         ));
     }
     // Se consume el búfer ya acumulado en lugar de copiarlo: `try_from_bytes`
@@ -1095,7 +1112,9 @@ pub(crate) fn input_error(path: &Path, error: io::Error) -> Diagnostic {
     .with("detail", error.to_string())
 }
 
+#[track_caller]
 pub(crate) fn empty_header(path: &Path, line: u64) -> Diagnostic {
+    crate::guard_trace::record();
     Diagnostic::format(
         "GPS-FMT-003",
         "Una cabecera FASTA no contiene un identificador de secuencia.",
@@ -1104,7 +1123,9 @@ pub(crate) fn empty_header(path: &Path, line: u64) -> Diagnostic {
     .with("location", format!("line {line}"))
 }
 
+#[track_caller]
 pub(crate) fn empty_fasta(path: &Path) -> Diagnostic {
+    crate::guard_trace::record();
     Diagnostic::format(
         "GPS-FMT-002",
         "El FASTA no contiene ninguna secuencia no vacía.",
@@ -1112,7 +1133,9 @@ pub(crate) fn empty_fasta(path: &Path) -> Diagnostic {
     .with("path", path.display().to_string())
 }
 
+#[track_caller]
 pub(crate) fn invalid_symbol(path: &Path, sequence: &str, position: u64, found: u8) -> Diagnostic {
+    crate::guard_trace::record();
     Diagnostic::format(
         "GPS-FMT-005",
         "Una secuencia contiene un símbolo de DNA no admitido.",
@@ -1124,7 +1147,9 @@ pub(crate) fn invalid_symbol(path: &Path, sequence: &str, position: u64, found: 
     .with("accepted", "A,C,G,T,N (case-insensitive)")
 }
 
+#[track_caller]
 fn configuration_mismatch(path: &Path, fields: &str, detail: impl Into<String>) -> Diagnostic {
+    crate::guard_trace::record();
     Diagnostic::configuration(
         "GPS-CONF-008",
         "La configuración contiene una combinación de campos incompatible.",
@@ -1134,7 +1159,9 @@ fn configuration_mismatch(path: &Path, fields: &str, detail: impl Into<String>) 
     .with("detail", detail.into())
 }
 
+#[track_caller]
 fn reference_error(path: &Path, error: ReferenceError) -> Diagnostic {
+    crate::guard_trace::record();
     match error {
         ReferenceError::InvalidDnaSymbol { position, symbol } => {
             invalid_symbol(path, "unknown", position, symbol)

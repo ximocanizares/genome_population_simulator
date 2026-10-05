@@ -205,9 +205,40 @@
 # Medido el 23/09/2026; oráculo y verificador del VCF remedidos el 29/09/2026
 # (168 a 52 y 25 a 22, con el mismo número de comprobaciones); `results.rs` y
 # `event_manifest.rs` medidos por primera vez el 29/09/2026.
+# **El 05/10/2026 entran nueve jueces más: pasan de cinco a catorce los
+# módulos vigilados (decisión del responsable).** Son los que juzgan lo
+# publicado o lo leído y que DT-001 listaba sin vigilar. Cifras medidas con esta
+# misma puerta, en comprobaciones / sin disparar: `src/truth_validation.rs`
+# 118 / 95, `src/truth_schema.rs` 69 / 46, `src/fastq_validation.rs` 71 / 57,
+# `src/population_snvs.rs` 143 / 123, `src/f5_publication.rs` 52 / 36,
+# `src/reference_fasta.rs` 41 / 30, `src/reference_reduction_io.rs` 55 / 45,
+# `src/integrity.rs` 1 / 0 y `src/technical_profile.rs` 15 / 14: 565
+# comprobaciones nuevas, 446 de las cuales no las ejercita ninguna prueba.
+# **Corregido el mismo día tras la revisión adversarial**: la primera medida
+# daba 121 / 93, 72 / 58 y 145 / 124 en los tres primeros módulos afectados, y
+# el total de sin disparar se sumó mal (416 en vez de 446). Siete envoltorios
+# que reetiquetaban un error ya anotado salen de la cuenta, y una utilidad
+# compartida (`reference_content_sha256`) deja de anotar un fallo que el juez
+# de recursos publicados se traga a propósito.
+# **No es una regresión: se ve lo que antes no se veía.** Cada rechazo pasa
+# ahora por su propia llamada a `rejected(..)` (genérica, en
+# `src/guard_trace.rs`) o a una constructora anotada con `#[track_caller]`,
+# con el mismo error byte a byte. El techo de cada módulo es la cifra medida;
+# bajarlo es DT-001, no este cambio. `src/f5_artifacts.rs` queda fuera porque
+# escribe y no juzga, y no se vigilan los rechazos por fallo de entrada/salida
+# ni el generador de matrices de `population_snvs.rs` (DT-001 explica por qué).
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	109	22
 src/f5_closure.rs	42	5
 src/results.rs	773	619
 src/event_manifest.rs	147	117
+src/truth_validation.rs	118	95
+src/truth_schema.rs	69	46
+src/fastq_validation.rs	71	57
+src/population_snvs.rs	143	123
+src/f5_publication.rs	52	36
+src/reference_fasta.rs	41	30
+src/reference_reduction_io.rs	55	45
+src/integrity.rs	1	0
+src/technical_profile.rs	15	14

@@ -216,15 +216,8 @@ impl ReductionSource for IndexedSource {
         start: usize,
         end: usize,
     ) -> Result<Vec<u8>, Diagnostic> {
-        let out_of_range = || {
-            map_error(
-                sequence_id.as_str(),
-                "source_interval",
-                "el intervalo fuente queda fuera de la secuencia",
-            )
-        };
         if end < start {
-            return Err(out_of_range());
+            return Err(out_of_range(sequence_id));
         }
         // Un intervalo vacío no es representable como región del índice, pero la
         // fuente en memoria lo acepta devolviendo un fragmento vacío. Ambas
@@ -233,13 +226,13 @@ impl ReductionSource for IndexedSource {
             return if self.catalog.iter().any(|entry| entry.id() == sequence_id) {
                 Ok(Vec::new())
             } else {
-                Err(out_of_range())
+                Err(out_of_range(sequence_id))
             };
         }
         // El FAI usa coordenadas de una base y extremos inclusivos; el mapa de
         // reducción usa un intervalo semiabierto de base cero.
         let region = format!("{}:{}-{}", sequence_id.as_str(), start + 1, end);
-        let region = region.parse().map_err(|_| out_of_range())?;
+        let region = region.parse().map_err(|_| out_of_range(sequence_id))?;
         let mut reader = fasta::io::indexed_reader::Builder::default()
             .set_index(self.index.clone())
             .build_from_path(&self.fasta_path)
@@ -249,10 +242,12 @@ impl ReductionSource for IndexedSource {
                     .with("operation", "open_indexed_reference")
                     .with("detail", error.to_string())
             })?;
-        let record = reader.query(&region).map_err(|_| out_of_range())?;
+        let record = reader
+            .query(&region)
+            .map_err(|_| out_of_range(sequence_id))?;
         let bases = record.sequence().as_ref().to_ascii_uppercase();
         if bases.len() != end - start {
-            return Err(out_of_range());
+            return Err(out_of_range(sequence_id));
         }
         Ok(bases)
     }
@@ -814,7 +809,22 @@ fn require_interval(
     Ok((start, end))
 }
 
+/// Rechazo del intervalo fuente que queda fuera de la secuencia. Es una función
+/// y no una clausura para que lleve `#[track_caller]`: cada uso es su propio
+/// punto de rechazo para la puerta de cobertura.
+#[track_caller]
+fn out_of_range(sequence_id: &SequenceId) -> Diagnostic {
+    crate::guard_trace::record();
+    map_error(
+        sequence_id.as_str(),
+        "source_interval",
+        "el intervalo fuente queda fuera de la secuencia",
+    )
+}
+
+#[track_caller]
 fn map_error(reference: &str, invariant: &str, detail: &str) -> Diagnostic {
+    crate::guard_trace::record();
     Diagnostic::format(
         "GPS-FMT-007",
         "El mapa de reducción no permite reconstruir exactamente la referencia derivada.",

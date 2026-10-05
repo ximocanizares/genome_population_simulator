@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Puerta del barrido de guardas de los jueces independientes y de los dos
-# verificadores de configuración efectiva y manifiesto de evento.
+# Puerta del barrido de guardas de los jueces independientes, de los dos
+# verificadores de configuración efectiva y manifiesto de evento y, desde el
+# 05/10/2026, de los nueve módulos que juzgan lo publicado o lo leído (verdad,
+# FASTQ, matriz de SNV, paquete F5, FASTA, mapa de reducción, identidad de
+# artefactos y perfil técnico). La lista autoritativa es el array `judges`.
 #
 # QUÉ MIDE, Y QUÉ NO. Mide **si una guarda llega a dispararse** durante la
 # batería. No mide si la prueba que la dispara **fallaría** en caso de que la
@@ -40,6 +43,15 @@ judges=(
     "src/f5_closure.rs|reject"
     "src/results.rs|effective_error|effective_error_for_schema|manifest_error|manifest_error_for_schema|repeat_section_error|reason|physical_error|artifact_identity_error"
     "src/event_manifest.rs|event_error"
+    "src/truth_validation.rs|rejected|mismatch"
+    "src/truth_schema.rs|rejected"
+    "src/fastq_validation.rs|rejected|missing_canonical_eof"
+    "src/population_snvs.rs|rejected|audit_error|missing|invalid"
+    "src/f5_publication.rs|document_error|manifest_error|failure_mismatch"
+    "src/reference_fasta.rs|rejected|empty_header|empty_fasta|invalid_symbol|configuration_mismatch|reference_error"
+    "src/reference_reduction_io.rs|map_error|out_of_range"
+    "src/integrity.rs|rejected"
+    "src/technical_profile.rs|rejected|invalid"
 )
 
 echo "== batería con el barrido encendido ==" >&2

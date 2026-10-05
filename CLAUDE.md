@@ -251,17 +251,32 @@ las ejercitaba nadie**: comprobaciones escritas, ejecutadas y jamás probadas,
 de modo que si una estuviera mal escrita nadie lo notaría y el simulador daría
 por bueno un fichero incorrecto.
 
-Vigila **cinco módulos**: el oráculo de aceptación de F5
+Vigila **catorce módulos**. Los cinco primeros: el oráculo de aceptación de F5
 (`src/f5_oracle.rs`), el oráculo semántico del VCF
 (`src/vcf_semantic_validation.rs`), la auditoría de identidad y publicación
 (`src/f5_closure.rs`), el juez de los recursos publicados, de la configuración
 efectiva y del manifiesto general (`src/results.rs`) y el del manifiesto de
-evento (`src/event_manifest.rs`). Los dos últimos entraron el 29 de septiembre
-de 2026. **La autoridad es el array `judges` de
+evento (`src/event_manifest.rs`); los dos últimos entraron el 29 de septiembre
+de 2026. Los nueve restantes entraron el 5 de octubre de 2026 y son los que
+juzgan lo publicado o lo leído: el juez semántico de la verdad
+(`src/truth_validation.rs`) y su contrato (`src/truth_schema.rs`), el del FASTQ
+final (`src/fastq_validation.rs`), la validación de la matriz de SNV
+(`src/population_snvs.rs`), la verificación del paquete F5
+(`src/f5_publication.rs`), la del FASTA suministrado (`src/reference_fasta.rs`),
+la del mapa de reducción (`src/reference_reduction_io.rs`), la identidad de
+artefactos (`src/integrity.rs`) y la del perfil técnico
+(`src/technical_profile.rs`). **La autoridad es el array `judges` de
 `scripts/check-guard-coverage.sh`**, que fija cada módulo y los nombres de sus
 constructoras de error; la fila de `scripts/guard-coverage-baseline.tsv` es
 obligatoria pero no basta: una fila sin entrada en el array se ignora sin
-avisar. Para añadir un módulo hay que tocar los dos ficheros y este párrafo.
+avisar. Para añadir un módulo hay que tocar los dos ficheros, este párrafo y la
+lista de `tests/guard_constructors.rs`, que impide que un rechazo se salte la
+constructora. En los nueve últimos, cada rechazo pasa por `rejected(..)`
+(`src/guard_trace.rs`) o por una constructora propia con `#[track_caller]`; en
+`ok_or` hay que escribir `ok_or_else(|| rejected(..))`, porque
+`ok_or(rejected(..))` anotaría siempre. Las comprobaciones de estos módulos
+subieron de golpe al entrar (565 nuevas, 446 sin ejercitar): se hizo visible lo
+que no se veía, no es una regresión.
 
 Compara contra `scripts/guard-coverage-baseline.tsv`, que declara por juez
 cuántas comprobaciones tiene y cuántas pueden quedar sin ejercitar. **Se

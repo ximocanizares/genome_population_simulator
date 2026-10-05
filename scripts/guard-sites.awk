@@ -10,6 +10,12 @@
 # que lo convierte en diagnóstico no es un punto de rechazo y no llama a una
 # constructora anotada.
 #
+# Desde el 05/10/2026 también se cuentan las llamadas a `rejected(`, la
+# constructora genérica de `src/guard_trace.rs` que envuelve el error de cada
+# rechazo (`Err(rejected(Variante { .. }))`), y las definiciones de las
+# constructoras `pub(crate) fn` o `pub fn` se descartan igual que las de
+# columna cero con `fn` a secas.
+#
 # Se descartan:
 #   - las **definiciones** de las constructoras y sus cuerpos, porque la
 #     anotación `#[track_caller]` los atraviesa y anota al llamante;
@@ -33,7 +39,7 @@ in_test { if ($0 == "}") { in_test = 0 } ; next }
 # igual. `#[track_caller]` hace que sus rechazos se anoten en el llamante, así
 # que ninguna línea suya es un punto de rechazo propio.
 {
-    if (match($0, "^fn (" names ")[(<]")) { in_constructor = 1; next }
+    if (match($0, "^(pub(\\([a-z]+\\))? )?fn (" names ")[(<]")) { in_constructor = 1; next }
 }
 in_constructor { if ($0 == "}") { in_constructor = 0 } ; next }
 

@@ -4,6 +4,7 @@
 //! Solo comprueba estructura en memoria. Proyección, E/S y reconstrucción son
 //! responsabilidades posteriores (F2.4.2 y F2.4.3).
 
+use crate::guard_trace::rejected;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Versión vigente de la verdad **sin alelos de repetición**.
@@ -464,7 +465,7 @@ impl TruthDocument {
         let h = &self.header;
         validate_lexical_document(self)?;
         if h.document_kind != TRUTH_DOCUMENT_KIND {
-            return Err(TruthContractError::UnsupportedDocumentKind);
+            return Err(rejected(TruthContractError::UnsupportedDocumentKind));
         }
         // **La versión se promueve por lo que se publica, no por lo que se
         // declara.** Un documento que lleve al menos un alelo de repetición es
@@ -478,10 +479,12 @@ impl TruthDocument {
             TRUTH_SCHEMA_VERSION
         };
         if h.schema_version != expected {
-            return Err(TruthContractError::UnsupportedVersion);
+            return Err(rejected(TruthContractError::UnsupportedVersion));
         }
         if h.coordinate_convention != TRUTH_COORDINATE_CONVENTION {
-            return Err(TruthContractError::UnsupportedCoordinateConvention);
+            return Err(rejected(
+                TruthContractError::UnsupportedCoordinateConvention,
+            ));
         }
         let digests = source_digest_index(&h.source_digests)?;
         let groups = digest_index(&h.group_digests)?;
@@ -497,22 +500,22 @@ impl TruthDocument {
         for record in &self.records {
             let key = RecordKey::of(record);
             if previous.as_ref().is_some_and(|prior| prior > &key) {
-                return Err(TruthContractError::RecordsOutOfOrder);
+                return Err(rejected(TruthContractError::RecordsOutOfOrder));
             }
             previous = Some(key);
             match record {
                 TruthRecord::HaplotypeCopy(copy) => {
                     validate_copy(copy, h, &digests, &groups)?;
                     if !copies.insert(copy.identity.clone()) {
-                        return Err(TruthContractError::DuplicateCopy {
+                        return Err(rejected(TruthContractError::DuplicateCopy {
                             identity: copy.identity.clone(),
-                        });
+                        }));
                     }
-                    copy_count = copy_count.checked_add(1).ok_or(
-                        TruthContractError::ArithmeticOverflow {
+                    copy_count = copy_count.checked_add(1).ok_or_else(|| {
+                        rejected(TruthContractError::ArithmeticOverflow {
                             field: "copy_count",
-                        },
-                    )?;
+                        })
+                    })?;
                 }
                 TruthRecord::Genotype(genotype) => {
                     validate_genotype(genotype, h, &copies)?;
@@ -522,29 +525,29 @@ impl TruthDocument {
                         genotype.locus.clone(),
                         genotype.case_id.clone(),
                     )) {
-                        return Err(TruthContractError::DuplicateGenotype {
+                        return Err(rejected(TruthContractError::DuplicateGenotype {
                             case_id: genotype.case_id.clone(),
-                        });
+                        }));
                     }
-                    genotype_count = genotype_count.checked_add(1).ok_or(
-                        TruthContractError::ArithmeticOverflow {
+                    genotype_count = genotype_count.checked_add(1).ok_or_else(|| {
+                        rejected(TruthContractError::ArithmeticOverflow {
                             field: "genotype_count",
-                        },
-                    )?;
+                        })
+                    })?;
                 }
             }
         }
         if h.copy_count != copy_count {
-            return Err(TruthContractError::CopyCountMismatch {
+            return Err(rejected(TruthContractError::CopyCountMismatch {
                 declared: h.copy_count,
                 actual: copy_count,
-            });
+            }));
         }
         if h.genotype_count != genotype_count {
-            return Err(TruthContractError::GenotypeCountMismatch {
+            return Err(rejected(TruthContractError::GenotypeCountMismatch {
                 declared: h.genotype_count,
                 actual: genotype_count,
-            });
+            }));
         }
         Ok(())
     }
@@ -570,16 +573,16 @@ fn validate_lexical_document(document: &TruthDocument) -> Result<(), TruthContra
                     valid_id("copy_identity", value)?;
                 }
                 if copy.identity.copy_index > 9 || copy.phase > 9 {
-                    return Err(TruthContractError::InvalidLexicalField {
+                    return Err(rejected(TruthContractError::InvalidLexicalField {
                         field: "copy_index_or_phase",
                         value: copy.identity.copy_index.to_string(),
-                    });
+                    }));
                 }
                 if copy.provenance.origin.is_empty() {
-                    return Err(TruthContractError::InvalidLexicalField {
+                    return Err(rejected(TruthContractError::InvalidLexicalField {
                         field: "copy_provenance_origin",
                         value: copy.provenance.origin.clone(),
-                    });
+                    }));
                 }
                 for source in &copy.provenance.sources {
                     valid_source(source)?;
@@ -681,10 +684,10 @@ fn validate_lexical_document(document: &TruthDocument) -> Result<(), TruthContra
                         valid_id("carrier_copy", value)?;
                     }
                     if carrier.copy.copy_index > 9 {
-                        return Err(TruthContractError::InvalidLexicalField {
+                        return Err(rejected(TruthContractError::InvalidLexicalField {
                             field: "carrier_copy_index",
                             value: carrier.copy.copy_index.to_string(),
-                        });
+                        }));
                     }
                 }
             }
@@ -702,10 +705,10 @@ fn valid_id(field: &'static str, value: &str) -> Result<(), TruthContractError> 
     {
         Ok(())
     } else {
-        Err(TruthContractError::InvalidLexicalField {
+        Err(rejected(TruthContractError::InvalidLexicalField {
             field,
             value: value.to_owned(),
-        })
+        }))
     }
 }
 fn valid_sha(value: &str) -> Result<(), TruthContractError> {
@@ -716,10 +719,10 @@ fn valid_sha(value: &str) -> Result<(), TruthContractError> {
     {
         Ok(())
     } else {
-        Err(TruthContractError::InvalidLexicalField {
+        Err(rejected(TruthContractError::InvalidLexicalField {
             field: "sha256",
             value: value.to_owned(),
-        })
+        }))
     }
 }
 fn valid_source(source: &TruthSourceRef) -> Result<(), TruthContractError> {
@@ -785,40 +788,41 @@ fn valid_modification_lexical(modification: &TruthModification) -> Result<(), Tr
 /// motivo.
 fn valid_repeat_blocks(blocks: &[TruthRepeatBlock], bases: &str) -> Result<(), TruthContractError> {
     if blocks.is_empty() {
-        return Err(TruthContractError::InvalidLexicalField {
+        return Err(rejected(TruthContractError::InvalidLexicalField {
             field: "repeat_blocks",
             value: String::new(),
-        });
+        }));
     }
     let mut total = 0_u64;
     for block in blocks {
         valid_bases("repeat_block_motif", &block.motif)?;
         let motif_length = u64::try_from(block.motif.len()).map_err(|_| {
-            TruthContractError::ArithmeticOverflow {
+            rejected(TruthContractError::ArithmeticOverflow {
                 field: "repeat_block_motif_length",
-            }
+            })
         })?;
         if block.bases == 0 || motif_length == 0 {
-            return Err(TruthContractError::InvalidLexicalField {
+            return Err(rejected(TruthContractError::InvalidLexicalField {
                 field: "repeat_block_bases",
                 value: block.bases.to_string(),
-            });
+            }));
         }
-        total = total
-            .checked_add(block.bases)
-            .ok_or(TruthContractError::ArithmeticOverflow {
+        total = total.checked_add(block.bases).ok_or_else(|| {
+            rejected(TruthContractError::ArithmeticOverflow {
                 field: "repeat_block_bases",
-            })?;
-    }
-    let observed =
-        u64::try_from(bases.len()).map_err(|_| TruthContractError::ArithmeticOverflow {
-            field: "repeat_allele_bases_length",
+            })
         })?;
+    }
+    let observed = u64::try_from(bases.len()).map_err(|_| {
+        rejected(TruthContractError::ArithmeticOverflow {
+            field: "repeat_allele_bases_length",
+        })
+    })?;
     if total != observed {
-        return Err(TruthContractError::InvalidLexicalField {
+        return Err(rejected(TruthContractError::InvalidLexicalField {
             field: "repeat_blocks_total_bases",
             value: total.to_string(),
-        });
+        }));
     }
     Ok(())
 }
@@ -851,9 +855,9 @@ fn valid_allele_lexical(allele: &TruthAllele) -> Result<(), TruthContractError> 
             if !matches!(source_event, TruthStructuralEvent::Insertion { point, bases: event_bases, .. } if *point > 0 && event_bases == bases)
                 || piece_links.is_empty()
             {
-                return Err(TruthContractError::InvalidGenotypeAllele {
+                return Err(rejected(TruthContractError::InvalidGenotypeAllele {
                     case_id: event_id.clone(),
-                });
+                }));
             }
             validate_structural_event(event_id, source_event, piece_links)
         }
@@ -869,16 +873,16 @@ fn valid_allele_lexical(allele: &TruthAllele) -> Result<(), TruthContractError> 
             if *start >= 1 && *end >= 2 && start < end {
                 if !matches!(source_event, TruthStructuralEvent::Deletion { start: source_start, end: source_end, .. } if source_start == start && source_end == end && *source_start >= 1 && *source_end >= 2)
                 {
-                    return Err(TruthContractError::InvalidGenotypeAllele {
+                    return Err(rejected(TruthContractError::InvalidGenotypeAllele {
                         case_id: event_id.clone(),
-                    });
+                    }));
                 }
                 validate_structural_event(event_id, source_event, piece_links)
             } else {
-                Err(TruthContractError::InvalidLexicalField {
+                Err(rejected(TruthContractError::InvalidLexicalField {
                     field: "deletion_allele_interval",
                     value: format!("{start}:{end}"),
-                })
+                }))
             }
         }
     }
@@ -895,10 +899,10 @@ fn validate_structural_event(
             bases,
         } => {
             if *point == 0 {
-                return Err(TruthContractError::InvalidLexicalField {
+                return Err(rejected(TruthContractError::InvalidLexicalField {
                     field: "source_event_insertion_point",
                     value: point.to_string(),
-                });
+                }));
             }
             valid_bases("source_event_insertion_bases", bases)?;
             event_id
@@ -909,20 +913,20 @@ fn validate_structural_event(
             end,
         } => {
             if *start == 0 || *end < 2 || start >= end {
-                return Err(TruthContractError::InvalidLexicalField {
+                return Err(rejected(TruthContractError::InvalidLexicalField {
                     field: "source_event_deletion_interval",
                     value: format!("{start}:{end}"),
-                });
+                }));
             }
             event_id
         }
     };
     valid_id("source_event_id", event_id)?;
     if event_id != allele_event_id {
-        return Err(TruthContractError::InvalidLexicalField {
+        return Err(rejected(TruthContractError::InvalidLexicalField {
             field: "source_event_id",
             value: event_id.clone(),
-        });
+        }));
     }
     let mut prior_end = 0;
     let mut piece_indices = BTreeSet::new();
@@ -931,10 +935,10 @@ fn validate_structural_event(
             || link.start < prior_end
             || !piece_indices.insert(link.piece_index)
         {
-            return Err(TruthContractError::InvalidLexicalField {
+            return Err(rejected(TruthContractError::InvalidLexicalField {
                 field: "piece_links",
                 value: format!("{}:{}:{}", link.piece_index, link.start, link.end),
-            });
+            }));
         }
         prior_end = link.end;
     }
@@ -944,10 +948,10 @@ fn valid_base(field: &'static str, value: &str) -> Result<(), TruthContractError
     if matches!(value, "A" | "C" | "G" | "T") {
         Ok(())
     } else {
-        Err(TruthContractError::InvalidLexicalField {
+        Err(rejected(TruthContractError::InvalidLexicalField {
             field,
             value: value.to_owned(),
-        })
+        }))
     }
 }
 fn valid_bases(field: &'static str, value: &str) -> Result<(), TruthContractError> {
@@ -958,10 +962,10 @@ fn valid_bases(field: &'static str, value: &str) -> Result<(), TruthContractErro
     {
         Ok(())
     } else {
-        Err(TruthContractError::InvalidLexicalField {
+        Err(rejected(TruthContractError::InvalidLexicalField {
             field,
             value: value.to_owned(),
-        })
+        }))
     }
 }
 
@@ -969,7 +973,7 @@ fn source_digest_index(
     digests: &[NamedDigest],
 ) -> Result<BTreeMap<TruthSourceRef, &NamedDigest>, TruthContractError> {
     if digests.is_empty() {
-        return Err(TruthContractError::EmptySourceDigests);
+        return Err(rejected(TruthContractError::EmptySourceDigests));
     }
     digest_index(digests)
 }
@@ -979,9 +983,9 @@ fn digest_index(
     let mut indexed = BTreeMap::new();
     for digest in digests {
         if indexed.insert(digest.source.clone(), digest).is_some() {
-            return Err(TruthContractError::DuplicateDigest {
+            return Err(rejected(TruthContractError::DuplicateDigest {
                 source: digest.source.clone(),
-            });
+            }));
         }
     }
     Ok(indexed)
@@ -993,9 +997,9 @@ fn require_digest(
     if digests.contains_key(source) {
         Ok(())
     } else {
-        Err(TruthContractError::MissingDigest {
+        Err(rejected(TruthContractError::MissingDigest {
             source: source.clone(),
-        })
+        }))
     }
 }
 fn validate_copy(
@@ -1005,39 +1009,39 @@ fn validate_copy(
     groups: &BTreeMap<TruthSourceRef, &NamedDigest>,
 ) -> Result<(), TruthContractError> {
     if copy.identity.reference_id != header.reference_id {
-        return Err(TruthContractError::CopyReferenceMismatch {
+        return Err(rejected(TruthContractError::CopyReferenceMismatch {
             identity: copy.identity.clone(),
-        });
+        }));
     }
     if copy.phase != copy.identity.copy_index {
-        return Err(TruthContractError::InvalidCopyPhase {
+        return Err(rejected(TruthContractError::InvalidCopyPhase {
             identity: copy.identity.clone(),
             phase: copy.phase,
-        });
+        }));
     }
     let mut provenance_sources = BTreeSet::new();
     for source in &copy.provenance.sources {
         if !provenance_sources.insert(source.clone()) {
-            return Err(TruthContractError::InvalidLexicalField {
+            return Err(rejected(TruthContractError::InvalidLexicalField {
                 field: "copy_provenance_sources",
                 value: source.source_id.clone(),
-            });
+            }));
         }
         require_digest(digests, source)?;
     }
     if copy.provenance.sources.is_empty() || copy.segments.is_empty() {
-        return Err(TruthContractError::EmptySegment {
+        return Err(rejected(TruthContractError::EmptySegment {
             identity: copy.identity.clone(),
-        });
+        }));
     }
     for segment in &copy.segments {
         let mut previous: Option<ModificationExtent> = None;
         if segment.source.start >= segment.source.end
             || segment.source.end > segment.source.sequence_length
         {
-            return Err(TruthContractError::InvalidSegmentInterval {
+            return Err(rejected(TruthContractError::InvalidSegmentInterval {
                 identity: copy.identity.clone(),
-            });
+            }));
         }
         if segment.source.reference_id != copy.identity.reference_id
             || segment.source.sequence_id != copy.identity.sequence_id
@@ -1046,17 +1050,17 @@ fn validate_copy(
                 TruthSourceKind::Reference | TruthSourceKind::Founder
             )
         {
-            return Err(TruthContractError::SegmentSourceMismatch {
+            return Err(rejected(TruthContractError::SegmentSourceMismatch {
                 identity: copy.identity.clone(),
-            });
+            }));
         }
         require_digest(digests, &segment.source.source)?;
         for modification in &segment.modifications {
             let extent = ModificationExtent::from(modification)?;
             if !extent.contained(&segment.source) {
-                return Err(TruthContractError::ModificationOutsideSegment {
+                return Err(rejected(TruthContractError::ModificationOutsideSegment {
                     event_id: extent.event_id.clone(),
-                });
+                }));
             }
             if let Some(prior) = previous {
                 let deletion_covers_snp = prior.deletion != extent.deletion
@@ -1065,14 +1069,14 @@ fn validate_copy(
                             && extent.start <= prior.start
                             && prior.end <= extent.end));
                 if prior.sort_key() >= extent.sort_key() && !deletion_covers_snp {
-                    return Err(TruthContractError::ModificationsNotOrdered {
+                    return Err(rejected(TruthContractError::ModificationsNotOrdered {
                         event_id: extent.event_id.clone(),
-                    });
+                    }));
                 }
                 if prior.overlaps(extent.clone()) && !deletion_covers_snp {
-                    return Err(TruthContractError::OverlappingModifications {
+                    return Err(rejected(TruthContractError::OverlappingModifications {
                         event_id: extent.event_id.clone(),
-                    });
+                    }));
                 }
             }
             validate_modification(
@@ -1094,9 +1098,9 @@ fn validate_current_state(
     groups: &BTreeMap<TruthSourceRef, &NamedDigest>,
 ) -> Result<(), TruthContractError> {
     if copy.current_pieces.is_empty() {
-        return Err(TruthContractError::EmptyCurrentPieces {
+        return Err(rejected(TruthContractError::EmptyCurrentPieces {
             identity: copy.identity.clone(),
-        });
+        }));
     }
     for piece in &copy.current_pieces {
         match piece {
@@ -1110,9 +1114,9 @@ fn validate_current_state(
                         TruthSourceKind::Reference | TruthSourceKind::Founder
                     )
                 {
-                    return Err(TruthContractError::InvalidCurrentPiece {
+                    return Err(rejected(TruthContractError::InvalidCurrentPiece {
                         identity: copy.identity.clone(),
-                    });
+                    }));
                 }
                 require_digest(digests, &source.source)?;
                 let mut prior = None;
@@ -1121,14 +1125,14 @@ fn validate_current_state(
                         || snp.position >= source.end
                         || snp.reference == snp.alternate
                     {
-                        return Err(TruthContractError::InvalidCurrentPiece {
+                        return Err(rejected(TruthContractError::InvalidCurrentPiece {
                             identity: copy.identity.clone(),
-                        });
+                        }));
                     }
                     if prior.is_some_and(|position| position >= snp.position) {
-                        return Err(TruthContractError::InvalidCurrentPiece {
+                        return Err(rejected(TruthContractError::InvalidCurrentPiece {
                             identity: copy.identity.clone(),
-                        });
+                        }));
                     }
                     validate_modification_provenance(
                         &snp.event_id,
@@ -1145,9 +1149,9 @@ fn validate_current_state(
                         .bytes()
                         .all(|base| matches!(base, b'A' | b'C' | b'G' | b'T' | b'N'))
                 {
-                    return Err(TruthContractError::InvalidCurrentPiece {
+                    return Err(rejected(TruthContractError::InvalidCurrentPiece {
                         identity: copy.identity.clone(),
-                    });
+                    }));
                 }
                 validate_modification_provenance("inserted_piece", provenance, digests, groups)?;
             }
@@ -1167,9 +1171,9 @@ fn validate_current_state(
                         TruthSourceKind::Reference | TruthSourceKind::Founder
                     )
                 {
-                    return Err(TruthContractError::InvalidCurrentPiece {
+                    return Err(rejected(TruthContractError::InvalidCurrentPiece {
                         identity: copy.identity.clone(),
-                    });
+                    }));
                 }
                 require_digest(digests, &source.source)?;
                 validate_modification_provenance(
@@ -1219,14 +1223,14 @@ fn validate_current_state(
             } => (event_id, start < end && !bases.is_empty(), provenance),
         };
         if !valid {
-            return Err(TruthContractError::InvalidCurrentPiece {
+            return Err(rejected(TruthContractError::InvalidCurrentPiece {
                 identity: copy.identity.clone(),
-            });
+            }));
         }
         if !history.insert(event_id) {
-            return Err(TruthContractError::DuplicateHistoryEvent {
+            return Err(rejected(TruthContractError::DuplicateHistoryEvent {
                 event_id: event_id.clone(),
-            });
+            }));
         }
         validate_modification_provenance(event_id, provenance, digests, groups)?;
     }
@@ -1247,9 +1251,9 @@ fn validate_modification(
             ..
         } => {
             if reference == alternate {
-                return Err(TruthContractError::SnpDoesNotChangeBase {
+                return Err(rejected(TruthContractError::SnpDoesNotChangeBase {
                     event_id: event_id.clone(),
-                });
+                }));
             }
             (event_id, provenance)
         }
@@ -1266,9 +1270,9 @@ fn validate_modification(
                     .bytes()
                     .all(|base| matches!(base, b'A' | b'C' | b'G' | b'T' | b'N'))
             {
-                return Err(TruthContractError::InvalidInsertion {
+                return Err(rejected(TruthContractError::InvalidInsertion {
                     event_id: event_id.clone(),
-                });
+                }));
             }
             (event_id, provenance)
         }
@@ -1279,9 +1283,9 @@ fn validate_modification(
             provenance,
         } => {
             if *start == 0 || *start >= *end || *end >= sequence_length {
-                return Err(TruthContractError::InvalidDeletion {
+                return Err(rejected(TruthContractError::InvalidDeletion {
                     event_id: event_id.clone(),
-                });
+                }));
             }
             (event_id, provenance)
         }
@@ -1304,18 +1308,22 @@ fn validate_modification_provenance(
         || provenance.source.kind != expected
         || (provenance.kind == ModificationProvenanceKind::Matrix) != provenance.matrix.is_some()
     {
-        return Err(TruthContractError::InvalidModificationProvenance {
-            event_id: event_id.to_owned(),
-        });
+        return Err(rejected(
+            TruthContractError::InvalidModificationProvenance {
+                event_id: event_id.to_owned(),
+            },
+        ));
     }
     if let Some(matrix) = &provenance.matrix
         && (matrix.matrix_source_id != provenance.source.source_id
             || matrix.population_id.is_empty()
             || matrix.variant_id.is_empty())
     {
-        return Err(TruthContractError::InvalidModificationProvenance {
-            event_id: event_id.to_owned(),
-        });
+        return Err(rejected(
+            TruthContractError::InvalidModificationProvenance {
+                event_id: event_id.to_owned(),
+            },
+        ));
     }
     if let Some(matrix) = &provenance.matrix {
         require_digest(
@@ -1344,11 +1352,11 @@ impl ModificationExtent {
             } => Self {
                 event_id: event_id.clone(),
                 start: *position,
-                end: position
-                    .checked_add(1)
-                    .ok_or(TruthContractError::ArithmeticOverflow {
+                end: position.checked_add(1).ok_or_else(|| {
+                    rejected(TruthContractError::ArithmeticOverflow {
                         field: "snp_position_plus_one",
-                    })?,
+                    })
+                })?,
                 point: false,
                 deletion: false,
             },
@@ -1408,14 +1416,14 @@ pub(crate) fn validate_genotype(
     copies: &BTreeSet<CopyIdentity>,
 ) -> Result<(), TruthContractError> {
     if g.alleles.is_empty() || g.alleles.len() != g.allele_dosages.len() {
-        return Err(TruthContractError::EmptyGenotype {
+        return Err(rejected(TruthContractError::EmptyGenotype {
             case_id: g.case_id.clone(),
-        });
+        }));
     }
     if g.reference_id != header.reference_id {
-        return Err(TruthContractError::GenotypeReferenceMismatch {
+        return Err(rejected(TruthContractError::GenotypeReferenceMismatch {
             case_id: g.case_id.clone(),
-        });
+        }));
     }
     if g.locus.start > g.locus.end
         || (matches!(g.case_kind, GenotypeCaseKind::Snp)
@@ -1423,9 +1431,9 @@ pub(crate) fn validate_genotype(
                 != g.locus
                     .start
                     .checked_add(1)
-                    .ok_or(TruthContractError::ArithmeticOverflow {
+                    .ok_or_else(|| rejected(TruthContractError::ArithmeticOverflow {
                         field: "snp_locus_start_plus_one",
-                    })?)
+                    }))?)
         || (matches!(g.case_kind, GenotypeCaseKind::Indel)
             && !g.alleles.iter().any(|allele| {
                 matches!(
@@ -1444,16 +1452,16 @@ pub(crate) fn validate_genotype(
                     .iter()
                     .any(|allele| matches!(allele, TruthAllele::Repeat { .. }))))
     {
-        return Err(TruthContractError::InvalidGenotypeAllele {
+        return Err(rejected(TruthContractError::InvalidGenotypeAllele {
             case_id: g.case_id.clone(),
-        });
+        }));
     }
     let mut unique_alleles = BTreeSet::new();
     for allele in &g.alleles {
         if !unique_alleles.insert(allele) {
-            return Err(TruthContractError::DuplicateAllele {
+            return Err(rejected(TruthContractError::DuplicateAllele {
                 case_id: g.case_id.clone(),
-            });
+            }));
         }
         match (g.case_kind, allele) {
             (GenotypeCaseKind::Snp, TruthAllele::Reference | TruthAllele::Snp { .. })
@@ -1465,9 +1473,9 @@ pub(crate) fn validate_genotype(
             )
             | (GenotypeCaseKind::Repeat, TruthAllele::Reference | TruthAllele::Repeat { .. }) => {}
             _ => {
-                return Err(TruthContractError::InvalidGenotypeAllele {
+                return Err(rejected(TruthContractError::InvalidGenotypeAllele {
                     case_id: g.case_id.clone(),
-                });
+                }));
             }
         }
         // El locus va en coordenadas de la referencia y el evento fuente en
@@ -1476,55 +1484,55 @@ pub(crate) fn validate_genotype(
         // semántico, que replica el historial; aquí solo cabe la forma: una
         // inserción no ocupa bases de referencia.
         if matches!(allele, TruthAllele::Insertion { .. }) && g.locus.start != g.locus.end {
-            return Err(TruthContractError::InvalidGenotypeAllele {
+            return Err(rejected(TruthContractError::InvalidGenotypeAllele {
                 case_id: g.case_id.clone(),
-            });
+            }));
         }
     }
     let mut seen = BTreeSet::new();
     let mut observed = vec![0_u8; g.alleles.len()];
     for c in &g.carriers {
         if c.allele_index >= g.alleles.len() {
-            return Err(TruthContractError::CarrierAlleleOutOfRange {
+            return Err(rejected(TruthContractError::CarrierAlleleOutOfRange {
                 case_id: g.case_id.clone(),
                 allele_index: c.allele_index,
-            });
+            }));
         }
         if c.copy.reference_id != g.reference_id
             || c.copy.individual_id != g.individual_id
             || c.copy.sequence_id != g.locus.sequence_id
         {
-            return Err(TruthContractError::CarrierOutsideGenotype {
+            return Err(rejected(TruthContractError::CarrierOutsideGenotype {
                 case_id: g.case_id.clone(),
                 copy: c.copy.clone(),
-            });
+            }));
         }
         if !copies.contains(&c.copy) {
-            return Err(TruthContractError::UnknownCarrierCopy {
+            return Err(rejected(TruthContractError::UnknownCarrierCopy {
                 case_id: g.case_id.clone(),
                 copy: c.copy.clone(),
-            });
+            }));
         }
         if !seen.insert(c.copy.clone()) {
-            return Err(TruthContractError::DuplicateCarrier {
+            return Err(rejected(TruthContractError::DuplicateCarrier {
                 case_id: g.case_id.clone(),
                 copy: c.copy.clone(),
-            });
+            }));
         }
-        observed[c.allele_index] = observed[c.allele_index].checked_add(1).ok_or(
-            TruthContractError::ArithmeticOverflow {
+        observed[c.allele_index] = observed[c.allele_index].checked_add(1).ok_or_else(|| {
+            rejected(TruthContractError::ArithmeticOverflow {
                 field: "observed_allele_dosage",
-            },
-        )?;
+            })
+        })?;
     }
     for (index, (&declared, &actual)) in g.allele_dosages.iter().zip(&observed).enumerate() {
         if declared != actual {
-            return Err(TruthContractError::DosageMismatch {
+            return Err(rejected(TruthContractError::DosageMismatch {
                 case_id: g.case_id.clone(),
                 allele_index: index,
                 declared,
                 actual,
-            });
+            }));
         }
     }
     Ok(())

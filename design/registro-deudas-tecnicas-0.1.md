@@ -28,7 +28,7 @@ documenta mejor.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026) |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | Abierta |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | Abierta |
@@ -53,6 +53,9 @@ documenta mejor.
 | DT-023 | Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete | Baja | 04/10/2026 | **Cerrada por aceptación (04/10/2026)** |
 | DT-024 | `validate_published_resources` no termina con `lineages` = 18446744073709551615 en la configuración efectiva | Media | 04/10/2026 | Abierta |
 | DT-025 | `validate_published_resources` aborta con `capacity overflow` si `reference_units[1]` = 18446744073709551615 en la efectiva | Media | 04/10/2026 | Abierta |
+| DT-026 | El juez del FASTQ final por pareja no lee ni un registro: toda la validación de registros es código muerto en producción | **Grave** | 05/10/2026 | Abierta |
+| DT-027 | La verdad de un paquete sin poblaciones no se juzga: 31 alteraciones de la cabecera pasan el juez de los recursos publicados | Media | 05/10/2026 | Abierta |
+| DT-028 | Sospecha: un alelo de referencia con una clave desconocida se acepta, el alelo SNP las rechaza | Baja | 05/10/2026 | Abierta, sin reproducir del todo |
 
 ---
 
@@ -164,30 +167,106 @@ literal, y escribir `ok_or(reason(..))`, que anota siempre.
 
 **Lo que sigue sin verse.** Los ayudantes que reciben el motivo como argumento
 y hacen un único rechazo para muchos llamantes (`required_non_empty_text` y
-similares) se cuentan una vez: son comprobaciones genéricas, no texto suelto. Y
-hay otros módulos que juzgan lo publicado y que la puerta **no** mira, con
-una estimación léxica (no medida) de sus comprobaciones:
+similares) se cuentan una vez: son comprobaciones genéricas, no texto suelto.
 
-- `src/truth_validation.rs`, el juez semántico de la verdad: unas 82
-  construcciones de `TruthValidationError` y unas 20 llamadas a `mismatch`,
-  que recibe el motivo como texto (el mismo defecto estructural);
-- `src/truth_schema.rs`, el contrato de la verdad: unas 64 variantes de
-  `TruthContractError`;
-- `src/fastq_validation.rs`, el juez del FASTQ final: unas 13;
-- `src/population_snvs.rs`, la validación de la matriz de SNV y de su
-  auditoría de normalización: unos 67 `Err`;
-- `src/f5_publication.rs` (`verify_published_f5_package`): unos 38;
-- `src/f5_artifacts.rs`: unos 45;
-- `src/reference_fasta.rs` (`validate_supplied_fasta*`, sobre el FASTA
-  publicado): unos 31;
-- `src/reference_reduction_io.rs` (`validate_reduction_map_document`): unos 33;
-- `src/integrity.rs` (`identify_file` y `verify_identity`): unos 6;
-- `src/technical_profile.rs`: `invalid`, con 7 usos y el motivo como texto.
+**Nueve módulos más entran en la puerta (05/10/2026).** Los que juzgan lo
+publicado o lo leído y que este registro listaba sin vigilar pasan a la puerta,
+por decisión del responsable. Cifras **medidas**, no estimadas (la estimación
+léxica anterior quedaba corta en casi todos), con el mismo número de pruebas y
+los mismos mensajes, variantes y códigos:
 
-`src/vcf_contract.rs` (unas 20 variantes de `VcfContractError`) es sobre todo
-un escritor, no un juez. Ampliar la puerta a estos módulos está pendiente de
-decisión del responsable; la lista autoritativa de lo que la puerta vigila es
-el array `judges` de `scripts/check-guard-coverage.sh`.
+| Módulo | Qué juzga | Comprobaciones | Sin disparar |
+|---|---|---|---|
+| `src/truth_validation.rs` | el juez semántico de la verdad | 118 | 95 |
+| `src/truth_schema.rs` | el contrato de la verdad | 69 | 46 |
+| `src/fastq_validation.rs` | el FASTQ final y su repetición | 71 | 57 |
+| `src/population_snvs.rs` | la matriz de SNV y la auditoría de normalización | 143 | 123 |
+| `src/f5_publication.rs` | `verify_published_f5_package` y los documentos que publica | 52 | 36 |
+| `src/reference_fasta.rs` | el FASTA suministrado | 41 | 30 |
+| `src/reference_reduction_io.rs` | el mapa de reducción | 55 | 45 |
+| `src/integrity.rs` | la identidad de un artefacto | 1 | 0 |
+| `src/technical_profile.rs` | el recurso del perfil técnico | 15 | 14 |
+| **Total** | | **565** | **446** |
+
+**Cómo se hizo.** Una constructora genérica nueva, `rejected` en
+`src/guard_trace.rs` (`#[track_caller]`, anota la línea y devuelve el error
+tal cual), envuelve cada rechazo: `Err(rejected(Variante { .. }))`,
+`.ok_or_else(|| rejected(..))` y `.map_err(|_| rejected(..))`; nunca
+`ok_or(rejected(..))`, que anotaría siempre. Los módulos que ya tenían
+funciones constructoras (`mismatch`, `audit_error`, `invalid`, `missing`,
+`document_error`, `manifest_error`, `empty_header`, `invalid_symbol`,
+`map_error`, `configuration_mismatch` y otras) las anotan ellas mismas con
+`#[track_caller]` y `record`, y se vigilan por nombre en el array `judges`.
+Dos clausuras que escondían varios rechazos tras una sola línea
+(`out_of_range` en `reference_reduction_io.rs` y `mismatch` en
+`f5_publication.rs`) pasaron a ser funciones; en `fastq_validation.rs` y
+`truth_validation.rs` las clausuras `structural` y `missing` siguen siendo
+clausuras (no admiten `#[track_caller]`) y cada uso que decide un rechazo va
+envuelto en `rejected(..)`; la excepción es `.map_err(structural)` de
+`parse_final_header` en `fastq_validation.rs`, que reetiqueta un texto ya
+anotado. Se comprobó que la secuencia de literales de cada módulo es la
+misma, salvo la reordenación de los dos textos de las funciones nuevas. La
+prueba `no_rejection_of_the_added_judges_skips_its_constructor`, en
+`tests/guard_constructors.rs`, impide que un rechazo nuevo se salte la
+constructora, y se verificó **muriendo** contra tres mutantes.
+
+**Lo que queda fuera de estos módulos, y por qué.**
+
+- `src/f5_artifacts.rs` **no entra**: su propia cabecera dice «este módulo no
+  decide nada: escribe lo que F5.1, F5.2 y F5.3 ya cerraron». Sus `internal` y
+  `configuration` son invariantes internas del escritor, no un juicio sobre lo
+  publicado. Lo que sí juzga esos ficheros ya lo cubren `src/f5_oracle.rs`,
+  `src/f5_closure.rs` y `src/results.rs`.
+- Los fallos de **entrada y salida** (`input_error`, `io_error`, `Diagnostic::io`
+  y similares) y las invariantes **internas** (`internal_error`, `size_error`)
+  no se cuentan en `reference_fasta.rs`, `reference_reduction_io.rs`,
+  `integrity.rs` ni `fastq_validation.rs`: no son un veredicto sobre el
+  contenido que se juzga. **Una excepción en `fastq_validation.rs`:**
+  `validate_final_artifact` informa de un fallo de `identify_file` como
+  `Artifact` (campo `sha256`), y ese rechazo sí se cuenta. En los módulos de enumeración de errores sí se
+  cuenta toda variante (también los desbordes de contador), por sencillez; son
+  guardas casi inalcanzables y engordan la cifra de sin disparar.
+- La validación de la configuración del **generador** de matrices de
+  `population_snvs.rs` (`PopulationSnvsGenerationError`): juzga la entrada del
+  usuario antes de generar, no lo publicado. La prueba léxica la exime por su
+  nombre.
+- Los ayudantes que reciben el motivo como argumento y hacen un único
+  rechazo para muchos llamantes se cuentan **una vez**: `require` en el juez de
+  casos de `truth_validation.rs` (seis llamantes); las clausuras `text` y
+  `number` de la auditoría de normalización de `population_snvs.rs`; y
+  `required_object`, `required_string` y `required_literal`, de la lectura de
+  los metadatos de la misma matriz.
+- `src/vcf_contract.rs` (unas 20 variantes de `VcfContractError`) es sobre
+  todo un escritor, no un juez, y sigue fuera.
+- Los rechazos de fallo de fichero o de otro módulo que estos jueces
+  propagan con `?` o `map_err(Variante::Envoltorio)` no son puntos propios:
+  los cuenta el módulo que los origina, si está vigilado.
+
+**Regla de los envoltorios, y lo que la prueba léxica no ve.** Una función que
+solo reetiqueta un error que ya anotó su origen (`parse_final_header`,
+`parse_metadata_json`, `parse_canonical_tsv`, `reconstruct_copy`,
+`validate_genotype_semantics`, `validate_case_set`,
+`validate_reference_digest`) **no** lleva `rejected(..)`: contaría como punto un
+rechazo que no decide nada. Siete lo llevaban al entrar y se quitaron tras la
+revisión adversarial, como `reference_content_sha256`, que usan también los
+productores y cuyo fallo el juez de recursos publicados se traga a propósito;
+sus llamadas que sí rechazan anotan ellas. La prueba léxica admite estos
+reetiquetados por **prefijo con recuento exacto** (cada exención declara
+cuántos usos tiene y la prueba falla si cambia). Lo que **no** ve, y solo caza
+la puerta por recuento: un rechazo escrito con una variable intermedia,
+`<D::Error as serde::de::Error>::custom(..)`, y un rechazo nuevo escrito con un
+prefijo exento si a la vez se sube el recuento declarado. Un `rejected(..)`
+puesto en un camino que se ejecuta siempre, sin rama que rechace, tampoco lo
+ve nadie: la puerta lo cuenta como disparado y solo deja un AVISO por
+comprobaciones nuevas.
+
+**Estas cifras no mejoran nada por sí solas.** Es lo mismo que pasó al meter
+el manifiesto general y `results.rs`: se hace visible lo que no se veía. Cubrir
+las 446 sin disparar es el trabajo de esta deuda; el techo de cada módulo es la
+cifra medida.
+
+La lista autoritativa de lo que la puerta vigila es el array `judges` de
+`scripts/check-guard-coverage.sh`.
 
 En `src/event_manifest.rs` no hay este segundo problema (no tiene ningún
 `Err("...")` a pelo), y su única construcción de diagnóstico fuera de la
@@ -1841,3 +1920,53 @@ en la configuración efectiva, `validate_published_resources` aborta con el
 pánico `capacity overflow` en vez de rechazar el documento. **Igual en la base
 `aef5ed4`**: no es una regresión. Falta validar el valor antes de reservar con
 él. No se ha corregido: es una deuda registrada.
+
+---
+
+## DT-026. El juez del FASTQ final por pareja no lee ningún registro
+
+**Gravedad: grave.** El juez que debía decidir si el FASTQ final publicado es
+correcto da por bueno cualquier contenido.
+
+Lo encontró el corpus de la revisión adversarial del 05/10/2026, al comparar la
+ampliación de la puerta con la base `a4beae1`. **Es anterior a ese cambio**:
+la base da el mismo resultado. En `validate_final_fastq_mate`
+(`src/fastq_validation.rs`, líneas 234-242), `file.try_clone()` **comparte la
+posición de lectura** con el fichero original; `validate_canonical_bgzf_eof` la
+deja al final del fichero, y el lector BGZF que viene después lee cero líneas y
+devuelve `Ok`. Por tanto **toda `validate_final_record`** —la estructura de
+cuatro líneas, el alfabeto de las bases y el de las calidades— **es código
+muerto en producción**.
+
+*Reproducción.* `printf 'hello\nworld\n+\nxx\n' | bgzip -c > a.fq.gz` y
+`validate_final_fastq_mate` sobre ese fichero devuelve `Ok`. De los 268 FASTQ
+corruptos del corpus, 260 pasan. El mutante «`validate_final_record` devuelve
+`Ok`» sobrevive a la batería entera.
+
+*Arreglo probable, que no se aplica aquí.* Rebobinar el fichero tras la
+comprobación del marcador de fin, como ya hace `validate_wgs_fastq` hacia la
+línea 644. Irá en un encargo aparte, con su regresión verificada fallando.
+
+---
+
+## DT-027. La verdad de un paquete sin poblaciones no se juzga
+
+**Gravedad: media.**
+
+También anterior al cambio. En `src/results.rs` (líneas 4171-4178), un paquete
+sin poblaciones no pasa por el juez completo de la verdad. El comentario dice
+que `validate_published_reference_names` juzga la cabecera, y esa función solo
+mira la referencia. Resultado medido por el corpus: **31 alteraciones de la
+cabecera de `truth.jsonl`** que el lector rechaza **pasan** el juez de los
+recursos publicados. No se ha corregido.
+
+---
+
+## DT-028. Sospecha: un alelo de referencia admite claves desconocidas
+
+**Gravedad: baja, sin confirmar del todo.**
+
+Un alelo `{"kind":"reference","zz_extra":1}` se acepta, mientras que el alelo
+`snp` rechaza las claves desconocidas. Lo anotó la revisión adversarial del
+05/10/2026 como sospecha; no se ha investigado si el contrato de la verdad
+quiere ese rechazo también para el alelo de referencia.

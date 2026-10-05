@@ -4,6 +4,7 @@
 //! FASTA, la semántica de `alt_af`, sumas, IDs canónicos y hashes operativos se
 //! incorpora en los pasos consumidores posteriores.
 
+use crate::guard_trace::rejected;
 use std::borrow::Cow;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
@@ -558,7 +559,9 @@ impl PreparedPopulationSnvs {
     ) -> Result<Self, PopulationSnvsPreparationError> {
         if self.rows.is_empty() {
             if !allow_empty_matrix {
-                return Err(PopulationSnvsPreparationError::EmptyActiveMatrixRequiresAuthorization);
+                return Err(rejected(
+                    PopulationSnvsPreparationError::EmptyActiveMatrixRequiresAuthorization,
+                ));
             }
             self.empty_authorized = true;
         }
@@ -655,7 +658,7 @@ pub fn prepare_population_snvs_from_reference(
     allow_empty_matrix: bool,
 ) -> Result<PreparedPopulationSnvs, PopulationSnvsPreparationError> {
     let prepared_reference = PreparedReferenceIdentity::from_reference(reference)
-        .map_err(|_| PopulationSnvsPreparationError::BasesNotMaterialized)?;
+        .map_err(|_| rejected(PopulationSnvsPreparationError::BasesNotMaterialized))?;
     let mut fasta_sequences = BTreeMap::new();
     for sequence in reference.sequences() {
         fasta_sequences.insert(
@@ -664,7 +667,7 @@ pub fn prepare_population_snvs_from_reference(
                 sequence
                     .sequence()
                     .as_bytes()
-                    .map_err(|_| PopulationSnvsPreparationError::BasesNotMaterialized)?,
+                    .map_err(|_| rejected(PopulationSnvsPreparationError::BasesNotMaterialized))?,
             ),
         );
     }
@@ -707,10 +710,10 @@ fn prepare_population_snvs(
         .enumerate()
         .map(|(i, row)| {
             PopulationId::parse(row.field(5), "population_snvs").map_err(|_| {
-                PopulationSnvsPreparationError::InvalidPopulation {
+                rejected(PopulationSnvsPreparationError::InvalidPopulation {
                     row_index: i,
                     value: row.field(5).to_owned(),
-                }
+                })
             })
         })
         .collect::<Result<BTreeSet<_>, _>>()?;
@@ -720,59 +723,65 @@ fn prepare_population_snvs(
     let mut parsed = Vec::with_capacity(table.rows().len());
     for (row_index, row) in table.rows().iter().enumerate() {
         let contig = SequenceId::parse(row.field(1), "population_snvs").map_err(|_| {
-            PopulationSnvsPreparationError::InvalidContig {
+            rejected(PopulationSnvsPreparationError::InvalidContig {
                 row_index,
                 value: row.field(1).to_owned(),
-            }
+            })
         })?;
         let position = row
             .field(2)
             .parse::<u64>()
             .ok()
             .filter(|value| *value > 0)
-            .ok_or_else(|| PopulationSnvsPreparationError::InvalidPosition {
-                row_index,
-                value: row.field(2).to_owned(),
+            .ok_or_else(|| {
+                rejected(PopulationSnvsPreparationError::InvalidPosition {
+                    row_index,
+                    value: row.field(2).to_owned(),
+                })
             })?;
         let reference_base = parse_snv_base(row.field(3), row_index, "ref")?;
         let alternate = parse_snv_base(row.field(4), row_index, "alt")?;
         if reference_base == alternate {
-            return Err(PopulationSnvsPreparationError::InvalidAllele {
+            return Err(rejected(PopulationSnvsPreparationError::InvalidAllele {
                 row_index,
                 field: "alt",
                 value: row.field(4).to_owned(),
-            });
+            }));
         }
         let population = PopulationId::parse(row.field(5), "population_snvs").map_err(|_| {
-            PopulationSnvsPreparationError::InvalidPopulation {
+            rejected(PopulationSnvsPreparationError::InvalidPopulation {
                 row_index,
                 value: row.field(5).to_owned(),
-            }
+            })
         })?;
         let sequence = fasta.sequences.get(contig.as_str()).ok_or_else(|| {
-            PopulationSnvsPreparationError::InvalidContig {
+            rejected(PopulationSnvsPreparationError::InvalidContig {
                 row_index,
                 value: contig.as_str().to_owned(),
-            }
+            })
         })?;
         let offset = usize::try_from(position - 1).ok();
         let expected = offset
             .and_then(|index| sequence.get(index).copied())
-            .ok_or_else(|| PopulationSnvsPreparationError::ReferenceMismatch {
-                row_index,
-                contig: contig.as_str().to_owned(),
-                position,
-                expected: b'?',
-                found: reference_base,
+            .ok_or_else(|| {
+                rejected(PopulationSnvsPreparationError::ReferenceMismatch {
+                    row_index,
+                    contig: contig.as_str().to_owned(),
+                    position,
+                    expected: b'?',
+                    found: reference_base,
+                })
             })?;
         if expected != reference_base {
-            return Err(PopulationSnvsPreparationError::ReferenceMismatch {
-                row_index,
-                contig: contig.as_str().to_owned(),
-                position,
-                expected,
-                found: reference_base,
-            });
+            return Err(rejected(
+                PopulationSnvsPreparationError::ReferenceMismatch {
+                    row_index,
+                    contig: contig.as_str().to_owned(),
+                    position,
+                    expected,
+                    found: reference_base,
+                },
+            ));
         }
         let key = (
             contig.as_str().to_owned(),
@@ -782,13 +791,15 @@ fn prepare_population_snvs(
             population.as_str().to_owned(),
         );
         if !seen.insert(key) {
-            return Err(PopulationSnvsPreparationError::DuplicateAltPopulation {
-                contig: contig.as_str().to_owned(),
-                position,
-                reference: reference_base,
-                alternate,
-                population: population.as_str().to_owned(),
-            });
+            return Err(rejected(
+                PopulationSnvsPreparationError::DuplicateAltPopulation {
+                    contig: contig.as_str().to_owned(),
+                    position,
+                    reference: reference_base,
+                    alternate,
+                    population: population.as_str().to_owned(),
+                },
+            ));
         }
         alt_populations
             .entry((
@@ -830,8 +841,10 @@ fn prepare_population_snvs(
                     variant_id,
                 )
             })
-            .map_err(|error| PopulationSnvsPreparationError::AuthoritativeFasta {
-                detail: error.render_human(),
+            .map_err(|error| {
+                rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                    detail: error.render_human(),
+                })
             })
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
@@ -843,15 +856,17 @@ fn prepare_population_snvs(
             let reference_base = parse_snv_base(&reference, value.row_index(), "ref")?;
             let alternate = parse_snv_base(value.alt(), value.row_index(), "alt")?;
             let position = position_text.parse::<u64>().map_err(|_| {
-                PopulationSnvsPreparationError::InvalidPosition {
+                rejected(PopulationSnvsPreparationError::InvalidPosition {
                     row_index: value.row_index(),
                     value: position_text.clone(),
-                }
+                })
             })?;
             value.variant_id = variant_ids
                 .get(&(contig.clone(), position, reference_base, alternate))
-                .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-                    detail: "invariante de identidad de auditoría".to_owned(),
+                .ok_or_else(|| {
+                    rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                        detail: "invariante de identidad de auditoría".to_owned(),
+                    })
                 })?
                 .as_str()
                 .to_owned();
@@ -865,18 +880,20 @@ fn prepare_population_snvs(
             .iter()
             .find(|(_, covered)| *covered != &populations)
         else {
-            return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
-                detail: "invariante de cobertura de población".to_owned(),
-            });
+            return Err(rejected(
+                PopulationSnvsPreparationError::AuthoritativeFasta {
+                    detail: "invariante de cobertura de población".to_owned(),
+                },
+            ));
         };
-        return Err(
+        return Err(rejected(
             PopulationSnvsPreparationError::IncompletePopulationCoverage {
                 contig: contig.clone(),
                 position: *position,
                 reference: *reference_base,
                 alternate: *alternate,
             },
-        );
+        ));
     }
     let mut discarded = Vec::new();
     let inactive: BTreeSet<(String, u64, u8, u8)> = alt_populations
@@ -900,8 +917,10 @@ fn prepare_population_snvs(
             reference_base,
             alternate,
         )
-        .map_err(|error| PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: error.render_human(),
+        .map_err(|error| {
+            rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: error.render_human(),
+            })
         })?;
         if inactive.contains(&(
             contig.as_str().to_owned(),
@@ -939,7 +958,9 @@ fn prepare_population_snvs(
             )
     });
     if rows.is_empty() && !allow_empty_matrix {
-        return Err(PopulationSnvsPreparationError::EmptyActiveMatrixRequiresAuthorization);
+        return Err(rejected(
+            PopulationSnvsPreparationError::EmptyActiveMatrixRequiresAuthorization,
+        ));
     }
     let empty_authorized = rows.is_empty();
     Ok(PreparedPopulationSnvs {
@@ -1191,9 +1212,9 @@ fn validate_reusable_population_snvs_snapshots(
     PopulationSnvsPreparationError,
 > {
     let metadata_bytes = fs::read(metadata_path).map_err(|error| {
-        PopulationSnvsPreparationError::AuthoritativeFasta {
+        rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: format!("no se puede leer metadata_path: {error}"),
-        }
+        })
     })?;
     after_metadata_snapshot();
     let matrix_path = metadata_path
@@ -1201,12 +1222,12 @@ fn validate_reusable_population_snvs_snapshots(
         .unwrap_or_else(|| Path::new("."))
         .join("population_snvs.tsv");
     let matrix_bytes = fs::read(&matrix_path).map_err(|error| {
-        PopulationSnvsPreparationError::AuthoritativeFasta {
+        rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: format!(
                 "no se puede leer la matriz {}, que debe estar junto a los metadatos: {error}",
                 matrix_path.display()
             ),
-        }
+        })
     })?;
     after_matrix_snapshot();
     let (prepared, provenance, metadata_sha256, audit) = validate_reusable_population_snvs_bytes(
@@ -1250,20 +1271,21 @@ pub fn validate_reusable_population_snvs_bytes(
         }
     })?;
     let document = metadata.document();
-    let object =
-        document
-            .as_object()
-            .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-                detail: "metadata no es un objeto".to_owned(),
-            })?;
+    let object = document.as_object().ok_or_else(|| {
+        rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata no es un objeto".to_owned(),
+        })
+    })?;
     let reference_object = object
         .get("reference")
         .and_then(Value::as_object)
-        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "metadata.reference inválida".to_owned(),
+        .ok_or_else(|| {
+            rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "metadata.reference inválida".to_owned(),
+            })
         })?;
     let expected_reference = PreparedReferenceIdentity::from_reference(reference)
-        .map_err(|_| PopulationSnvsPreparationError::BasesNotMaterialized)?;
+        .map_err(|_| rejected(PopulationSnvsPreparationError::BasesNotMaterialized))?;
     let declared_reference = reference_object.get("reference_id").and_then(Value::as_str);
     let declared_fingerprint = reference_object
         .get("canonical_fingerprint")
@@ -1271,39 +1293,50 @@ pub fn validate_reusable_population_snvs_bytes(
     let fasta_object = object
         .get("reference_fasta")
         .and_then(Value::as_object)
-        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "metadata.reference_fasta inválida".to_owned(),
+        .ok_or_else(|| {
+            rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "metadata.reference_fasta inválida".to_owned(),
+            })
         })?;
     let declared_fasta_sha = fasta_object.get("sha256").and_then(Value::as_str);
     if declared_reference != Some(expected_reference.reference_id().as_str())
         || declared_fingerprint != Some(expected_reference.canonical_fingerprint().as_str())
         || declared_fasta_sha != Some(reference_sha256)
     {
-        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "la matriz reutilizada no está ligada a la referencia autoritativa".to_owned(),
-        });
+        return Err(rejected(
+            PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "la matriz reutilizada no está ligada a la referencia autoritativa"
+                    .to_owned(),
+            },
+        ));
     }
     let matrix = object
         .get("matrix")
         .and_then(Value::as_object)
-        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "metadata.matrix inválida".to_owned(),
+        .ok_or_else(|| {
+            rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "metadata.matrix inválida".to_owned(),
+            })
         })?;
     let declared_digest = matrix
         .get("sha256")
         .and_then(Value::as_str)
-        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "metadata.matrix.sha256 inválido".to_owned(),
+        .ok_or_else(|| {
+            rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "metadata.matrix.sha256 inválido".to_owned(),
+            })
         })?;
     if sha256_bytes(matrix_bytes) != declared_digest {
-        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "SHA-256 del TSV reutilizado no coincide con metadata".to_owned(),
-        });
+        return Err(rejected(
+            PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "SHA-256 del TSV reutilizado no coincide con metadata".to_owned(),
+            },
+        ));
     }
     let audit = object.get("normalization_audit").ok_or_else(|| {
-        PopulationSnvsPreparationError::AuthoritativeFasta {
+        rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: "metadata.normalization_audit ausente".to_owned(),
-        }
+        })
     })?;
     let table = parse_canonical_tsv(matrix_bytes).map_err(|error| {
         PopulationSnvsPreparationError::AuthoritativeFasta {
@@ -1314,15 +1347,19 @@ pub fn validate_reusable_population_snvs_bytes(
         prepare_population_snvs_from_reference(&table, reference, tolerance, allow_empty_matrix)?;
     restore_published_allele_frequencies(&mut prepared, audit)?;
     if canonical_tsv_bytes(&prepared) != matrix_bytes {
-        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "el TSV reutilizado no está en orden y representación canónicos".to_owned(),
-        });
+        return Err(rejected(
+            PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "el TSV reutilizado no está en orden y representación canónicos".to_owned(),
+            },
+        ));
     }
     let populations = object
         .get("populations")
         .and_then(Value::as_array)
-        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "metadata.populations inválida".to_owned(),
+        .ok_or_else(|| {
+            rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "metadata.populations inválida".to_owned(),
+            })
         })?;
     let observed = populations
         .iter()
@@ -1330,62 +1367,76 @@ pub fn validate_reusable_population_snvs_bytes(
             value
                 .get("population_id")
                 .and_then(Value::as_str)
-                .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-                    detail: "metadata.populations inválida".to_owned(),
+                .ok_or_else(|| {
+                    rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                        detail: "metadata.populations inválida".to_owned(),
+                    })
                 })
                 .and_then(|value| {
                     PopulationId::parse(value, "population_snvs_metadata").map_err(|_| {
-                        PopulationSnvsPreparationError::AuthoritativeFasta {
+                        rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
                             detail: "metadata.populations inválida".to_owned(),
-                        }
+                        })
                     })
                 })
         })
         .collect::<Result<Vec<_>, _>>()?;
     if observed.windows(2).any(|window| window[0] >= window[1]) {
-        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "metadata.populations no está ordenada canónicamente".to_owned(),
-        });
+        return Err(rejected(
+            PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "metadata.populations no está ordenada canónicamente".to_owned(),
+            },
+        ));
     }
     if prepared.population_ids().is_empty() {
         prepared.population_ids = observed;
     } else if observed != prepared.population_ids() {
-        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "metadata.populations no coincide con el TSV canónico".to_owned(),
-        });
+        return Err(rejected(
+            PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "metadata.populations no coincide con el TSV canónico".to_owned(),
+            },
+        ));
     }
     let provenance = object
         .get("provenance")
         .and_then(Value::as_str)
         .and_then(PopulationSnvsProvenance::parse)
-        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "metadata.provenance inválida".to_owned(),
+        .ok_or_else(|| {
+            rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "metadata.provenance inválida".to_owned(),
+            })
         })?;
     let discarded_variant_pairs = object
         .get("discarded_variant_pairs")
         .and_then(Value::as_array)
-        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "metadata.discarded_variant_pairs inválido".to_owned(),
+        .ok_or_else(|| {
+            rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "metadata.discarded_variant_pairs inválido".to_owned(),
+            })
         })?
         .iter()
         .map(|value| {
             let pair = value.as_object().ok_or_else(|| {
-                PopulationSnvsPreparationError::AuthoritativeFasta {
+                rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
                     detail: "metadata.discarded_variant_pairs inválido".to_owned(),
-                }
+                })
             })?;
             Ok((
                 pair.get("population_id")
                     .and_then(Value::as_str)
                     .map(str::to_owned)
-                    .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-                        detail: "metadata.discarded_variant_pairs inválido".to_owned(),
+                    .ok_or_else(|| {
+                        rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                            detail: "metadata.discarded_variant_pairs inválido".to_owned(),
+                        })
                     })?,
                 pair.get("variant_id")
                     .and_then(Value::as_str)
                     .map(str::to_owned)
-                    .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
-                        detail: "metadata.discarded_variant_pairs inválido".to_owned(),
+                    .ok_or_else(|| {
+                        rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
+                            detail: "metadata.discarded_variant_pairs inválido".to_owned(),
+                        })
                     })?,
             ))
         })
@@ -1648,7 +1699,7 @@ pub fn validate_normalization_audit_document(
         if sequence
             .sequence()
             .as_bytes()
-            .map_err(|_| PopulationSnvsPreparationError::BasesNotMaterialized)?
+            .map_err(|_| rejected(PopulationSnvsPreparationError::BasesNotMaterialized))?
             .get(usize::try_from(position - 1).map_err(|_| audit_error("position"))?)
             .copied()
             != Some(reference_base)
@@ -1822,7 +1873,9 @@ pub fn validate_normalization_audit_document(
     }
 }
 
+#[track_caller]
 fn audit_error(detail: impl Into<String>) -> PopulationSnvsPreparationError {
+    crate::guard_trace::record();
     PopulationSnvsPreparationError::AuthoritativeFasta {
         detail: format!("auditoría de normalización inválida: {}", detail.into()),
     }
@@ -1843,11 +1896,11 @@ fn parse_snv_base(
     if bytes.len() == 1 && matches!(bytes[0], b'A' | b'C' | b'G' | b'T') {
         Ok(bytes[0])
     } else {
-        Err(PopulationSnvsPreparationError::InvalidAllele {
+        Err(rejected(PopulationSnvsPreparationError::InvalidAllele {
             row_index,
             field,
             value: value.to_owned(),
-        })
+        }))
     }
 }
 
@@ -1875,9 +1928,9 @@ fn load_authoritative_fasta(
     reference: &ResolvedManifestReference,
 ) -> Result<AuthoritativeFasta<'static>, PopulationSnvsPreparationError> {
     let bytes = fs::read(reference.fasta_path()).map_err(|error| {
-        PopulationSnvsPreparationError::AuthoritativeFasta {
+        rejected(PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: error.to_string(),
-        }
+        })
     })?;
     let mut records = BTreeMap::new();
     let mut order = BTreeMap::new();
@@ -1901,9 +1954,11 @@ fn load_authoritative_fasta(
                         .insert(previous.clone(), Cow::Owned(std::mem::take(&mut bases)))
                         .is_some()
                 {
-                    return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
-                        detail: "cabecera FASTA duplicada o vacía".to_owned(),
-                    });
+                    return Err(rejected(
+                        PopulationSnvsPreparationError::AuthoritativeFasta {
+                            detail: "cabecera FASTA duplicada o vacía".to_owned(),
+                        },
+                    ));
                 }
                 order.insert(previous, order.len());
             }
@@ -1912,14 +1967,18 @@ fn load_authoritative_fasta(
         }
     }
     let Some(last) = name else {
-        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "FASTA vacío".to_owned(),
-        });
+        return Err(rejected(
+            PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "FASTA vacío".to_owned(),
+            },
+        ));
     };
     if last.is_empty() || records.insert(last.clone(), Cow::Owned(bases)).is_some() {
-        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "cabecera FASTA duplicada o vacía".to_owned(),
-        });
+        return Err(rejected(
+            PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "cabecera FASTA duplicada o vacía".to_owned(),
+            },
+        ));
     }
     order.insert(last, order.len());
     Ok(AuthoritativeFasta {
@@ -2010,22 +2069,24 @@ pub fn normalize_alt_frequencies(
     tolerance: f64,
 ) -> Result<NormalizedPopulationSnvs, AltFrequencyNormalizationError> {
     if !tolerance.is_finite() || !(0.0..=1e-6).contains(&tolerance) {
-        return Err(AltFrequencyNormalizationError::InvalidTolerance { value: tolerance });
+        return Err(rejected(AltFrequencyNormalizationError::InvalidTolerance {
+            value: tolerance,
+        }));
     }
     let mut groups: BTreeMap<AltGroupKey<'_>, Vec<ParsedAltRow<'_>>> = BTreeMap::new();
     for (row_index, row) in table.rows.iter().enumerate() {
         let literal = row.field(6);
         let value = literal.parse::<f64>().map_err(|_| {
-            AltFrequencyNormalizationError::InvalidFrequency {
+            rejected(AltFrequencyNormalizationError::InvalidFrequency {
                 row_index,
                 literal: literal.to_owned(),
-            }
+            })
         })?;
         if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-            return Err(AltFrequencyNormalizationError::InvalidFrequency {
+            return Err(rejected(AltFrequencyNormalizationError::InvalidFrequency {
                 row_index,
                 literal: literal.to_owned(),
-            });
+            }));
         }
         groups
             .entry((row.field(5), row.field(1), row.field(2), row.field(3)))
@@ -2043,7 +2104,7 @@ pub fn normalize_alt_frequencies(
         } else if original_sum.is_finite() && original_sum > 0.0 && original_delta <= tolerance {
             AltFrequencyDecision::Normalized
         } else {
-            return Err(AltFrequencyNormalizationError::ExcessAltSum {
+            return Err(rejected(AltFrequencyNormalizationError::ExcessAltSum {
                 population_id: population_id.to_owned(),
                 contig: contig.to_owned(),
                 position: position.to_owned(),
@@ -2051,7 +2112,7 @@ pub fn normalize_alt_frequencies(
                 sum: original_sum,
                 delta: original_delta,
                 tolerance,
-            });
+            }));
         };
         let values = rows
             .into_iter()
@@ -2074,24 +2135,28 @@ pub fn normalize_alt_frequencies(
             .iter()
             .any(|value| !value.effective.is_finite() || !(0.0..=1.0).contains(&value.effective))
         {
-            return Err(AltFrequencyNormalizationError::InvalidNormalizedSum {
-                population_id: population_id.to_owned(),
-                contig: contig.to_owned(),
-                position: position.to_owned(),
-                reference: reference.to_owned(),
-            });
+            return Err(rejected(
+                AltFrequencyNormalizationError::InvalidNormalizedSum {
+                    population_id: population_id.to_owned(),
+                    contig: contig.to_owned(),
+                    position: position.to_owned(),
+                    reference: reference.to_owned(),
+                },
+            ));
         }
         let effective_sum = neumaier(values.iter().map(AuditedAltFrequency::effective));
         let effective_delta = (effective_sum - 1.0).abs();
         if decision == AltFrequencyDecision::Normalized
             && (!effective_sum.is_finite() || effective_delta > tolerance)
         {
-            return Err(AltFrequencyNormalizationError::InvalidNormalizedSum {
-                population_id: population_id.to_owned(),
-                contig: contig.to_owned(),
-                position: position.to_owned(),
-                reference: reference.to_owned(),
-            });
+            return Err(rejected(
+                AltFrequencyNormalizationError::InvalidNormalizedSum {
+                    population_id: population_id.to_owned(),
+                    contig: contig.to_owned(),
+                    position: position.to_owned(),
+                    reference: reference.to_owned(),
+                },
+            ));
         }
         audited.push(AltFrequencyNormalization {
             population_id: population_id.to_owned(),
@@ -2142,37 +2207,37 @@ fn neumaier(values: impl IntoIterator<Item = f64>) -> f64 {
 
 /// Comprueba la forma del TSV canónico; no interpreta aún sus valores.
 pub fn parse_canonical_tsv(bytes: &[u8]) -> Result<PopulationSnvsTsv, PopulationSnvsFormatError> {
-    let text = std::str::from_utf8(bytes).map_err(|_| PopulationSnvsFormatError::InvalidUtf8)?;
+    let text =
+        std::str::from_utf8(bytes).map_err(|_| rejected(PopulationSnvsFormatError::InvalidUtf8))?;
     if text.starts_with("##fileformat=VCF") || text.starts_with("#CHROM\t") {
-        return Err(PopulationSnvsFormatError::VcfInput);
+        return Err(rejected(PopulationSnvsFormatError::VcfInput));
     }
     let mut lines = text.lines();
     let header = lines
         .next()
-        .ok_or(PopulationSnvsFormatError::MissingHeader)?;
+        .ok_or_else(|| rejected(PopulationSnvsFormatError::MissingHeader))?;
     let expected = TSV_HEADER.join("\t");
     if header != expected {
-        return Err(PopulationSnvsFormatError::IncorrectHeader {
+        return Err(rejected(PopulationSnvsFormatError::IncorrectHeader {
             found: header.to_owned(),
-        });
+        }));
     }
     let mut rows = Vec::new();
     for (index, line) in lines.enumerate() {
         if line.is_empty() {
-            return Err(PopulationSnvsFormatError::IncorrectColumnCount {
+            return Err(rejected(PopulationSnvsFormatError::IncorrectColumnCount {
                 line: index + 2,
                 found: 0,
-            });
+            }));
         }
         let fields = line.split('\t').map(str::to_owned).collect::<Vec<_>>();
         let found = fields.len();
-        let fields =
-            fields
-                .try_into()
-                .map_err(|_| PopulationSnvsFormatError::IncorrectColumnCount {
-                    line: index + 2,
-                    found,
-                })?;
+        let fields = fields.try_into().map_err(|_| {
+            rejected(PopulationSnvsFormatError::IncorrectColumnCount {
+                line: index + 2,
+                found,
+            })
+        })?;
         rows.push(PopulationSnvRow { fields });
     }
     Ok(PopulationSnvsTsv { rows })
@@ -2181,32 +2246,33 @@ pub fn parse_canonical_tsv(bytes: &[u8]) -> Result<PopulationSnvsTsv, Population
 /// Analiza la tabla mínima suministrada (seis columnas y `source_id` opcional)
 /// sin confundirla con el recurso canónico publicado de ocho columnas.
 pub fn parse_supplied_tsv(bytes: &[u8]) -> Result<PopulationSnvsTsv, PopulationSnvsFormatError> {
-    let text = std::str::from_utf8(bytes).map_err(|_| PopulationSnvsFormatError::InvalidUtf8)?;
+    let text =
+        std::str::from_utf8(bytes).map_err(|_| rejected(PopulationSnvsFormatError::InvalidUtf8))?;
     if text.starts_with("##fileformat=VCF") || text.starts_with("#CHROM\t") {
-        return Err(PopulationSnvsFormatError::VcfInput);
+        return Err(rejected(PopulationSnvsFormatError::VcfInput));
     }
     let mut lines = text.lines();
     let header = lines
         .next()
-        .ok_or(PopulationSnvsFormatError::MissingHeader)?;
+        .ok_or_else(|| rejected(PopulationSnvsFormatError::MissingHeader))?;
     let accepted = [
         "contig\tposition\tref\talt\tpopulation_id\talt_af",
         "contig\tposition\tref\talt\tpopulation_id\talt_af\tsource_id",
     ];
     if !accepted.contains(&header) {
-        return Err(PopulationSnvsFormatError::IncorrectHeader {
+        return Err(rejected(PopulationSnvsFormatError::IncorrectHeader {
             found: header.to_owned(),
-        });
+        }));
     }
     let has_source = header.ends_with("\tsource_id");
     let mut rows = Vec::new();
     for (index, line) in lines.enumerate() {
         let fields = line.split('\t').collect::<Vec<_>>();
         if fields.len() != if has_source { 7 } else { 6 } {
-            return Err(PopulationSnvsFormatError::IncorrectColumnCount {
+            return Err(rejected(PopulationSnvsFormatError::IncorrectColumnCount {
                 line: index + 2,
                 found: fields.len(),
-            });
+            }));
         }
         rows.push(PopulationSnvRow {
             fields: [
@@ -2246,10 +2312,10 @@ pub fn parse_metadata_json(
     bytes: &[u8],
 ) -> Result<PopulationSnvsMetadata, PopulationSnvsFormatError> {
     let value: Value = serde_json::from_slice(bytes)
-        .map_err(|_| PopulationSnvsFormatError::InvalidMetadataJson)?;
+        .map_err(|_| rejected(PopulationSnvsFormatError::InvalidMetadataJson))?;
     let object = value
         .as_object()
-        .ok_or(PopulationSnvsFormatError::MetadataMustBeObject)?;
+        .ok_or_else(|| rejected(PopulationSnvsFormatError::MetadataMustBeObject))?;
     closed_object(
         object,
         &[
@@ -2363,7 +2429,9 @@ fn closed_object(
             } else {
                 format!("{prefix}.{field}")
             };
-            return Err(PopulationSnvsFormatError::UnexpectedMetadataField { field });
+            return Err(rejected(
+                PopulationSnvsFormatError::UnexpectedMetadataField { field },
+            ));
         }
     }
     Ok(())
@@ -2403,9 +2471,11 @@ fn required_literal(
         .ok_or_else(|| missing(field))?
         .as_str()
         .filter(|value| *value == expected)
-        .ok_or_else(|| PopulationSnvsFormatError::InvalidMetadataLiteral {
-            field: field.to_owned(),
-            expected,
+        .ok_or_else(|| {
+            rejected(PopulationSnvsFormatError::InvalidMetadataLiteral {
+                field: field.to_owned(),
+                expected,
+            })
         })?;
     Ok(())
 }
@@ -2420,21 +2490,27 @@ fn required_provenance(
         .as_str()
         .ok_or_else(|| invalid("provenance", "\"supplied\" o \"generated\""))?;
     if !matches!(kind, "supplied" | "generated") {
-        return Err(PopulationSnvsFormatError::InvalidMetadataLiteral {
-            field: "provenance".to_owned(),
-            expected: "\"supplied\" o \"generated\"",
-        });
+        return Err(rejected(
+            PopulationSnvsFormatError::InvalidMetadataLiteral {
+                field: "provenance".to_owned(),
+                expected: "\"supplied\" o \"generated\"",
+            },
+        ));
     }
     Ok(())
 }
 
+#[track_caller]
 fn missing(field: &str) -> PopulationSnvsFormatError {
+    crate::guard_trace::record();
     PopulationSnvsFormatError::MissingMetadataField {
         field: field.to_owned(),
     }
 }
 
+#[track_caller]
 fn invalid(field: &str, expected: &'static str) -> PopulationSnvsFormatError {
+    crate::guard_trace::record();
     PopulationSnvsFormatError::InvalidMetadataField {
         field: field.to_owned(),
         expected,

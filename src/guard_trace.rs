@@ -22,11 +22,13 @@
 //!
 //! ## Cómo funciona
 //!
-//! Los cinco módulos vigilados (la lista autoritativa es el array `judges` de
+//! Los catorce módulos vigilados (la lista autoritativa es el array `judges` de
 //! `scripts/check-guard-coverage.sh`) canalizan sus rechazos por unas pocas
 //! funciones constructoras de error; en `src/results.rs`, además, por `reason`,
 //! que anota el motivo de los validadores que devuelven texto en vez de un
-//! diagnóstico. Esas funciones llevan la anotación
+//! diagnóstico, y los nueve añadidos el 05/10/2026 por [`rejected`], que
+//! envuelve el error de cada rechazo (`Err(rejected(Variante { .. }))`) y lo
+//! devuelve intacto. Esas funciones llevan la anotación
 //! [`track_caller`](https://doc.rust-lang.org/reference/attributes/codegen.html#the-track_caller-attribute),
 //! que hace que la función sepa desde qué fichero y línea la han llamado, y
 //! llaman a [`record`]. Con eso, una sola ejecución de la batería dice qué
@@ -116,4 +118,20 @@ pub fn record() {
         let _ = writeln!(sink.file, "{}:{}", key.0, key.1);
         let _ = sink.file.flush();
     }
+}
+
+/// Devuelve el error que recibe y anota que el punto de rechazo de quien llama
+/// se ha disparado.
+///
+/// Es la constructora compartida de los módulos vigilados que construyen sus
+/// rechazos como variantes de su enumeración de errores o como diagnósticos a
+/// mano (`Err(rejected(Variante { .. }))`): la anotación `#[track_caller]`
+/// hace que se anote la línea del rechazo, no la de esta función, y como
+/// devuelve lo que recibe no cambia ni un byte del error. **Hay que llamarla
+/// solo en la rama que rechaza**: por eso se escribe `ok_or_else(|| rejected(..))`
+/// y nunca `ok_or(rejected(..))`, que anotaría siempre.
+#[track_caller]
+pub(crate) fn rejected<E>(error: E) -> E {
+    record();
+    error
 }

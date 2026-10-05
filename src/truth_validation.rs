@@ -4,6 +4,7 @@
 //! tipos externos, valida su estructura y materializa la vista vigente desde
 //! las piezas y la referencia autoritativa. Tampoco acepta ni consulta VCF.
 
+use crate::guard_trace::rejected;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::BufRead;
@@ -57,13 +58,17 @@ impl<'truth> ValidatedTruthForVcf<'truth> {
         reference: &Reference,
     ) -> Result<(), TruthValidationError> {
         if self.reference_id != reference.id().as_str() {
-            return Err(TruthValidationError::ReferenceIdMismatch {
+            return Err(rejected(TruthValidationError::ReferenceIdMismatch {
                 declared: self.reference_id.to_owned(),
                 actual: reference.id().as_str().to_owned(),
-            });
+            }));
         }
-        if self.reference_content_sha256 != reference_content_sha256(reference)? {
-            return Err(TruthValidationError::ReferenceDigestMismatch);
+        let observed = match reference_content_sha256(reference) {
+            Ok(observed) => observed,
+            Err(error) => return Err(rejected(error)),
+        };
+        if self.reference_content_sha256 != observed {
+            return Err(rejected(TruthValidationError::ReferenceDigestMismatch));
         }
         Ok(())
     }
@@ -161,7 +166,7 @@ fn bases_of(sequence: &crate::reference::ReferenceSequence) -> Result<&[u8], Tru
     sequence
         .sequence()
         .as_bytes()
-        .map_err(|_| TruthValidationError::BasesNotMaterialized)
+        .map_err(|_| rejected(TruthValidationError::BasesNotMaterialized))
 }
 
 impl std::error::Error for TruthValidationError {}
@@ -182,50 +187,53 @@ pub fn read_truth_jsonl(reader: &mut impl BufRead) -> Result<TruthDocument, Trut
         }
         line_number = line_number.saturating_add(1);
         if raw.last() != Some(&b'\n') {
-            return Err(TruthValidationError::MissingFinalNewline);
+            return Err(rejected(TruthValidationError::MissingFinalNewline));
         }
         let content = &raw[..raw.len() - 1];
         let content = content.strip_suffix(b"\r").unwrap_or(content);
-        let line = std::str::from_utf8(content).map_err(|error| TruthValidationError::Schema {
-            line: line_number,
-            detail: error.to_string(),
-        })?;
-        if line.is_empty() {
-            return Err(TruthValidationError::Schema {
-                line: line_number,
-                detail: "línea JSONL vacía".to_owned(),
-            });
-        }
-        let value: WireLine =
-            serde_json::from_str(line).map_err(|error| TruthValidationError::Schema {
+        let line = std::str::from_utf8(content).map_err(|error| {
+            rejected(TruthValidationError::Schema {
                 line: line_number,
                 detail: error.to_string(),
-            })?;
+            })
+        })?;
+        if line.is_empty() {
+            return Err(rejected(TruthValidationError::Schema {
+                line: line_number,
+                detail: "línea JSONL vacía".to_owned(),
+            }));
+        }
+        let value: WireLine = serde_json::from_str(line).map_err(|error| {
+            rejected(TruthValidationError::Schema {
+                line: line_number,
+                detail: error.to_string(),
+            })
+        })?;
         match value {
             WireLine::Header(value) => {
                 if line_number != 1 {
-                    return Err(TruthValidationError::HeaderMustBeFirst);
+                    return Err(rejected(TruthValidationError::HeaderMustBeFirst));
                 }
                 if header.replace(value.into()).is_some() {
-                    return Err(TruthValidationError::DuplicateHeader);
+                    return Err(rejected(TruthValidationError::DuplicateHeader));
                 }
             }
             WireLine::HaplotypeCopy(value) => {
                 if header.is_none() {
-                    return Err(TruthValidationError::HeaderMustBeFirst);
+                    return Err(rejected(TruthValidationError::HeaderMustBeFirst));
                 }
                 records.push(TruthRecord::HaplotypeCopy(value.into()));
             }
             WireLine::Genotype(value) => {
                 if header.is_none() {
-                    return Err(TruthValidationError::HeaderMustBeFirst);
+                    return Err(rejected(TruthValidationError::HeaderMustBeFirst));
                 }
                 records.push(TruthRecord::Genotype(value.into()));
             }
         }
     }
     let document = TruthDocument {
-        header: header.ok_or(TruthValidationError::EmptyDocument)?,
+        header: header.ok_or_else(|| rejected(TruthValidationError::EmptyDocument))?,
         records,
     };
     document
@@ -243,13 +251,12 @@ fn read_jsonl_line(
     line: u64,
 ) -> Result<bool, TruthValidationError> {
     destination.clear();
-    let count =
-        reader
-            .read_until(b'\n', destination)
-            .map_err(|error| TruthValidationError::Io {
-                line,
-                detail: error.to_string(),
-            })?;
+    let count = reader.read_until(b'\n', destination).map_err(|error| {
+        rejected(TruthValidationError::Io {
+            line,
+            detail: error.to_string(),
+        })
+    })?;
     if count == 0 {
         return Ok(false);
     }
@@ -258,23 +265,27 @@ fn read_jsonl_line(
 
 fn parse_wire_line(raw: &[u8], line_number: u64) -> Result<WireLine, TruthValidationError> {
     if raw.last() != Some(&b'\n') {
-        return Err(TruthValidationError::MissingFinalNewline);
+        return Err(rejected(TruthValidationError::MissingFinalNewline));
     }
     let content = &raw[..raw.len() - 1];
     let content = content.strip_suffix(b"\r").unwrap_or(content);
     if content.is_empty() {
-        return Err(TruthValidationError::Schema {
+        return Err(rejected(TruthValidationError::Schema {
             line: line_number,
             detail: "línea JSONL vacía".to_owned(),
-        });
+        }));
     }
-    let line = std::str::from_utf8(content).map_err(|error| TruthValidationError::Schema {
-        line: line_number,
-        detail: error.to_string(),
+    let line = std::str::from_utf8(content).map_err(|error| {
+        rejected(TruthValidationError::Schema {
+            line: line_number,
+            detail: error.to_string(),
+        })
     })?;
-    serde_json::from_str(line).map_err(|error| TruthValidationError::Schema {
-        line: line_number,
-        detail: error.to_string(),
+    serde_json::from_str(line).map_err(|error| {
+        rejected(TruthValidationError::Schema {
+            line: line_number,
+            detail: error.to_string(),
+        })
     })
 }
 
@@ -325,10 +336,16 @@ fn validate_reference_digest(
         })
         .collect::<Vec<_>>();
     if matches.len() != 1 {
-        return Err(TruthValidationError::MissingOrDuplicateReferenceDigest);
+        return Err(rejected(
+            TruthValidationError::MissingOrDuplicateReferenceDigest,
+        ));
     }
-    if header.reference_content_sha256 != reference_content_sha256(reference)? {
-        return Err(TruthValidationError::ReferenceDigestMismatch);
+    let observed = match reference_content_sha256(reference) {
+        Ok(observed) => observed,
+        Err(error) => return Err(rejected(error)),
+    };
+    if header.reference_content_sha256 != observed {
+        return Err(rejected(TruthValidationError::ReferenceDigestMismatch));
     }
     Ok(())
 }
@@ -430,12 +447,12 @@ pub(crate) fn validate_truth_with_copy_inspection<E>(
     mut inspect: impl FnMut(&HaplotypeCopyRecord, [u8; 32]) -> Result<(), E>,
 ) -> Result<(), InspectedValidationError<E>> {
     if document.header.reference_id != reference.id().as_str() {
-        return Err(InspectedValidationError::Semantics(Box::new(
+        return Err(rejected(InspectedValidationError::Semantics(Box::new(
             TruthValidationError::ReferenceIdMismatch {
                 declared: document.header.reference_id.clone(),
                 actual: reference.id().as_str().to_owned(),
             },
-        )));
+        ))));
     }
     validate_reference_digest(&document.header, reference)
         .map_err(|error| InspectedValidationError::Semantics(Box::new(error)))?;
@@ -561,7 +578,7 @@ pub fn validate_truth_jsonl_streaming(
         match value {
             WireLine::Header(value) => {
                 if line_number != 1 {
-                    return Err(TruthValidationError::HeaderMustBeFirst);
+                    return Err(rejected(TruthValidationError::HeaderMustBeFirst));
                 }
                 let parsed: TruthHeader = value.into();
                 let mut isolated = parsed.clone();
@@ -574,20 +591,20 @@ pub fn validate_truth_jsonl_streaming(
                 .validate_structure()
                 .map_err(TruthValidationError::Contract)?;
                 if parsed.reference_id != reference.id().as_str() {
-                    return Err(TruthValidationError::ReferenceIdMismatch {
+                    return Err(rejected(TruthValidationError::ReferenceIdMismatch {
                         declared: parsed.reference_id,
                         actual: reference.id().as_str().to_owned(),
-                    });
+                    }));
                 }
                 validate_reference_digest(&parsed, reference)?;
                 if header.replace(parsed).is_some() {
-                    return Err(TruthValidationError::DuplicateHeader);
+                    return Err(rejected(TruthValidationError::DuplicateHeader));
                 }
             }
             WireLine::HaplotypeCopy(value) => {
                 let header = header
                     .as_ref()
-                    .ok_or(TruthValidationError::HeaderMustBeFirst)?;
+                    .ok_or_else(|| rejected(TruthValidationError::HeaderMustBeFirst))?;
                 let copy: HaplotypeCopyRecord = value.into();
                 if previous_genotype.is_some()
                     || previous_copy
@@ -595,9 +612,9 @@ pub fn validate_truth_jsonl_streaming(
                         .is_some_and(|previous| previous >= &copy.identity)
                     || summaries.contains_key(&copy.identity)
                 {
-                    return Err(TruthValidationError::Contract(
+                    return Err(rejected(TruthValidationError::Contract(
                         TruthContractError::RecordsOutOfOrder,
-                    ));
+                    )));
                 }
                 let mut isolated_header = header.clone();
                 isolated_header.copy_count = 1;
@@ -621,19 +638,19 @@ pub fn validate_truth_jsonl_streaming(
                 );
                 copy_identities.insert(copy_identity.clone());
                 previous_copy = Some(copy_identity);
-                copy_count = copy_count
-                    .checked_add(1)
-                    .ok_or(TruthValidationError::Contract(
+                copy_count = copy_count.checked_add(1).ok_or_else(|| {
+                    rejected(TruthValidationError::Contract(
                         TruthContractError::CopyCountMismatch {
                             declared: 0,
                             actual: u64::MAX,
                         },
-                    ))?;
+                    ))
+                })?;
             }
             WireLine::Genotype(value) => {
                 let header = header
                     .as_ref()
-                    .ok_or(TruthValidationError::HeaderMustBeFirst)?;
+                    .ok_or_else(|| rejected(TruthValidationError::HeaderMustBeFirst))?;
                 let genotype: GenotypeRecord = value.into();
                 let key = (
                     genotype.reference_id.clone(),
@@ -646,9 +663,9 @@ pub fn validate_truth_jsonl_streaming(
                     .is_some_and(|previous| previous >= &key)
                     || !seen_genotypes.insert(key.clone())
                 {
-                    return Err(TruthValidationError::Contract(
+                    return Err(rejected(TruthValidationError::Contract(
                         TruthContractError::RecordsOutOfOrder,
-                    ));
+                    )));
                 }
                 // El flujo debe aplicar el mismo contrato estructural que el
                 // documento completo antes de comparar semántica: incluidos
@@ -666,19 +683,18 @@ pub fn validate_truth_jsonl_streaming(
                 }
                 individual_cases.push(genotype);
                 previous_genotype = Some(key);
-                genotype_count =
-                    genotype_count
-                        .checked_add(1)
-                        .ok_or(TruthValidationError::Contract(
-                            TruthContractError::GenotypeCountMismatch {
-                                declared: 0,
-                                actual: u64::MAX,
-                            },
-                        ))?;
+                genotype_count = genotype_count.checked_add(1).ok_or_else(|| {
+                    rejected(TruthValidationError::Contract(
+                        TruthContractError::GenotypeCountMismatch {
+                            declared: 0,
+                            actual: u64::MAX,
+                        },
+                    ))
+                })?;
             }
         }
     }
-    let header = header.ok_or(TruthValidationError::EmptyDocument)?;
+    let header = header.ok_or_else(|| rejected(TruthValidationError::EmptyDocument))?;
     if let Some(last) = individual_cases.first() {
         let individual_id = last.individual_id.clone();
         judge_individual(&individual_cases, &individual_id, &summaries)?;
@@ -693,20 +709,20 @@ pub fn validate_truth_jsonl_streaming(
         judge_individual(&[], individual_id, &summaries)?;
     }
     if header.copy_count != copy_count {
-        return Err(TruthValidationError::Contract(
+        return Err(rejected(TruthValidationError::Contract(
             TruthContractError::CopyCountMismatch {
                 declared: header.copy_count,
                 actual: copy_count,
             },
-        ));
+        )));
     }
     if header.genotype_count != genotype_count {
-        return Err(TruthValidationError::Contract(
+        return Err(rejected(TruthValidationError::Contract(
             TruthContractError::GenotypeCountMismatch {
                 declared: header.genotype_count,
                 actual: genotype_count,
             },
-        ));
+        )));
     }
     Ok(TruthStreamSummary {
         copy_count,
@@ -720,10 +736,10 @@ pub fn validate_and_reconstruct_truth(
     reference: &Reference,
 ) -> Result<ReconstructedTruth, TruthValidationError> {
     if document.header.reference_id != reference.id().as_str() {
-        return Err(TruthValidationError::ReferenceIdMismatch {
+        return Err(rejected(TruthValidationError::ReferenceIdMismatch {
             declared: document.header.reference_id.clone(),
             actual: reference.id().as_str().to_owned(),
-        });
+        }));
     }
     validate_reference_digest(&document.header, reference)?;
     let mut reconstructed = BTreeMap::new();
@@ -940,14 +956,14 @@ fn replay_event(
                 ..
             }) = modification
             else {
-                return Err(TruthValidationError::HistoryDoesNotReplay {
+                return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                });
+                }));
             };
             if modifications.next().is_some() {
-                return Err(TruthValidationError::HistoryDoesNotReplay {
+                return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                });
+                }));
             }
             let mut matching = pieces
                 .iter_mut()
@@ -961,30 +977,30 @@ fn replay_event(
                 })
                 .collect::<Vec<_>>();
             let Some((source, snps)) = matching.pop() else {
-                return Err(TruthValidationError::HistoryDoesNotReplay {
+                return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                });
+                }));
             };
             if !matching.is_empty() {
-                return Err(TruthValidationError::HistoryDoesNotReplay {
+                return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                });
+                }));
             }
             let sequence = validated_source(copy, source, reference)?;
             let index = usize::try_from(*position).map_err(|_| {
-                TruthValidationError::HistoryDoesNotReplay {
+                rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                }
+                })
             })?;
             let bases = sequence
                 .sequence()
                 .as_bytes()
-                .map_err(|_| TruthValidationError::BasesNotMaterialized)?;
+                .map_err(|_| rejected(TruthValidationError::BasesNotMaterialized))?;
             if bases.get(index) != Some(&expected.as_bytes()[0]) {
-                return Err(TruthValidationError::SnpReferenceMismatch {
+                return Err(rejected(TruthValidationError::SnpReferenceMismatch {
                     event_id: event_id.clone(),
                     position: *position,
-                });
+                }));
             }
             // Guarda defensiva que ninguna prueba ejercita: un documento con
             // dos cambios en la misma posición lo rechaza antes la lectura
@@ -999,9 +1015,9 @@ fn replay_event(
                 {
                     return Ok(None);
                 }
-                return Err(TruthValidationError::HistoryDoesNotReplay {
+                return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                });
+                }));
             }
             // La verdad publica los cambios de base de cada tramo ordenados
             // por posición, no por orden de llegada al historial: se insertan
@@ -1027,16 +1043,16 @@ fn replay_event(
         } => {
             let length = replay_length(copy, pieces)?;
             if *point == 0 || *point >= length {
-                return Err(TruthValidationError::HistoryDoesNotReplay {
+                return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                });
+                }));
             }
             split_replay_at(copy, pieces, *point)?;
             let index = piece_boundary_index(copy, pieces, *point)?;
             let Some(anchor) = replay_reference_anchor(&pieces[..index]) else {
-                return Err(TruthValidationError::HistoryDoesNotReplay {
+                return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                });
+                }));
             };
             pieces.insert(
                 index,
@@ -1050,9 +1066,9 @@ fn replay_event(
         TruthHistoryEvent::Deletion { start, end, .. } => {
             let length = replay_length(copy, pieces)?;
             if *start == 0 || start >= end || *end >= length {
-                return Err(TruthValidationError::HistoryDoesNotReplay {
+                return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                });
+                }));
             }
             split_replay_at(copy, pieces, *start)?;
             split_replay_at(copy, pieces, *end)?;
@@ -1063,12 +1079,14 @@ fn replay_event(
             for piece in pieces.drain(..) {
                 let next = cursor
                     .checked_add(piece.len().ok_or_else(|| {
-                        TruthValidationError::HistoryDoesNotReplay {
+                        rejected(TruthValidationError::HistoryDoesNotReplay {
                             identity: copy.identity.clone(),
-                        }
+                        })
                     })?)
-                    .ok_or_else(|| TruthValidationError::HistoryDoesNotReplay {
-                        identity: copy.identity.clone(),
+                    .ok_or_else(|| {
+                        rejected(TruthValidationError::HistoryDoesNotReplay {
+                            identity: copy.identity.clone(),
+                        })
                     })?;
                 if next <= *start || cursor >= *end {
                     retained.push(piece);
@@ -1090,9 +1108,9 @@ fn replay_event(
             return match (removed, anchor.flatten()) {
                 (Some(span), _) => Ok(Some(span)),
                 (None, Some(anchor)) => Ok(Some((anchor, anchor))),
-                (None, None) => Err(TruthValidationError::HistoryDoesNotReplay {
+                (None, None) => Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                }),
+                })),
             };
         }
         // **El alelo de repetición se replica en coordenadas de referencia**,
@@ -1111,9 +1129,9 @@ fn replay_event(
             ..
         } => {
             if start >= end || bases.is_empty() {
-                return Err(TruthValidationError::HistoryDoesNotReplay {
+                return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                });
+                }));
             }
             let index = pieces
                 .iter()
@@ -1127,13 +1145,15 @@ fn replay_event(
                     }
                     ReplayPiece::Inserted { .. } | ReplayPiece::RepeatAllele { .. } => false,
                 })
-                .ok_or_else(|| TruthValidationError::HistoryDoesNotReplay {
-                    identity: copy.identity.clone(),
+                .ok_or_else(|| {
+                    rejected(TruthValidationError::HistoryDoesNotReplay {
+                        identity: copy.identity.clone(),
+                    })
                 })?;
             let ReplayPiece::Source { source, snps } = pieces[index].clone() else {
-                return Err(TruthValidationError::HistoryDoesNotReplay {
+                return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                });
+                }));
             };
             let mut replacement = Vec::with_capacity(3);
             if source.start < *start {
@@ -1200,15 +1220,15 @@ fn replay_length(
 ) -> Result<u64, TruthValidationError> {
     pieces.iter().try_fold(0_u64, |length, piece| {
         length
-            .checked_add(
-                piece
-                    .len()
-                    .ok_or_else(|| TruthValidationError::HistoryDoesNotReplay {
-                        identity: copy.identity.clone(),
-                    })?,
-            )
-            .ok_or_else(|| TruthValidationError::HistoryDoesNotReplay {
-                identity: copy.identity.clone(),
+            .checked_add(piece.len().ok_or_else(|| {
+                rejected(TruthValidationError::HistoryDoesNotReplay {
+                    identity: copy.identity.clone(),
+                })
+            })?)
+            .ok_or_else(|| {
+                rejected(TruthValidationError::HistoryDoesNotReplay {
+                    identity: copy.identity.clone(),
+                })
             })
     })
 }
@@ -1223,23 +1243,24 @@ fn piece_boundary_index(
         if cursor == point {
             return Ok(index);
         }
-        cursor =
-            cursor
-                .checked_add(piece.len().ok_or_else(|| {
-                    TruthValidationError::HistoryDoesNotReplay {
-                        identity: copy.identity.clone(),
-                    }
-                })?)
-                .ok_or_else(|| TruthValidationError::HistoryDoesNotReplay {
+        cursor = cursor
+            .checked_add(piece.len().ok_or_else(|| {
+                rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
-                })?;
+                })
+            })?)
+            .ok_or_else(|| {
+                rejected(TruthValidationError::HistoryDoesNotReplay {
+                    identity: copy.identity.clone(),
+                })
+            })?;
     }
     if cursor == point {
         Ok(pieces.len())
     } else {
-        Err(TruthValidationError::HistoryDoesNotReplay {
+        Err(rejected(TruthValidationError::HistoryDoesNotReplay {
             identity: copy.identity.clone(),
-        })
+        }))
     }
 }
 
@@ -1250,16 +1271,15 @@ fn split_replay_at(
 ) -> Result<(), TruthValidationError> {
     let mut cursor = 0_u64;
     for index in 0..pieces.len() {
-        let length =
-            pieces[index]
-                .len()
-                .ok_or_else(|| TruthValidationError::HistoryDoesNotReplay {
-                    identity: copy.identity.clone(),
-                })?;
-        let end = cursor.checked_add(length).ok_or_else(|| {
-            TruthValidationError::HistoryDoesNotReplay {
+        let length = pieces[index].len().ok_or_else(|| {
+            rejected(TruthValidationError::HistoryDoesNotReplay {
                 identity: copy.identity.clone(),
-            }
+            })
+        })?;
+        let end = cursor.checked_add(length).ok_or_else(|| {
+            rejected(TruthValidationError::HistoryDoesNotReplay {
+                identity: copy.identity.clone(),
+            })
         })?;
         if point == cursor || point == end {
             return Ok(());
@@ -1269,9 +1289,9 @@ fn split_replay_at(
                 ReplayPiece::Source { source, snps } => {
                     let split = point - cursor;
                     let source_point = source.start.checked_add(split).ok_or_else(|| {
-                        TruthValidationError::HistoryDoesNotReplay {
+                        rejected(TruthValidationError::HistoryDoesNotReplay {
                             identity: copy.identity.clone(),
-                        }
+                        })
                     })?;
                     let mut left_source = source.clone();
                     left_source.end = source_point;
@@ -1297,15 +1317,15 @@ fn split_replay_at(
                     }
                 }
                 ReplayPiece::RepeatAllele { .. } => {
-                    return Err(TruthValidationError::HistoryDoesNotReplay {
+                    return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                         identity: copy.identity.clone(),
-                    });
+                    }));
                 }
                 ReplayPiece::Inserted { bases, provenance } => {
                     let split = usize::try_from(point - cursor).map_err(|_| {
-                        TruthValidationError::HistoryDoesNotReplay {
+                        rejected(TruthValidationError::HistoryDoesNotReplay {
                             identity: copy.identity.clone(),
-                        }
+                        })
                     })?;
                     let (left, right) = bases.split_at(split);
                     let right = ReplayPiece::Inserted {
@@ -1324,9 +1344,9 @@ fn split_replay_at(
         }
         cursor = end;
     }
-    Err(TruthValidationError::HistoryDoesNotReplay {
+    Err(rejected(TruthValidationError::HistoryDoesNotReplay {
         identity: copy.identity.clone(),
-    })
+    }))
 }
 
 #[derive(Clone, Debug)]
@@ -1356,9 +1376,9 @@ fn reconstruct_copy(
     }
     let replayed = pieces.iter().map(ReplayPiece::current).collect::<Vec<_>>();
     if replayed != copy.current_pieces {
-        return Err(TruthValidationError::HistoryDoesNotReplay {
+        return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
             identity: copy.identity.clone(),
-        });
+        }));
     }
     let mut result = materialize_replayed_copy(copy, reference, &pieces)?;
     result.event_loci = event_loci;
@@ -1459,9 +1479,9 @@ fn initial_replay_from_segments(
                         Vec::new(),
                     )?;
                     let end = position.checked_add(1).ok_or_else(|| {
-                        TruthValidationError::HistoryDoesNotReplay {
+                        rejected(TruthValidationError::HistoryDoesNotReplay {
                             identity: copy.identity.clone(),
-                        }
+                        })
                     })?;
                     push_initial_source(
                         copy,
@@ -1550,9 +1570,9 @@ fn validate_structural_event_ids(copy: &HaplotypeCopyRecord) -> Result<(), Truth
             }
         };
         if inherited.insert(event_id, class).is_some() {
-            return Err(TruthValidationError::HistoryDoesNotReplay {
+            return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                 identity: copy.identity.clone(),
-            });
+            }));
         }
     }
     for event in &copy.history {
@@ -1569,9 +1589,9 @@ fn validate_structural_event_ids(copy: &HaplotypeCopyRecord) -> Result<(), Truth
             && matches!(event, TruthHistoryEvent::Snp { .. })
             && segment_snp_matches_history(copy, event);
         if !permitted_snp_duplicate {
-            return Err(TruthValidationError::HistoryDoesNotReplay {
+            return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                 identity: copy.identity.clone(),
-            });
+            }));
         }
     }
     Ok(())
@@ -1609,9 +1629,9 @@ fn push_initial_source(
     snps: Vec<TruthCurrentSnp>,
 ) -> Result<(), TruthValidationError> {
     if start > end {
-        return Err(TruthValidationError::HistoryDoesNotReplay {
+        return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
             identity: copy.identity.clone(),
-        });
+        }));
     }
     if start < end {
         let mut source = source.clone();
@@ -1632,9 +1652,9 @@ fn materialize_replayed_copy(
     let mut layouts = Vec::with_capacity(pieces.len());
     for piece in pieces {
         let start = u64::try_from(bases.len()).map_err(|_| {
-            TruthValidationError::SourceIntervalOutOfBounds {
+            rejected(TruthValidationError::SourceIntervalOutOfBounds {
                 identity: copy.identity.clone(),
-            }
+            })
         })?;
         let inserted_provenance = match piece {
             ReplayPiece::Source { source, snps } => {
@@ -1643,56 +1663,58 @@ fn materialize_replayed_copy(
                     let bases = sequence
                         .sequence()
                         .as_bytes()
-                        .map_err(|_| TruthValidationError::BasesNotMaterialized)?;
+                        .map_err(|_| rejected(TruthValidationError::BasesNotMaterialized))?;
                     let found = bases[usize::try_from(snp.position).map_err(|_| {
-                        TruthValidationError::SourceIntervalOutOfBounds {
+                        rejected(TruthValidationError::SourceIntervalOutOfBounds {
                             identity: copy.identity.clone(),
-                        }
+                        })
                     })?];
                     if found != snp.reference.as_bytes()[0] {
-                        return Err(TruthValidationError::SnpReferenceMismatch {
+                        return Err(rejected(TruthValidationError::SnpReferenceMismatch {
                             event_id: snp.event_id.clone(),
                             position: snp.position,
-                        });
+                        }));
                     }
                 }
                 for prior in &source_slices {
                     if prior.start < source.end && source.start < prior.end {
-                        return Err(TruthValidationError::DuplicateCurrentSourcePosition {
-                            identity: copy.identity.clone(),
-                            position: prior.start.max(source.start),
-                        });
+                        return Err(rejected(
+                            TruthValidationError::DuplicateCurrentSourcePosition {
+                                identity: copy.identity.clone(),
+                                position: prior.start.max(source.start),
+                            },
+                        ));
                     }
                 }
                 let mut cursor = source.start;
                 for snp in snps {
                     let position = usize::try_from(snp.position).map_err(|_| {
-                        TruthValidationError::SourceIntervalOutOfBounds {
+                        rejected(TruthValidationError::SourceIntervalOutOfBounds {
                             identity: copy.identity.clone(),
-                        }
+                        })
                     })?;
                     let start_index = usize::try_from(cursor).map_err(|_| {
-                        TruthValidationError::SourceIntervalOutOfBounds {
+                        rejected(TruthValidationError::SourceIntervalOutOfBounds {
                             identity: copy.identity.clone(),
-                        }
+                        })
                     })?;
                     bases.extend_from_slice(&bases_of(sequence)?[start_index..position]);
                     bases.push(snp.alternate.as_bytes()[0]);
                     cursor = snp.position.checked_add(1).ok_or_else(|| {
-                        TruthValidationError::HistoryDoesNotReplay {
+                        rejected(TruthValidationError::HistoryDoesNotReplay {
                             identity: copy.identity.clone(),
-                        }
+                        })
                     })?;
                 }
                 let start_index = usize::try_from(cursor).map_err(|_| {
-                    TruthValidationError::SourceIntervalOutOfBounds {
+                    rejected(TruthValidationError::SourceIntervalOutOfBounds {
                         identity: copy.identity.clone(),
-                    }
+                    })
                 })?;
                 let end_index = usize::try_from(source.end).map_err(|_| {
-                    TruthValidationError::SourceIntervalOutOfBounds {
+                    rejected(TruthValidationError::SourceIntervalOutOfBounds {
                         identity: copy.identity.clone(),
-                    }
+                    })
                 })?;
                 bases.extend_from_slice(&bases_of(sequence)?[start_index..end_index]);
                 source_slices.push(SourceSlice {
@@ -1721,10 +1743,12 @@ fn materialize_replayed_copy(
                 // reclamarlo.
                 for prior in &source_slices {
                     if prior.start < source.end && source.start < prior.end {
-                        return Err(TruthValidationError::DuplicateCurrentSourcePosition {
-                            identity: copy.identity.clone(),
-                            position: prior.start.max(source.start),
-                        });
+                        return Err(rejected(
+                            TruthValidationError::DuplicateCurrentSourcePosition {
+                                identity: copy.identity.clone(),
+                                position: prior.start.max(source.start),
+                            },
+                        ));
                     }
                 }
                 validated_source(copy, source, reference)?;
@@ -1739,9 +1763,9 @@ fn materialize_replayed_copy(
             }
         };
         let end = u64::try_from(bases.len()).map_err(|_| {
-            TruthValidationError::SourceIntervalOutOfBounds {
+            rejected(TruthValidationError::SourceIntervalOutOfBounds {
                 identity: copy.identity.clone(),
-            }
+            })
         })?;
         layouts.push(PieceLayout {
             start,
@@ -1768,28 +1792,30 @@ fn validated_source<'a>(
         || source.source.kind != TruthSourceKind::Reference
         || source.source.source_id != reference.id().as_str()
     {
-        return Err(TruthValidationError::SourceDoesNotNameReference {
+        return Err(rejected(TruthValidationError::SourceDoesNotNameReference {
             identity: copy.identity.clone(),
-        });
+        }));
     }
     let sequence = reference
         .sequences()
         .iter()
         .find(|sequence| sequence.id().as_str() == source.sequence_id)
-        .ok_or_else(|| TruthValidationError::MissingReferenceSequence {
-            sequence_id: source.sequence_id.clone(),
+        .ok_or_else(|| {
+            rejected(TruthValidationError::MissingReferenceSequence {
+                sequence_id: source.sequence_id.clone(),
+            })
         })?;
     if source.sequence_length != sequence.length() {
-        return Err(TruthValidationError::SourceLengthMismatch {
+        return Err(rejected(TruthValidationError::SourceLengthMismatch {
             sequence_id: source.sequence_id.clone(),
             declared: source.sequence_length,
             actual: sequence.length(),
-        });
+        }));
     }
     if source.start >= source.end || source.end > sequence.length() {
-        return Err(TruthValidationError::SourceIntervalOutOfBounds {
+        return Err(rejected(TruthValidationError::SourceIntervalOutOfBounds {
             identity: copy.identity.clone(),
-        });
+        }));
     }
     Ok(sequence)
 }
@@ -2106,7 +2132,9 @@ fn carriers_match(
     Ok(())
 }
 
+#[track_caller]
 fn mismatch(genotype: &GenotypeRecord, detail: &'static str) -> TruthValidationError {
+    crate::guard_trace::record();
     TruthValidationError::GenotypeMismatch {
         case_id: genotype.case_id.clone(),
         detail,
@@ -2295,7 +2323,7 @@ fn validate_individual_case_set<'a>(
                     | CaseAnchor::Event { sequence, .. }
                     | CaseAnchor::Repeat { sequence, .. } => sequence,
                 };
-                Err(missing(sequence, start, end, detail))
+                Err(rejected(missing(sequence, start, end, detail)))
             }
         };
     for (identity, copy) in copies {
@@ -2356,12 +2384,12 @@ fn validate_individual_case_set<'a>(
             // un segmento heredado, y ningún caso puede explicarlas: un caso
             // indel exige su evento en el historial.
             let event_id = event_id.ok_or_else(|| {
-                missing(
+                rejected(missing(
                     sequence,
                     piece.start,
                     piece.end,
                     "unas bases insertadas de la copia no tienen evento ni caso",
-                )
+                ))
             })?;
             let (start, end) = copy.event_loci.get(event_id).copied().unwrap_or_default();
             require(
@@ -2386,12 +2414,12 @@ fn validate_individual_case_set<'a>(
             }
         }
         if let Some((start, end)) = copy.inherited_loss {
-            return Err(missing(
+            return Err(rejected(missing(
                 sequence,
                 start,
                 end,
                 "faltan bases de referencia en el estado heredado de los segmentos, sin evento ni caso",
-            ));
+            )));
         }
     }
     let mut population = None;
@@ -2405,7 +2433,14 @@ fn validate_individual_case_set<'a>(
         let known = matrix
             .population_by_individual
             .get(individual_id)
-            .ok_or_else(|| missing("", 0, 0, "el individuo no tiene población conocida"))?;
+            .ok_or_else(|| {
+                rejected(missing(
+                    "",
+                    0,
+                    0,
+                    "el individuo no tiene población conocida",
+                ))
+            })?;
         population = Some(known.as_str());
         let rows = matrix.loci_by_population.get(known.as_str());
         for (sequence, position) in rows.into_iter().flat_map(BTreeMap::keys) {
@@ -2434,10 +2469,10 @@ fn validate_individual_case_set<'a>(
         // La población que declaran las copias es la del individuo.
         let origin = format!("{COPY_ORIGIN_PREFIX}{population}");
         if let Some((identity, _)) = copies.iter().find(|(_, copy)| copy.origin != origin) {
-            return Err(TruthValidationError::CopyOriginMismatch {
+            return Err(rejected(TruthValidationError::CopyOriginMismatch {
                 identity: (*identity).clone(),
                 expected: origin,
-            });
+            }));
         }
         for genotype in cases {
             if genotype.case_kind == GenotypeCaseKind::Snp {
@@ -2803,22 +2838,24 @@ impl<'de> Deserialize<'de> for WireRepeatBlock {
         let units = raw
             .units
             .as_f64()
-            .ok_or_else(|| D::Error::custom("el número de unidades no es un decimal"))?;
+            .ok_or_else(|| rejected(D::Error::custom("el número de unidades no es un decimal")))?;
         let observed = u64::try_from(raw.motif.len())
-            .map_err(|_| D::Error::custom("el motivo del bloque es inabarcable"))?;
+            .map_err(|_| rejected(D::Error::custom("el motivo del bloque es inabarcable")))?;
         if observed == 0 || raw.motif_length != observed {
-            return Err(D::Error::custom(
+            return Err(rejected(D::Error::custom(
                 "la longitud declarada del motivo no es la de su secuencia",
-            ));
+            )));
         }
         if raw.bases == 0 {
-            return Err(D::Error::custom("un bloque sin bases no es un bloque"));
+            return Err(rejected(D::Error::custom(
+                "un bloque sin bases no es un bloque",
+            )));
         }
         let derived = raw.bases as f64 / observed as f64;
         if (units - derived).abs() > 1e-9 * derived.max(1.0) {
-            return Err(D::Error::custom(
+            return Err(rejected(D::Error::custom(
                 "el número de unidades no es las bases entre la longitud del motivo",
-            ));
+            )));
         }
         Ok(Self {
             motif: raw.motif,
@@ -3018,8 +3055,11 @@ where
     D: Deserializer<'de>,
 {
     let number = Number::deserialize(deserializer)?;
-    parse_json_integer(&number.to_string())
-        .ok_or_else(|| D::Error::custom("se esperaba un entero JSON no negativo exacto en u64"))
+    parse_json_integer(&number.to_string()).ok_or_else(|| {
+        rejected(D::Error::custom(
+            "se esperaba un entero JSON no negativo exacto en u64",
+        ))
+    })
 }
 
 fn deserialize_u8<'de, D>(deserializer: D) -> Result<u8, D::Error>
@@ -3027,7 +3067,7 @@ where
     D: Deserializer<'de>,
 {
     let value = deserialize_u64(deserializer)?;
-    u8::try_from(value).map_err(|_| D::Error::custom("entero fuera de u8"))
+    u8::try_from(value).map_err(|_| rejected(D::Error::custom("entero fuera de u8")))
 }
 
 fn deserialize_usize<'de, D>(deserializer: D) -> Result<usize, D::Error>
@@ -3035,7 +3075,7 @@ where
     D: Deserializer<'de>,
 {
     let value = deserialize_u64(deserializer)?;
-    usize::try_from(value).map_err(|_| D::Error::custom("entero fuera de usize"))
+    usize::try_from(value).map_err(|_| rejected(D::Error::custom("entero fuera de usize")))
 }
 
 fn deserialize_vec_u8<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
@@ -3047,8 +3087,8 @@ where
         .into_iter()
         .map(|number| {
             let value = parse_json_integer(&number.to_string())
-                .ok_or_else(|| D::Error::custom("dosis no es un entero exacto"))?;
-            u8::try_from(value).map_err(|_| D::Error::custom("dosis fuera de u8"))
+                .ok_or_else(|| rejected(D::Error::custom("dosis no es un entero exacto")))?;
+            u8::try_from(value).map_err(|_| rejected(D::Error::custom("dosis fuera de u8")))
         })
         .collect()
 }
