@@ -1671,15 +1671,12 @@ pub fn resolve_manifest_reference(
     let fasta_path = parent.join(&fasta.path);
     let observed = identify_file(&fasta_path, &fasta.path)?;
     if observed.size_bytes() != fasta.size_bytes || observed.digest() != fasta.digest {
-        return Err(Diagnostic::io(
-            "GPS-IO-002",
-            "El tamaño o SHA-256 de un artefacto no coincide con el valor esperado.",
-        )
-        .with("path", fasta_path.display().to_string())
-        .with("expected_size", fasta.size_bytes.to_string())
-        .with("observed_size", observed.size_bytes().to_string())
-        .with("expected_digest", &fasta.digest)
-        .with("observed_digest", observed.digest()));
+        return Err(artifact_identity_error()
+            .with("path", fasta_path.display().to_string())
+            .with("expected_size", fasta.size_bytes.to_string())
+            .with("observed_size", observed.size_bytes().to_string())
+            .with("expected_digest", &fasta.digest)
+            .with("observed_digest", observed.digest()));
     }
 
     // El digest del FASTA seleccionado no autentica por sí solo una referencia
@@ -4374,12 +4371,9 @@ fn validate_physical_vcf_output(
         let physical_path = root.join(relative_path);
         let identity = identify_file(&physical_path, Path::new(relative_path))?;
         if identity.size_bytes() != artifact.size_bytes || identity.digest() != artifact.digest {
-            return Err(Diagnostic::io(
-                "GPS-IO-002",
-                "El tamaño o SHA-256 de un artefacto no coincide con el valor esperado.",
-            )
-            .with("path", physical_path.display().to_string())
-            .with("artifact_id", id));
+            return Err(artifact_identity_error()
+                .with("path", physical_path.display().to_string())
+                .with("artifact_id", id));
         }
     }
     Ok(())
@@ -5233,6 +5227,10 @@ fn effective_sequence_class(
     }
 }
 
+/// Rechazo de la autoridad física F1. Lleva `#[track_caller]`: sin ella, sus
+/// treinta y cuatro llamadores contaban como un solo punto de rechazo para la
+/// puerta de cobertura de guardas.
+#[track_caller]
 fn physical_error(path: &Path, operation: &str, error: &Diagnostic) -> Diagnostic {
     effective_error(
         path,
@@ -5244,8 +5242,15 @@ fn physical_error(path: &Path, operation: &str, error: &Diagnostic) -> Diagnosti
     )
 }
 
+#[track_caller]
 fn repeat_section_error(path: &Path, detail: &str) -> Diagnostic {
     manifest_error_for_schema(path, "manifest-general-v6.schema.json", detail.to_owned())
+}
+
+/// Lo mismo que [`repeat_section_error`] para un motivo que ya anotó
+/// [`reason`]: no anota la línea del envoltorio.
+fn repeat_section_error_from_reason(path: &Path, detail: &str) -> Diagnostic {
+    manifest_diagnostic(path, "manifest-general-v6.schema.json", detail)
 }
 
 /// Comprueba la sección de repeticiones con la misma severidad que el resto
@@ -5272,7 +5277,7 @@ fn repeat_section_error(path: &Path, detail: &str) -> Diagnostic {
 fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
     let section = value
         .as_object()
-        .ok_or("la sección repeat_loci no es un objeto")?;
+        .ok_or_else(|| reason("la sección repeat_loci no es un objeto"))?;
     const FIELDS: [&str; 5] = [
         "reference_id",
         "reference_source",
@@ -5281,41 +5286,45 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
         "loci",
     ];
     if section.len() != FIELDS.len() || section.keys().any(|key| !FIELDS.contains(&key.as_str())) {
-        return Err("la sección repeat_loci no tiene exactamente sus campos");
+        return Err(reason(
+            "la sección repeat_loci no tiene exactamente sus campos",
+        ));
     }
     if !section
         .get("reference_id")
         .and_then(Value::as_str)
         .is_some_and(|value| !value.is_empty())
     {
-        return Err("la sección repeat_loci no nombra su referencia");
+        return Err(reason("la sección repeat_loci no nombra su referencia"));
     }
     if !matches!(
         section.get("reference_source").and_then(Value::as_str),
         Some("simulated" | "supplied")
     ) {
-        return Err("la procedencia de la referencia no es simulada ni suministrada");
+        return Err(reason(
+            "la procedencia de la referencia no es simulada ni suministrada",
+        ));
     }
     validate_repeat_admission(
         section
             .get("admission_defaults")
-            .ok_or("faltan los mínimos de omisión")?,
+            .ok_or_else(|| reason("faltan los mínimos de omisión"))?,
     )?;
     validate_repeat_tract_output(
         section
             .get("tract_output")
-            .ok_or("falta la contabilidad de bases de tracto")?,
+            .ok_or_else(|| reason("falta la contabilidad de bases de tracto"))?,
     )?;
     let loci = section
         .get("loci")
         .and_then(Value::as_array)
         .filter(|loci| !loci.is_empty())
-        .ok_or("la sección repeat_loci no publica ningún locus")?;
+        .ok_or_else(|| reason("la sección repeat_loci no publica ningún locus"))?;
     let mut identifiers = BTreeSet::new();
     for locus in loci {
         let locus = locus
             .as_object()
-            .ok_or("un locus publicado no es un objeto")?;
+            .ok_or_else(|| reason("un locus publicado no es un objeto"))?;
         const LOCUS_FIELDS: [&str; 10] = [
             "id",
             "sequence_id",
@@ -5337,7 +5346,7 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
                 .keys()
                 .any(|key| !LOCUS_FIELDS.contains(&key.as_str()) && key != "slippage")
         {
-            return Err("un locus publicado no tiene exactamente sus campos");
+            return Err(reason("un locus publicado no tiene exactamente sus campos"));
         }
         if let Some(slippage) = locus.get("slippage") {
             validate_repeat_slippage(slippage)?;
@@ -5346,35 +5355,35 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
             .get("id")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
-            .ok_or("un locus publicado no tiene identificador")?;
+            .ok_or_else(|| reason("un locus publicado no tiene identificador"))?;
         if !identifiers.insert(identifier) {
-            return Err("dos loci publicados comparten identificador");
+            return Err(reason("dos loci publicados comparten identificador"));
         }
         if !locus
             .get("sequence_id")
             .and_then(Value::as_str)
             .is_some_and(|value| !value.is_empty())
         {
-            return Err("un locus publicado no nombra su secuencia");
+            return Err(reason("un locus publicado no nombra su secuencia"));
         }
         let start = locus
             .get("start")
             .and_then(Value::as_u64)
             .filter(|start| *start >= 1)
-            .ok_or("el inicio del locus no es una coordenada de base uno")?;
+            .ok_or_else(|| reason("el inicio del locus no es una coordenada de base uno"))?;
         let end = locus
             .get("end")
             .and_then(Value::as_u64)
             .filter(|end| *end >= start)
-            .ok_or("el final del locus no llega a su inicio")?;
+            .ok_or_else(|| reason("el final del locus no llega a su inicio"))?;
         let _ = end;
         if locus.get("max_units").and_then(Value::as_u64).unwrap_or(0) == 0 {
-            return Err("el tope del locus no es un entero positivo");
+            return Err(reason("el tope del locus no es un entero positivo"));
         }
         validate_repeat_admission(
             locus
                 .get("admission")
-                .ok_or("faltan los mínimos del locus")?,
+                .ok_or_else(|| reason("faltan los mínimos del locus"))?,
         )?;
         let motifs = repeat_motif_list(locus.get("motifs"))?;
         let motif_lengths = repeat_u64_list(locus.get("motif_lengths"))?;
@@ -5384,17 +5393,19 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
                 .zip(&motif_lengths)
                 .any(|(motif, length)| motif.len() as u64 != *length)
         {
-            return Err("las longitudes de motivo del locus no son las de sus motivos");
+            return Err(reason(
+                "las longitudes de motivo del locus no son las de sus motivos",
+            ));
         }
         let drawn = locus
             .get("drawn_copies")
             .and_then(Value::as_u64)
-            .ok_or("las copias sorteadas del locus no son un entero")?;
+            .ok_or_else(|| reason("las copias sorteadas del locus no son un entero"))?;
         let alleles = locus
             .get("alleles")
             .and_then(Value::as_array)
             .filter(|alleles| !alleles.is_empty())
-            .ok_or("el locus publicado no tiene alelos")?;
+            .ok_or_else(|| reason("el locus publicado no tiene alelos"))?;
         let generated = locus.contains_key("slippage");
         // **Cada linaje termina en exactamente un alelo**, de modo que no puede
         // haber más alelos que linajes. Es la única relación aritmética que ata
@@ -5406,7 +5417,9 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
             .and_then(Value::as_u64)
             && alleles.len() as u64 > lineages
         {
-            return Err("el abanico publica más alelos que linajes simulados");
+            return Err(reason(
+                "el abanico publica más alelos que linajes simulados",
+            ));
         }
         let mut realized_total = 0_u64;
         for allele in alleles {
@@ -5422,16 +5435,18 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
             let origin = allele
                 .get("origin")
                 .and_then(Value::as_str)
-                .ok_or("un alelo publicado no declara su origen")?;
+                .ok_or_else(|| reason("un alelo publicado no declara su origen"))?;
             if generated != (origin == "generated") {
-                return Err("el origen del alelo contradice al del locus");
+                return Err(reason("el origen del alelo contradice al del locus"));
             }
             realized_total = realized_total
                 .checked_add(copies)
-                .ok_or("las copias realizadas del locus desbordan")?;
+                .ok_or_else(|| reason("las copias realizadas del locus desbordan"))?;
         }
         if realized_total != drawn {
-            return Err("las copias realizadas no suman las copias sorteadas del locus");
+            return Err(reason(
+                "las copias realizadas no suman las copias sorteadas del locus",
+            ));
         }
     }
     Ok(())
@@ -5488,9 +5503,11 @@ fn validate_published_slippage_fans(
         let Some(slippage) = locus.get("slippage") else {
             continue;
         };
+        // Cada `reject(reason(..))` anota su propia línea; el cierre no.
         let reject = |detail: &str| {
-            effective_error(
+            effective_diagnostic(
                 effective_path,
+                "effective-config-v4.schema.json",
                 format!(
                     "abanico generado de {}: {detail}",
                     locus
@@ -5503,26 +5520,26 @@ fn validate_published_slippage_fans(
         let locus_id = locus
             .get("id")
             .and_then(Value::as_str)
-            .ok_or_else(|| reject("el locus no tiene identificador"))?;
+            .ok_or_else(|| reject(reason("el locus no tiene identificador")))?;
         let ancestral = published_ancestral_tract(locus, reference, &reject)?;
         let max_units = locus
             .get("max_units")
             .and_then(Value::as_u64)
-            .ok_or_else(|| reject("el tope del locus no es un entero"))?;
+            .ok_or_else(|| reject(reason("el tope del locus no es un entero")))?;
         let mean_events = slippage
             .get("mean_events")
             .and_then(Value::as_f64)
-            .ok_or_else(|| reject("la media de pasos no es un decimal"))?;
+            .ok_or_else(|| reject(reason("la media de pasos no es un decimal")))?;
         let expansion_bias = slippage
             .get("expansion_bias")
             .and_then(Value::as_f64)
-            .ok_or_else(|| reject("el sesgo de expansión no es un decimal"))?;
+            .ok_or_else(|| reject(reason("el sesgo de expansión no es un decimal")))?;
         let lineages = slippage
             .get("lineages")
             .and_then(Value::as_u64)
-            .ok_or_else(|| reject("los linajes no son un entero"))?;
+            .ok_or_else(|| reject(reason("los linajes no son un entero")))?;
         let mut rng = crate::repeat_slippage::slippage_subseed(root_seed, reference_id, locus_id)
-            .map_err(|error| reject(&error.detail()))?
+            .map_err(|error| reject(&reason(error.detail())))?
             .local_rng();
         let recomputed = recompute_slippage_fan(
             &mut rng,
@@ -5548,44 +5565,48 @@ fn published_ancestral_tract(
     let sequence_id = locus
         .get("sequence_id")
         .and_then(Value::as_str)
-        .ok_or_else(|| reject("el locus no nombra su secuencia"))?;
+        .ok_or_else(|| reject(reason("el locus no nombra su secuencia")))?;
     let start = locus
         .get("start")
         .and_then(Value::as_u64)
         .filter(|start| *start >= 1)
-        .ok_or_else(|| reject("el inicio no es una coordenada de base uno"))?;
+        .ok_or_else(|| reject(reason("el inicio no es una coordenada de base uno")))?;
     let end = locus
         .get("end")
         .and_then(Value::as_u64)
-        .ok_or_else(|| reject("el final no es una coordenada"))?;
+        .ok_or_else(|| reject(reason("el final no es una coordenada")))?;
     let motifs = locus
         .get("motifs")
         .and_then(Value::as_array)
-        .ok_or_else(|| reject("el locus no publica sus motivos"))?;
+        .ok_or_else(|| reject(reason("el locus no publica sus motivos")))?;
     let [motif] = motifs.as_slice() else {
-        return Err(reject("un locus generado tiene que tener un solo motivo"));
+        return Err(reject(reason(
+            "un locus generado tiene que tener un solo motivo",
+        )));
     };
     let motif = motif
         .as_str()
-        .ok_or_else(|| reject("el motivo publicado no es texto"))?;
-    let motif = RepeatMotif::new(motif.as_bytes()).map_err(|error| reject(&error.detail()))?;
+        .ok_or_else(|| reject(reason("el motivo publicado no es texto")))?;
+    let motif =
+        RepeatMotif::new(motif.as_bytes()).map_err(|error| reject(&reason(error.detail())))?;
     let sequence = reference
         .sequences()
         .iter()
         .find(|sequence| sequence.id().as_str() == sequence_id)
-        .ok_or_else(|| reject("la referencia publicada no contiene esa secuencia"))?;
-    let bases = sequence
-        .sequence()
-        .as_bytes()
-        .map_err(|_| reject("las bases de la referencia publicada no están materializadas"))?;
+        .ok_or_else(|| reject(reason("la referencia publicada no contiene esa secuencia")))?;
+    let bases = sequence.sequence().as_bytes().map_err(|_| {
+        reject(reason(
+            "las bases de la referencia publicada no están materializadas",
+        ))
+    })?;
     // El intervalo publicado es de base uno cerrada; el corte, de base cero
     // semiabierta. La conversión se escribe aquí una sola vez y a la vista.
-    let from = usize::try_from(start - 1).map_err(|_| reject("el inicio desborda"))?;
-    let to = usize::try_from(end).map_err(|_| reject("el final desborda"))?;
+    let from = usize::try_from(start - 1).map_err(|_| reject(reason("el inicio desborda")))?;
+    let to = usize::try_from(end).map_err(|_| reject(reason("el final desborda")))?;
     let slice = bases
         .get(from..to)
-        .ok_or_else(|| reject("el intervalo rebasa la secuencia publicada"))?;
-    TandemRepeatTract::new(motif, slice).map_err(|error| reject(&error.detail()))
+        .ok_or_else(|| reject(reason("el intervalo rebasa la secuencia publicada")))?;
+    TandemRepeatTract::new(motif, slice).map_err(|error| reject(&reason(error.detail())))
 }
 
 /// El recorrido **escrito aparte del productor**: cada linaje parte del
@@ -5608,10 +5629,10 @@ fn recompute_slippage_fan(
     let mut unapplied = 0_u64;
     for _ in 0..lineages {
         let events = crate::randomness::poisson_count(rng, mean_events)
-            .map_err(|error| format!("el recuento de pasos falló: {error:?}"))?;
+            .map_err(|error| reason(format!("el recuento de pasos falló: {error:?}")))?;
         drawn = drawn
             .checked_add(events)
-            .ok_or_else(|| "el recuento de pasos desborda".to_owned())?;
+            .ok_or_else(|| reason("el recuento de pasos desborda".to_owned()))?;
         let mut current = ancestral.clone();
         let mut stopped = false;
         for _ in 0..events {
@@ -5634,7 +5655,7 @@ fn recompute_slippage_fan(
             } else if expansion_bias == 0.0 {
                 -1
             } else if crate::randomness::f4_bernoulli(rng, expansion_bias)
-                .map_err(|error| format!("el ensayo del sesgo falló: {error:?}"))?
+                .map_err(|error| reason(format!("el ensayo del sesgo falló: {error:?}")))?
             {
                 1
             } else {
@@ -5642,7 +5663,7 @@ fn recompute_slippage_fan(
             };
             current = current
                 .apply_unit_step(step)
-                .map_err(|error| format!("el paso falló: {}", error.detail()))?;
+                .map_err(|error| reason(format!("el paso falló: {}", error.detail())))?;
             applied += 1;
         }
         *counts
@@ -5678,23 +5699,23 @@ fn compare_published_fan_against_oracle(
     let published = locus
         .get("alleles")
         .and_then(Value::as_array)
-        .ok_or_else(|| reject("el locus no publica alelos"))?;
+        .ok_or_else(|| reject(reason("el locus no publica alelos")))?;
     if published.len() != recomputed.alleles.len() {
-        return Err(reject(
+        return Err(reject(reason(
             "el número de alelos publicados no es el que el modelo produce",
-        ));
+        )));
     }
     for (index, (expected_bases, expected_lineages)) in recomputed.alleles.iter().enumerate() {
         let allele = &published[index];
         let sequence = allele
             .get("sequence")
             .and_then(Value::as_str)
-            .ok_or_else(|| reject("un alelo publicado no tiene secuencia"))?;
+            .ok_or_else(|| reject(reason("un alelo publicado no tiene secuencia")))?;
         if sequence.as_bytes() != expected_bases.as_slice() {
-            return Err(reject(
+            return Err(reject(reason(
                 "la secuencia de un alelo publicado no es la que el modelo produce, o el orden \
 canónico no es el suyo",
-            ));
+            )));
         }
         // **Aquí muere el espectro emparejado al revés.** La frecuencia se
         // compara bit a bit contra los linajes que este juez contó terminando
@@ -5704,11 +5725,11 @@ canónico no es el suyo",
         if published_frequency != Some(expected_frequency) {
             // El diagnóstico lleva las dos cifras: sin ellas, quien lo lea sabe
             // que algo no cuadra y no **qué**.
-            return Err(reject(&format!(
+            return Err(reject(&reason(format!(
                 "la frecuencia de un alelo no es la proporción de linajes que terminan en él \
 (alelo {index}: publicada {published_frequency:?}, rehecha {expected_frequency} = \
 {expected_lineages}/{lineages})"
-            )));
+            ))));
         }
     }
     for (field, expected) in [
@@ -5717,9 +5738,9 @@ canónico no es el suyo",
         ("unapplied_events", recomputed.unapplied),
     ] {
         if slippage.get(field).and_then(Value::as_u64) != Some(expected) {
-            return Err(reject(
+            return Err(reject(reason(
                 "la contabilidad publicada del generador no es la que el modelo produce",
-            ));
+            )));
         }
     }
     Ok(())
@@ -5747,7 +5768,7 @@ canónico no es el suyo",
 fn validate_repeat_slippage(value: &Value) -> Result<(), &'static str> {
     let slippage = value
         .as_object()
-        .ok_or("el bloque del generador no es un objeto")?;
+        .ok_or_else(|| reason("el bloque del generador no es un objeto"))?;
     const FIELDS: [&str; 14] = [
         "model",
         "step_units",
@@ -5766,31 +5787,33 @@ fn validate_repeat_slippage(value: &Value) -> Result<(), &'static str> {
     ];
     if slippage.len() != FIELDS.len() || slippage.keys().any(|key| !FIELDS.contains(&key.as_str()))
     {
-        return Err("el bloque del generador no tiene exactamente sus campos");
+        return Err(reason(
+            "el bloque del generador no tiene exactamente sus campos",
+        ));
     }
     if slippage.get("model").and_then(Value::as_str)
         != Some(crate::repeat_slippage::SLIPPAGE_MODEL_STEPWISE)
     {
-        return Err("el modelo del generador no es el escalonado");
+        return Err(reason("el modelo del generador no es el escalonado"));
     }
     if slippage.get("step_units").and_then(Value::as_u64)
         != Some(crate::repeat_slippage::SLIPPAGE_STEP_UNITS)
     {
-        return Err("el paso del generador no es de una unidad completa");
+        return Err(reason("el paso del generador no es de una unidad completa"));
     }
     let mean = slippage
         .get("mean_events")
         .and_then(Value::as_f64)
-        .ok_or("la media de pasos no es un decimal")?;
+        .ok_or_else(|| reason("la media de pasos no es un decimal"))?;
     if !mean.is_finite() || mean < 0.0 {
-        return Err("la media de pasos no es un decimal no negativo");
+        return Err(reason("la media de pasos no es un decimal no negativo"));
     }
     let bias = slippage
         .get("expansion_bias")
         .and_then(Value::as_f64)
-        .ok_or("el sesgo de expansión no es un decimal")?;
+        .ok_or_else(|| reason("el sesgo de expansión no es un decimal"))?;
     if !bias.is_finite() || !(0.0..=1.0).contains(&bias) {
-        return Err("el sesgo de expansión no pertenece a [0,1]");
+        return Err(reason("el sesgo de expansión no pertenece a [0,1]"));
     }
     for (field, expected) in [
         ("algorithm", crate::repeat_slippage::SLIPPAGE_ALGORITHM),
@@ -5809,42 +5832,50 @@ fn validate_repeat_slippage(value: &Value) -> Result<(), &'static str> {
         ),
     ] {
         if slippage.get(field).and_then(Value::as_str) != Some(expected) {
-            return Err("una versión o un ámbito del generador no es el normativo");
+            return Err(reason(
+                "una versión o un ámbito del generador no es el normativo",
+            ));
         }
     }
     let limitations = slippage
         .get("limitations")
         .and_then(Value::as_array)
-        .ok_or("las limitaciones del generador no son una lista")?;
+        .ok_or_else(|| reason("las limitaciones del generador no son una lista"))?;
     if limitations.len() != crate::repeat_slippage::SLIPPAGE_LIMITATIONS.len()
         || limitations
             .iter()
             .zip(crate::repeat_slippage::SLIPPAGE_LIMITATIONS)
             .any(|(published, expected)| published.as_str() != Some(expected))
     {
-        return Err("las limitaciones del generador no son las tres declaradas");
+        return Err(reason(
+            "las limitaciones del generador no son las tres declaradas",
+        ));
     }
     if slippage
         .get("lineages")
         .and_then(Value::as_u64)
         .is_none_or(|lineages| lineages == 0)
     {
-        return Err("los linajes del generador no son un entero positivo");
+        return Err(reason(
+            "los linajes del generador no son un entero positivo",
+        ));
     }
     let drawn = slippage
         .get("drawn_events")
         .and_then(Value::as_u64)
-        .ok_or("los pasos sorteados no son un entero")?;
+        .ok_or_else(|| reason("los pasos sorteados no son un entero"))?;
     let applied = slippage
         .get("applied_events")
         .and_then(Value::as_u64)
-        .ok_or("los pasos aplicados no son un entero")?;
+        .ok_or_else(|| reason("los pasos aplicados no son un entero"))?;
     let unapplied = slippage
         .get("unapplied_events")
         .and_then(Value::as_u64)
-        .ok_or("los pasos no aplicados no son un entero")?;
+        .ok_or_else(|| reason("los pasos no aplicados no son un entero"))?;
     if applied.checked_add(unapplied) != Some(drawn) {
-        return Err("los pasos aplicados y los no aplicados no suman los sorteados");
+        return Err(reason(
+            "los pasos aplicados y los no aplicados no suman los sorteados",
+        ));
     }
     Ok(())
 }
@@ -5859,7 +5890,7 @@ fn validate_repeat_slippage(value: &Value) -> Result<(), &'static str> {
 fn validate_repeat_tract_output(value: &Value) -> Result<(), &'static str> {
     let accounting = value
         .as_object()
-        .ok_or("la contabilidad de tracto no es un objeto")?;
+        .ok_or_else(|| reason("la contabilidad de tracto no es un objeto"))?;
     const FIELDS: [&str; 6] = [
         "truth_tract_bases_bound",
         "vcf_tract_bases_bound",
@@ -5871,13 +5902,15 @@ fn validate_repeat_tract_output(value: &Value) -> Result<(), &'static str> {
     if accounting.len() != FIELDS.len()
         || accounting.keys().any(|key| !FIELDS.contains(&key.as_str()))
     {
-        return Err("la contabilidad de tracto no tiene exactamente sus campos");
+        return Err(reason(
+            "la contabilidad de tracto no tiene exactamente sus campos",
+        ));
     }
     let read = |key: &str| {
         accounting
             .get(key)
             .and_then(Value::as_u64)
-            .ok_or("una cifra de la contabilidad de tracto no es un entero")
+            .ok_or_else(|| reason("una cifra de la contabilidad de tracto no es un entero"))
     };
     let truth_bound = read("truth_tract_bases_bound")?;
     let vcf_bound = read("vcf_tract_bases_bound")?;
@@ -5886,13 +5919,15 @@ fn validate_repeat_tract_output(value: &Value) -> Result<(), &'static str> {
     let vcf = read("realized_vcf_tract_bases")?;
     let total = read("realized_total_tract_bases")?;
     if truth_bound.checked_add(vcf_bound) != Some(total_bound) {
-        return Err("la cota total no es la suma de sus dos términos");
+        return Err(reason("la cota total no es la suma de sus dos términos"));
     }
     if truth.checked_add(vcf) != Some(total) {
-        return Err("el total realizado no es la suma de sus dos términos");
+        return Err(reason(
+            "el total realizado no es la suma de sus dos términos",
+        ));
     }
     if truth > truth_bound || vcf > vcf_bound {
-        return Err("las bases de tracto realizadas superan su cota");
+        return Err(reason("las bases de tracto realizadas superan su cota"));
     }
     Ok(())
 }
@@ -5900,19 +5935,21 @@ fn validate_repeat_tract_output(value: &Value) -> Result<(), &'static str> {
 fn validate_repeat_admission(value: &Value) -> Result<(), &'static str> {
     let admission = value
         .as_object()
-        .ok_or("unos mínimos de admisión no son un objeto")?;
+        .ok_or_else(|| reason("unos mínimos de admisión no son un objeto"))?;
     const FIELDS: [&str; 2] = ["min_purity", "min_longest_run_units"];
     if admission.len() != FIELDS.len()
         || admission.keys().any(|key| !FIELDS.contains(&key.as_str()))
     {
-        return Err("unos mínimos de admisión no tienen exactamente sus campos");
+        return Err(reason(
+            "unos mínimos de admisión no tienen exactamente sus campos",
+        ));
     }
     let purity = admission
         .get("min_purity")
         .and_then(Value::as_f64)
-        .ok_or("la pureza mínima no es un decimal")?;
+        .ok_or_else(|| reason("la pureza mínima no es un decimal"))?;
     if !purity.is_finite() || !(0.0..=1.0).contains(&purity) {
-        return Err("la pureza mínima no es finita ni pertenece a [0,1]");
+        return Err(reason("la pureza mínima no es finita ni pertenece a [0,1]"));
     }
     if admission
         .get("min_longest_run_units")
@@ -5920,7 +5957,7 @@ fn validate_repeat_admission(value: &Value) -> Result<(), &'static str> {
         .unwrap_or(0)
         == 0
     {
-        return Err("la tirada mínima no es un entero positivo");
+        return Err(reason("la tirada mínima no es un entero positivo"));
     }
     Ok(())
 }
@@ -5929,7 +5966,7 @@ fn validate_repeat_admission(value: &Value) -> Result<(), &'static str> {
 fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str> {
     let allele = value
         .as_object()
-        .ok_or("un alelo publicado no es un objeto")?;
+        .ok_or_else(|| reason("un alelo publicado no es un objeto"))?;
     const FIELDS: [&str; 15] = [
         "sequence",
         "origin",
@@ -5948,68 +5985,76 @@ fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str
         "interruptions",
     ];
     if allele.len() != FIELDS.len() || allele.keys().any(|key| !FIELDS.contains(&key.as_str())) {
-        return Err("un alelo publicado no tiene exactamente sus campos");
+        return Err(reason("un alelo publicado no tiene exactamente sus campos"));
     }
     if !allele
         .get("sequence")
         .and_then(Value::as_str)
         .is_some_and(|sequence| !sequence.is_empty() && sequence.bytes().all(is_repeat_allele_base))
     {
-        return Err("la secuencia del alelo no son bases");
+        return Err(reason("la secuencia del alelo no son bases"));
     }
     if !matches!(
         allele.get("origin").and_then(Value::as_str),
         Some("declared" | "generated")
     ) {
-        return Err("el origen del alelo no es declarado ni generado");
+        return Err(reason("el origen del alelo no es declarado ni generado"));
     }
     for field in ["declared_frequency", "effective_frequency", "purity"] {
         let value = allele
             .get(field)
             .and_then(Value::as_f64)
-            .ok_or("una proporción del alelo no es un decimal")?;
+            .ok_or_else(|| reason("una proporción del alelo no es un decimal"))?;
         if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-            return Err("una proporción del alelo no es finita ni pertenece a [0,1]");
+            return Err(reason(
+                "una proporción del alelo no es finita ni pertenece a [0,1]",
+            ));
         }
     }
     let units = allele
         .get("units")
         .and_then(Value::as_f64)
-        .ok_or("las unidades del alelo no son un decimal")?;
+        .ok_or_else(|| reason("las unidades del alelo no son un decimal"))?;
     if !units.is_finite() || units <= 0.0 {
-        return Err("las unidades del alelo no son un decimal positivo");
+        return Err(reason("las unidades del alelo no son un decimal positivo"));
     }
     if allele
         .get("longest_run_units")
         .and_then(Value::as_u64)
         .is_none()
     {
-        return Err("la tirada más larga del alelo no es un entero");
+        return Err(reason("la tirada más larga del alelo no es un entero"));
     }
     let copies = allele
         .get("realized_copies")
         .and_then(Value::as_u64)
-        .ok_or("las copias realizadas del alelo no son un entero")?;
+        .ok_or_else(|| reason("las copias realizadas del alelo no son un entero"))?;
     if copies > drawn {
-        return Err("un alelo recibió más copias que las sorteadas del locus");
+        return Err(reason(
+            "un alelo recibió más copias que las sorteadas del locus",
+        ));
     }
     // **La misma comparación que el documento vecino**: bit a bit contra
     // copias realizadas entre copias sorteadas. Sin sorteo no hay proporción, y
     // publicar un cero afirmaría una medida que no se hizo.
     let realized = allele
         .get("realized_frequency")
-        .ok_or("falta la frecuencia realizada del alelo")?;
+        .ok_or_else(|| reason("falta la frecuencia realizada del alelo"))?;
     if drawn == 0 {
         if !realized.is_null() {
-            return Err("sin copias sorteadas la frecuencia realizada tiene que ser nula");
+            return Err(reason(
+                "sin copias sorteadas la frecuencia realizada tiene que ser nula",
+            ));
         }
     } else {
         let realized = realized
             .as_f64()
-            .ok_or("la frecuencia realizada del alelo no es un decimal")?;
+            .ok_or_else(|| reason("la frecuencia realizada del alelo no es un decimal"))?;
         let expected = copies as f64 / drawn as f64;
         if realized.to_bits() != expected.to_bits() {
-            return Err("la frecuencia realizada no es las copias realizadas entre las sorteadas");
+            return Err(reason(
+                "la frecuencia realizada no es las copias realizadas entre las sorteadas",
+            ));
         }
     }
     let count = allele
@@ -6017,42 +6062,48 @@ fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str
         .and_then(Value::as_u64)
         .filter(|count| *count >= 1)
         .and_then(|count| usize::try_from(count).ok())
-        .ok_or("el recuento de secuencias repetidas no es un entero positivo")?;
+        .ok_or_else(|| reason("el recuento de secuencias repetidas no es un entero positivo"))?;
     let motifs = repeat_motif_list(allele.get("block_motifs"))?;
     let motif_lengths = repeat_u64_list(allele.get("block_motif_lengths"))?;
     let bases = repeat_u64_list(allele.get("block_bases"))?;
     let unit_counts = allele
         .get("block_unit_counts")
         .and_then(Value::as_array)
-        .ok_or("las copias por bloque no son una lista")?
+        .ok_or_else(|| reason("las copias por bloque no son una lista"))?
         .iter()
         .map(|value| value.as_f64())
         .collect::<Option<Vec<_>>>()
-        .ok_or("una cifra de copias por bloque no es un decimal")?;
+        .ok_or_else(|| reason("una cifra de copias por bloque no es un decimal"))?;
     if motifs.len() != count
         || motif_lengths.len() != count
         || bases.len() != count
         || unit_counts.len() != count
     {
-        return Err("las listas de bloque no miden lo que el recuento declara");
+        return Err(reason(
+            "las listas de bloque no miden lo que el recuento declara",
+        ));
     }
     let mut total = 0_u64;
     for index in 0..count {
         if motifs[index].len() as u64 != motif_lengths[index] {
-            return Err("la longitud de un motivo de bloque no es la de su secuencia");
+            return Err(reason(
+                "la longitud de un motivo de bloque no es la de su secuencia",
+            ));
         }
         if bases[index] == 0 {
-            return Err("un bloque sin bases no es un bloque");
+            return Err(reason("un bloque sin bases no es un bloque"));
         }
         let derived = bases[index] as f64 / motif_lengths[index] as f64;
         if !unit_counts[index].is_finite()
             || (unit_counts[index] - derived).abs() > 1e-9 * derived.max(1.0)
         {
-            return Err("las copias de un bloque no son sus bases entre la longitud del motivo");
+            return Err(reason(
+                "las copias de un bloque no son sus bases entre la longitud del motivo",
+            ));
         }
         total = total
             .checked_add(bases[index])
-            .ok_or("las bases de los bloques desbordan")?;
+            .ok_or_else(|| reason("las bases de los bloques desbordan"))?;
     }
     if total
         != allele
@@ -6061,23 +6112,27 @@ fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str
             .unwrap_or_default()
             .len() as u64
     {
-        return Err("las bases de los bloques no suman las de la secuencia del alelo");
+        return Err(reason(
+            "las bases de los bloques no suman las de la secuencia del alelo",
+        ));
     }
     for interruption in allele
         .get("interruptions")
         .and_then(Value::as_array)
-        .ok_or("las interrupciones del alelo no son una lista")?
+        .ok_or_else(|| reason("las interrupciones del alelo no son una lista"))?
     {
         let interruption = interruption
             .as_object()
-            .ok_or("una interrupción publicada no es un objeto")?;
+            .ok_or_else(|| reason("una interrupción publicada no es un objeto"))?;
         const INTERRUPTION_FIELDS: [&str; 2] = ["offset", "length"];
         if interruption.len() != INTERRUPTION_FIELDS.len()
             || interruption
                 .keys()
                 .any(|key| !INTERRUPTION_FIELDS.contains(&key.as_str()))
         {
-            return Err("una interrupción publicada no tiene exactamente sus campos");
+            return Err(reason(
+                "una interrupción publicada no tiene exactamente sus campos",
+            ));
         }
         if interruption.get("offset").and_then(Value::as_u64).is_none()
             || interruption
@@ -6086,7 +6141,9 @@ fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str
                 .unwrap_or(0)
                 == 0
         {
-            return Err("una interrupción publicada no tiene desplazamiento y longitud válidos");
+            return Err(reason(
+                "una interrupción publicada no tiene desplazamiento y longitud válidos",
+            ));
         }
     }
     Ok(copies)
@@ -6096,16 +6153,16 @@ fn repeat_motif_list(value: Option<&Value>) -> Result<Vec<&str>, &'static str> {
     let motifs = value
         .and_then(Value::as_array)
         .filter(|motifs| !motifs.is_empty())
-        .ok_or("una lista de motivos está ausente o vacía")?
+        .ok_or_else(|| reason("una lista de motivos está ausente o vacía"))?
         .iter()
         .map(Value::as_str)
         .collect::<Option<Vec<_>>>()
-        .ok_or("un motivo publicado no es texto")?;
+        .ok_or_else(|| reason("un motivo publicado no es texto"))?;
     if motifs
         .iter()
         .any(|motif| motif.is_empty() || !motif.bytes().all(is_repeat_motif_base))
     {
-        return Err("un motivo publicado no son bases A, C, G o T");
+        return Err(reason("un motivo publicado no son bases A, C, G o T"));
     }
     Ok(motifs)
 }
@@ -6114,11 +6171,11 @@ fn repeat_u64_list(value: Option<&Value>) -> Result<Vec<u64>, &'static str> {
     value
         .and_then(Value::as_array)
         .filter(|values| !values.is_empty())
-        .ok_or("una lista de enteros está ausente o vacía")?
+        .ok_or_else(|| reason("una lista de enteros está ausente o vacía"))?
         .iter()
         .map(Value::as_u64)
         .collect::<Option<Vec<_>>>()
-        .ok_or("un entero publicado no lo es")
+        .ok_or_else(|| reason("un entero publicado no lo es"))
 }
 
 const fn is_repeat_motif_base(base: u8) -> bool {
@@ -6216,7 +6273,7 @@ fn parse_general_manifest_bytes_unretagged(
             repeat_section_error(path, "la versión 6 exige la sección repeat_loci")
         })?;
         validate_repeat_loci_section(section)
-            .map_err(|detail| repeat_section_error(path, detail))?;
+            .map_err(|detail| repeat_section_error_from_reason(path, detail))?;
     }
     required_non_empty_text(object, "execution_id", path)?;
     let state = match object.get("state").and_then(Value::as_str) {
@@ -6978,10 +7035,10 @@ fn validate_manifest_population_snvs(
         object.get("normalization_audit"),
         "population_snvs.normalization_audit inválida",
     )
-    .map_err(|detail| manifest_error(path, detail))?;
+    .map_err(|detail| manifest_error_from_reason(path, detail))?;
     if let Some(statistics) = object.get("initial_population_statistics") {
         validate_initial_population_statistics(statistics)
-            .map_err(|detail| manifest_error(path, detail))?;
+            .map_err(|detail| manifest_error_from_reason(path, detail))?;
     }
     match (mode, object.get("metadata_artifact_id")) {
         ("reuse", None | Some(Value::Null)) => Ok(None),
@@ -6999,28 +7056,28 @@ fn validate_manifest_population_snvs(
 fn validate_initial_population_statistics(value: &Value) -> Result<(), &'static str> {
     let object = value
         .as_object()
-        .ok_or("estadísticas iniciales inválidas")?;
+        .ok_or_else(|| reason("estadísticas iniciales inválidas"))?;
     const FIELDS: [&str; 4] = ["kind", "version", "provenance", "populations"];
     if object.len() != FIELDS.len() || object.keys().any(|field| !FIELDS.contains(&field.as_str()))
     {
-        return Err("estadísticas iniciales inválidas");
+        return Err(reason("estadísticas iniciales inválidas"));
     }
     if object.get("kind").and_then(Value::as_str) != Some("initial_population_statistics")
         || object.get("version").and_then(Value::as_str) != Some("1")
     {
-        return Err("estadísticas iniciales inválidas");
+        return Err(reason("estadísticas iniciales inválidas"));
     }
     let provenance = object
         .get("provenance")
         .and_then(Value::as_object)
-        .ok_or("procedencia de estadísticas iniciales inválida")?;
+        .ok_or_else(|| reason("procedencia de estadísticas iniciales inválida"))?;
     validate_initial_population_statistics_provenance(provenance)?;
     let populations = object
         .get("populations")
         .and_then(Value::as_array)
-        .ok_or("estadísticas iniciales inválidas")?;
+        .ok_or_else(|| reason("estadísticas iniciales inválidas"))?;
     if populations.is_empty() {
-        return Err("estadísticas iniciales sin poblaciones");
+        return Err(reason("estadísticas iniciales sin poblaciones"));
     }
     let mut population_ids = BTreeSet::new();
     for population in populations {
@@ -7028,9 +7085,9 @@ fn validate_initial_population_statistics(value: &Value) -> Result<(), &'static 
         let population_id = population
             .get("population_id")
             .and_then(Value::as_str)
-            .ok_or("población estadística inválida")?;
+            .ok_or_else(|| reason("población estadística inválida"))?;
         if !population_ids.insert(population_id) {
-            return Err("población estadística repetida");
+            return Err(reason("población estadística repetida"));
         }
     }
     Ok(())
@@ -7052,7 +7109,7 @@ fn validate_initial_population_statistics_provenance(
             .keys()
             .any(|field| !FIELDS.contains(&field.as_str()))
     {
-        return Err("procedencia de estadísticas iniciales inválida");
+        return Err(reason("procedencia de estadísticas iniciales inválida"));
     }
     let reference_id = provenance
         .get("matrix_reference_id")
@@ -7066,28 +7123,28 @@ fn validate_initial_population_statistics_provenance(
             .and_then(Value::as_str)
             != Some("missing_by_deletion_excluded_from_allele_frequency_denominator_v1")
     {
-        return Err("procedencia de estadísticas iniciales inválida");
+        return Err(reason("procedencia de estadísticas iniciales inválida"));
     }
     let algorithms = provenance
         .get("genotype_algorithms")
         .and_then(Value::as_array)
-        .ok_or("algoritmos de genotipo inválidos")?;
+        .ok_or_else(|| reason("algoritmos de genotipo inválidos"))?;
     if algorithms.len() != 3
         || algorithms[0].as_str() != Some("hwe-composition-v1")
         || algorithms[1].as_str() != Some("f-diploid-genotype-v1")
         || algorithms[2].as_str() != Some("phase-permutation-v1")
     {
-        return Err("algoritmos de genotipo inválidos");
+        return Err(reason("algoritmos de genotipo inválidos"));
     }
     let constraints = provenance
         .get("explicit_snp_constraints")
         .and_then(Value::as_array)
-        .ok_or("restricciones SNV explícitas inválidas")?;
+        .ok_or_else(|| reason("restricciones SNV explícitas inválidas"))?;
     let mut constraint_ids = BTreeSet::new();
     for constraint in constraints {
         let constraint = constraint
             .as_object()
-            .ok_or("restricción SNV explícita inválida")?;
+            .ok_or_else(|| reason("restricción SNV explícita inválida"))?;
         const CONSTRAINT_FIELDS: [&str; 8] = [
             "population_id",
             "individual_id",
@@ -7127,7 +7184,7 @@ fn validate_initial_population_statistics_provenance(
                 .get("incompatible")
                 .is_some_and(Value::is_boolean)
         {
-            return Err("restricción SNV explícita inválida");
+            return Err(reason("restricción SNV explícita inválida"));
         }
         let key = (
             constraint["population_id"].as_str().unwrap_or_default(),
@@ -7135,14 +7192,16 @@ fn validate_initial_population_statistics_provenance(
             constraint["event_id"].as_str().unwrap_or_default(),
         );
         if !constraint_ids.insert(key) {
-            return Err("restricción SNV explícita repetida");
+            return Err(reason("restricción SNV explícita repetida"));
         }
     }
     Ok(())
 }
 
 fn validate_initial_population_statistics_population(value: &Value) -> Result<(), &'static str> {
-    let population = value.as_object().ok_or("población estadística inválida")?;
+    let population = value
+        .as_object()
+        .ok_or_else(|| reason("población estadística inválida"))?;
     const FIELDS: [&str; 5] = [
         "population_id",
         "genotype_model",
@@ -7153,7 +7212,7 @@ fn validate_initial_population_statistics_population(value: &Value) -> Result<()
     if population.len() != FIELDS.len()
         || population.keys().any(|key| !FIELDS.contains(&key.as_str()))
     {
-        return Err("población estadística inválida");
+        return Err(reason("población estadística inválida"));
     }
     let population_id = population
         .get("population_id")
@@ -7166,19 +7225,19 @@ fn validate_initial_population_statistics_population(value: &Value) -> Result<()
         || individual_count.is_none()
         || !matches!(ploidy, Some(1..=10))
     {
-        return Err("población estadística inválida");
+        return Err(reason("población estadística inválida"));
     }
     validate_initial_population_statistics_model(
         population
             .get("genotype_model")
             .and_then(Value::as_object)
-            .ok_or("modelo genotípico estadístico inválido")?,
+            .ok_or_else(|| reason("modelo genotípico estadístico inválido"))?,
         ploidy.unwrap_or_default(),
     )?;
     let loci = population
         .get("loci")
         .and_then(Value::as_array)
-        .ok_or("loci estadísticos inválidos")?;
+        .ok_or_else(|| reason("loci estadísticos inválidos"))?;
     let mut locus_keys = BTreeSet::new();
     for locus in loci {
         validate_initial_population_statistics_locus(
@@ -7198,7 +7257,7 @@ fn validate_initial_population_statistics_population(value: &Value) -> Result<()
             locus.get("ref").and_then(Value::as_str).unwrap_or_default(),
         );
         if !locus_keys.insert(key) {
-            return Err("locus estadístico repetido");
+            return Err(reason("locus estadístico repetido"));
         }
     }
     Ok(())
@@ -7221,7 +7280,7 @@ fn validate_initial_population_statistics_model(
         {
             Ok(())
         }
-        _ => Err("modelo genotípico estadístico inválido"),
+        _ => Err(reason("modelo genotípico estadístico inválido")),
     }
 }
 
@@ -7230,7 +7289,9 @@ fn validate_initial_population_statistics_locus(
     individual_count: u64,
     ploidy: u64,
 ) -> Result<(), &'static str> {
-    let locus = value.as_object().ok_or("locus estadístico inválido")?;
+    let locus = value
+        .as_object()
+        .ok_or_else(|| reason("locus estadístico inválido"))?;
     const FIELDS: [&str; 9] = [
         "contig",
         "position_1based",
@@ -7243,7 +7304,7 @@ fn validate_initial_population_statistics_locus(
         "genotypes",
     ];
     if locus.len() != FIELDS.len() || locus.keys().any(|key| !FIELDS.contains(&key.as_str())) {
-        return Err("locus estadístico inválido");
+        return Err(reason("locus estadístico inválido"));
     }
     if !locus
         .get("contig")
@@ -7258,41 +7319,43 @@ fn validate_initial_population_statistics_locus(
             .and_then(Value::as_str)
             .is_some_and(is_canonical_base_text)
     {
-        return Err("locus estadístico inválido");
+        return Err(reason("locus estadístico inválido"));
     }
     let total = locus
         .get("total_copies")
         .and_then(Value::as_u64)
-        .ok_or("total de copias inválido")?;
+        .ok_or_else(|| reason("total de copias inválido"))?;
     let observed = locus
         .get("observed_copies")
         .and_then(Value::as_u64)
-        .ok_or("copias observadas inválidas")?;
+        .ok_or_else(|| reason("copias observadas inválidas"))?;
     let missing = locus
         .get("missing_by_deletion")
         .and_then(Value::as_u64)
-        .ok_or("copias ausentes inválidas")?;
+        .ok_or_else(|| reason("copias ausentes inválidas"))?;
     if total
         != individual_count
             .checked_mul(ploidy)
-            .ok_or("total de copias inválido")?
+            .ok_or_else(|| reason("total de copias inválido"))?
         || observed.checked_add(missing) != Some(total)
     {
-        return Err("las copias observadas y ausentes no suman el total");
+        return Err(reason("las copias observadas y ausentes no suman el total"));
     }
     let alleles = locus
         .get("alleles")
         .and_then(Value::as_array)
-        .ok_or("alelos estadísticos inválidos")?;
+        .ok_or_else(|| reason("alelos estadísticos inválidos"))?;
     if alleles.len() < 2 {
-        return Err("alelos estadísticos inválidos");
+        return Err(reason("alelos estadísticos inválidos"));
     }
     let reference = locus.get("ref").and_then(Value::as_str).unwrap_or_default();
     let mut allele_texts = BTreeSet::new();
     let mut count_sum = 0_u64;
     let mut requested_sum = 0.0;
     for (index, allele) in alleles.iter().enumerate() {
-        let allele = allele.as_object().ok_or("alelo estadístico inválido")?;
+        let allele = allele
+            .as_object()
+            .ok_or_else(|| reason("alelo estadístico inválido"))?;
         const REF_FIELDS: [&str; 5] = [
             "allele",
             "kind",
@@ -7313,20 +7376,22 @@ fn validate_initial_population_statistics_locus(
         let fields = match kind {
             Some("ref") if index == 0 => &REF_FIELDS[..],
             Some("alt") if index > 0 => &ALT_FIELDS[..],
-            _ => return Err("clase u orden de alelo estadístico inválido"),
+            _ => return Err(reason("clase u orden de alelo estadístico inválido")),
         };
         if allele.len() != fields.len()
             || allele.keys().any(|field| !fields.contains(&field.as_str()))
         {
-            return Err("alelo estadístico inválido");
+            return Err(reason("alelo estadístico inválido"));
         }
         let allele_text = allele
             .get("allele")
             .and_then(Value::as_str)
             .filter(|value| is_canonical_base_text(value))
-            .ok_or("alelo estadístico inválido")?;
+            .ok_or_else(|| reason("alelo estadístico inválido"))?;
         if !allele_texts.insert(allele_text) || (index == 0 && allele_text != reference) {
-            return Err("alelo estadístico duplicado o referencia incoherente");
+            return Err(reason(
+                "alelo estadístico duplicado o referencia incoherente",
+            ));
         }
         if index > 0
             && (!allele
@@ -7335,26 +7400,26 @@ fn validate_initial_population_statistics_locus(
                 .is_some_and(|value| !value.is_empty())
                 || allele.get("source_id").and_then(Value::as_str).is_none())
         {
-            return Err("procedencia de alelo alternativo inválida");
+            return Err(reason("procedencia de alelo alternativo inválida"));
         }
         let count = allele
             .get("realized_count")
             .and_then(Value::as_u64)
-            .ok_or("recuento alélico inválido")?;
+            .ok_or_else(|| reason("recuento alélico inválido"))?;
         let requested = allele
             .get("requested_frequency")
             .and_then(Value::as_f64)
-            .ok_or("frecuencia objetivo inválida")?;
+            .ok_or_else(|| reason("frecuencia objetivo inválida"))?;
         let realized = allele
             .get("realized_frequency")
             .and_then(Value::as_f64)
-            .ok_or("frecuencia realizada inválida")?;
+            .ok_or_else(|| reason("frecuencia realizada inválida"))?;
         if !requested.is_finite()
             || !realized.is_finite()
             || !(0.0..=1.0).contains(&requested)
             || !(0.0..=1.0).contains(&realized)
         {
-            return Err("frecuencia estadística no finita o fuera de rango");
+            return Err(reason("frecuencia estadística no finita o fuera de rango"));
         }
         let expected_realized = if observed == 0 {
             0.0
@@ -7362,32 +7427,36 @@ fn validate_initial_population_statistics_locus(
             count as f64 / observed as f64
         };
         if realized.to_bits() != expected_realized.to_bits() {
-            return Err("frecuencia realizada no coincide con recuento y denominador");
+            return Err(reason(
+                "frecuencia realizada no coincide con recuento y denominador",
+            ));
         }
         requested_sum += requested;
         count_sum = count_sum
             .checked_add(count)
-            .ok_or("recuento alélico desbordado")?;
+            .ok_or_else(|| reason("recuento alélico desbordado"))?;
     }
     if count_sum != observed {
-        return Err("los recuentos alélicos no suman las copias observadas");
+        return Err(reason(
+            "los recuentos alélicos no suman las copias observadas",
+        ));
     }
     if !requested_sum.is_finite() || (requested_sum - 1.0).abs() > 1e-12 {
-        return Err("las frecuencias objetivo no suman uno");
+        return Err(reason("las frecuencias objetivo no suman uno"));
     }
     let complete = locus
         .get("complete_genotype_observations")
         .and_then(Value::as_u64)
-        .ok_or("observaciones genotípicas inválidas")?;
+        .ok_or_else(|| reason("observaciones genotípicas inválidas"))?;
     if complete > individual_count {
-        return Err("observaciones genotípicas fuera de rango");
+        return Err(reason("observaciones genotípicas fuera de rango"));
     }
     let genotypes = locus
         .get("genotypes")
         .and_then(Value::as_array)
-        .ok_or("genotipos estadísticos inválidos")?;
+        .ok_or_else(|| reason("genotipos estadísticos inválidos"))?;
     if genotypes.is_empty() {
-        return Err("genotipos estadísticos inválidos");
+        return Err(reason("genotipos estadísticos inválidos"));
     }
     let mut genotype_keys = BTreeSet::new();
     let mut expected_probability_sum = 0.0;
@@ -7395,7 +7464,7 @@ fn validate_initial_population_statistics_locus(
     for genotype in genotypes {
         let genotype = genotype
             .as_object()
-            .ok_or("genotipo estadístico inválido")?;
+            .ok_or_else(|| reason("genotipo estadístico inválido"))?;
         const GENOTYPE_FIELDS: [&str; 4] = [
             "allele_dosages",
             "expected_probability",
@@ -7407,35 +7476,35 @@ fn validate_initial_population_statistics_locus(
                 .keys()
                 .any(|field| !GENOTYPE_FIELDS.contains(&field.as_str()))
         {
-            return Err("genotipo estadístico inválido");
+            return Err(reason("genotipo estadístico inválido"));
         }
         let dosages = genotype
             .get("allele_dosages")
             .and_then(Value::as_array)
-            .ok_or("dosis genotípicas inválidas")?;
+            .ok_or_else(|| reason("dosis genotípicas inválidas"))?;
         let dosages = dosages
             .iter()
             .map(Value::as_u64)
             .collect::<Option<Vec<_>>>()
-            .ok_or("dosis genotípicas inválidas")?;
+            .ok_or_else(|| reason("dosis genotípicas inválidas"))?;
         let dosage_sum = dosages.iter().try_fold(0_u64, |sum, dosage| {
             sum.checked_add(*dosage)
-                .ok_or("dosis genotípicas desbordadas")
+                .ok_or_else(|| reason("dosis genotípicas desbordadas"))
         })?;
         if dosages.len() != alleles.len() || dosage_sum != ploidy || !genotype_keys.insert(dosages)
         {
-            return Err("dosis genotípicas inválidas o repetidas");
+            return Err(reason("dosis genotípicas inválidas o repetidas"));
         }
         let probability = genotype
             .get("expected_probability")
             .and_then(Value::as_f64)
             .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
-            .ok_or("probabilidad genotípica inválida")?;
+            .ok_or_else(|| reason("probabilidad genotípica inválida"))?;
         genotype
             .get("expected_count")
             .and_then(Value::as_f64)
             .filter(|value| value.is_finite() && *value >= 0.0)
-            .ok_or("recuento genotípico esperado inválido")?;
+            .ok_or_else(|| reason("recuento genotípico esperado inválido"))?;
         // El recuento esperado se conserva como una magnitud de salida. Su
         // correspondencia exacta con la probabilidad y la población se vuelve
         // a calcular desde TOML, semilla y matriz en la puerta física; aquí se
@@ -7444,17 +7513,17 @@ fn validate_initial_population_statistics_locus(
         let realized = genotype
             .get("realized_count")
             .and_then(Value::as_u64)
-            .ok_or("recuento genotípico realizado inválido")?;
+            .ok_or_else(|| reason("recuento genotípico realizado inválido"))?;
         expected_probability_sum += probability;
         realized_genotype_sum = realized_genotype_sum
             .checked_add(realized)
-            .ok_or("recuento genotípico realizado desbordado")?;
+            .ok_or_else(|| reason("recuento genotípico realizado desbordado"))?;
     }
     if !expected_probability_sum.is_finite() || (expected_probability_sum - 1.0).abs() > 1e-12 {
-        return Err("probabilidades genotípicas no suman uno");
+        return Err(reason("probabilidades genotípicas no suman uno"));
     }
     if realized_genotype_sum != complete {
-        return Err("recuentos genotípicos realizados incoherentes");
+        return Err(reason("recuentos genotípicos realizados incoherentes"));
     }
     Ok(())
 }
@@ -7476,10 +7545,12 @@ fn validate_serialized_normalization_audit(
     value: Option<&Value>,
     detail: &'static str,
 ) -> Result<(), &'static str> {
-    let groups = value.and_then(Value::as_array).ok_or(detail)?;
+    let groups = value
+        .and_then(Value::as_array)
+        .ok_or_else(|| reason(detail))?;
     let mut previous_group = None;
     for group in groups {
-        let group = group.as_object().ok_or(detail)?;
+        let group = group.as_object().ok_or_else(|| reason(detail))?;
         const GROUP_FIELDS: [&str; 14] = [
             "population_id",
             "contig",
@@ -7501,29 +7572,29 @@ fn validate_serialized_normalization_audit(
                 .keys()
                 .any(|field| !GROUP_FIELDS.contains(&field.as_str()))
         {
-            return Err(detail);
+            return Err(reason(detail));
         }
         let population = group
             .get("population_id")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
-            .ok_or(detail)?;
+            .ok_or_else(|| reason(detail))?;
         let contig = group
             .get("contig")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
-            .ok_or(detail)?;
+            .ok_or_else(|| reason(detail))?;
         let position = group
             .get("position")
             .and_then(Value::as_str)
             .and_then(|value| value.parse::<u64>().ok())
             .filter(|value| *value > 0)
-            .ok_or(detail)?;
+            .ok_or_else(|| reason(detail))?;
         let reference = group
             .get("ref")
             .and_then(Value::as_str)
             .and_then(single_canonical_base)
-            .ok_or(detail)?;
+            .ok_or_else(|| reason(detail))?;
         if group
             .get("tolerance")
             .and_then(Value::as_f64)
@@ -7556,24 +7627,24 @@ fn validate_serialized_normalization_audit(
                 Some("reference_remainder" | "normalized")
             )
         {
-            return Err(detail);
+            return Err(reason(detail));
         }
         let group_key = (population, contig, position, reference);
         if previous_group
             .as_ref()
             .is_some_and(|last| last >= &group_key)
         {
-            return Err(detail);
+            return Err(reason(detail));
         }
         previous_group = Some(group_key);
         let values = group
             .get("values")
             .and_then(Value::as_array)
             .filter(|values| !values.is_empty())
-            .ok_or(detail)?;
+            .ok_or_else(|| reason(detail))?;
         let mut previous_value = None;
         for value in values {
-            let value = value.as_object().ok_or(detail)?;
+            let value = value.as_object().ok_or_else(|| reason(detail))?;
             const VALUE_FIELDS: [&str; 5] =
                 ["alt", "variant_id", "source_id", "original", "effective"];
             if value.len() != VALUE_FIELDS.len()
@@ -7581,23 +7652,23 @@ fn validate_serialized_normalization_audit(
                     .keys()
                     .any(|field| !VALUE_FIELDS.contains(&field.as_str()))
             {
-                return Err(detail);
+                return Err(reason(detail));
             }
             let alternate = value
                 .get("alt")
                 .and_then(Value::as_str)
                 .and_then(single_canonical_base)
                 .filter(|alternate| *alternate != reference)
-                .ok_or(detail)?;
+                .ok_or_else(|| reason(detail))?;
             let variant_id = value
                 .get("variant_id")
                 .and_then(Value::as_str)
                 .filter(|value| !value.is_empty())
-                .ok_or(detail)?;
+                .ok_or_else(|| reason(detail))?;
             let source_id = value
                 .get("source_id")
                 .and_then(Value::as_str)
-                .ok_or(detail)?;
+                .ok_or_else(|| reason(detail))?;
             if ["original", "effective"].iter().any(|field| {
                 value
                     .get(*field)
@@ -7605,14 +7676,14 @@ fn validate_serialized_normalization_audit(
                     .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
                     .is_none()
             }) {
-                return Err(detail);
+                return Err(reason(detail));
             }
             let value_key = (alternate, variant_id, source_id);
             if previous_value
                 .as_ref()
                 .is_some_and(|last| last >= &value_key)
             {
-                return Err(detail);
+                return Err(reason(detail));
             }
             previous_value = Some(value_key);
         }
@@ -7676,7 +7747,7 @@ fn validate_effective_authorizations(
         ));
     }
     validate_authorizations_value(effective_value)
-        .map_err(|detail| effective_error(effective_path, detail))
+        .map_err(|detail| effective_error_from_reason(effective_path, detail))
 }
 
 fn validate_effective_vcf_output(
@@ -8932,11 +9003,13 @@ fn validate_effective_technical_event(
 
 fn validate_manifest_authorizations(value: Option<&Value>, path: &Path) -> Result<(), Diagnostic> {
     let value = value.ok_or_else(|| manifest_error(path, "falta authorizations"))?;
-    validate_authorizations_value(value).map_err(|detail| manifest_error(path, detail))
+    validate_authorizations_value(value).map_err(|detail| manifest_error_from_reason(path, detail))
 }
 
 fn validate_authorizations_value(value: &Value) -> Result<(), &'static str> {
-    let object = value.as_object().ok_or("authorizations inválido")?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| reason("authorizations inválido"))?;
     if object.len() != 2
         || !matches!(object.get("allow_empty_snv_matrix"), Some(Value::Bool(_)))
         || !matches!(
@@ -8944,7 +9017,7 @@ fn validate_authorizations_value(value: &Value) -> Result<(), &'static str> {
             Some(Value::Bool(_))
         )
     {
-        return Err("authorizations inválido");
+        return Err(reason("authorizations inválido"));
     }
     Ok(())
 }
@@ -10487,6 +10560,16 @@ fn manifest_error_for_schema(
     detail: impl Into<String>,
 ) -> Diagnostic {
     crate::guard_trace::record();
+    manifest_diagnostic(path, schema, detail)
+}
+
+/// El diagnóstico de un rechazo del manifiesto general, **sin anotar nada**.
+///
+/// Lo construyen [`manifest_error_for_schema`], que sí anota el punto de
+/// rechazo, y los envoltorios que reciben un motivo ya anotado por
+/// [`reason`]: ahí el rechazo nació en otra línea, y anotar también la del
+/// envoltorio contaría como punto de rechazo una línea que no decide nada.
+fn manifest_diagnostic(path: &Path, schema: &'static str, detail: impl Into<String>) -> Diagnostic {
     Diagnostic::format(
         "GPS-FMT-006",
         "Un documento JSON producido no satisface su esquema publicado.",
@@ -10514,6 +10597,20 @@ fn effective_error_for_schema(
     detail: impl Into<String>,
 ) -> Diagnostic {
     crate::guard_trace::record();
+    effective_diagnostic(path, schema, detail)
+}
+
+/// El diagnóstico de un rechazo de la configuración efectiva, **sin anotar nada**.
+///
+/// Lo construyen [`effective_error_for_schema`], que sí anota el punto de
+/// rechazo, y los envoltorios que reciben un motivo ya anotado por
+/// [`reason`]: ahí el rechazo nació en otra línea, y anotar también la del
+/// envoltorio contaría como punto de rechazo una línea que no decide nada.
+fn effective_diagnostic(
+    path: &Path,
+    schema: &'static str,
+    detail: impl Into<String>,
+) -> Diagnostic {
     Diagnostic::format(
         "GPS-FMT-006",
         "Un documento JSON producido no satisface su esquema publicado.",
@@ -10523,8 +10620,51 @@ fn effective_error_for_schema(
     .with("detail", detail.into())
 }
 
+/// El motivo de un rechazo que viaja como **texto** hasta que un envoltorio lo
+/// convierte en diagnóstico.
+///
+/// Los validadores de este módulo que devuelven `Result<_, &'static str>` o
+/// `Result<_, String>` no construyen un [`Diagnostic`]: lo hace quien los llama,
+/// con **una sola** llamada a [`manifest_error`] o [`effective_error`] que
+/// recoge todos sus rechazos. Para la puerta de cobertura de guardas
+/// ([`crate::guard_trace`]) eran entonces un único punto de rechazo, y bastaba
+/// con que se disparase uno para dar por ejercitados los demás.
+///
+/// Cada rechazo de texto se escribe ahora `Err(reason("..."))`. `#[track_caller]`
+/// hace que se anote **la línea del rechazo**, no esta; el texto no cambia ni
+/// un byte. Hay que llamarla **solo en la rama que rechaza**: por eso se usa
+/// `ok_or_else(|| reason(..))` y no `ok_or(reason(..))`, que anotaría siempre.
+#[track_caller]
+fn reason<T>(detail: T) -> T {
+    crate::guard_trace::record();
+    detail
+}
+
+/// [`manifest_error`] para un motivo que ya anotó [`reason`].
+fn manifest_error_from_reason(path: &Path, detail: &str) -> Diagnostic {
+    manifest_diagnostic(path, "manifest-general-v4.schema.json", detail)
+}
+
+/// [`effective_error`] para un motivo que ya anotó [`reason`].
+fn effective_error_from_reason(path: &Path, detail: &str) -> Diagnostic {
+    effective_diagnostic(path, "effective-config-v4.schema.json", detail)
+}
+
 fn json_error(error: serde_json::Error) -> Diagnostic {
     Diagnostic::internal_invariant("results", format!("JSON serialization failed: {error}"))
+}
+
+/// Constructora del rechazo `GPS-IO-002`: un artefacto publicado no tiene el
+/// tamaño o el SHA-256 que su registro declara. Devuelve el diagnóstico base y
+/// el llamante le añade el contexto que le toca. Lleva `#[track_caller]` para
+/// que la puerta de guardas anote el rechazo real y no esta línea.
+#[track_caller]
+fn artifact_identity_error() -> Diagnostic {
+    crate::guard_trace::record();
+    Diagnostic::io(
+        "GPS-IO-002",
+        "El tamaño o SHA-256 de un artefacto no coincide con el valor esperado.",
+    )
 }
 
 fn io_error(path: &Path, operation: &str, error: std::io::Error) -> Diagnostic {

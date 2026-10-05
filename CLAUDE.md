@@ -244,12 +244,24 @@ comprobar que se midió con el entorno correcto.
   contra ese juez externo dejó de estar ignorada.
 
 **La puerta de cobertura de los jueces.** `check-guard-coverage.sh` mide, en
-los tres módulos que verifican que los datos publicados son correctos, cuántas
-de sus comprobaciones internas ejercita de verdad alguna prueba. Existe desde
-el 23 de septiembre de 2026, cuando una medición encontró que **dos tercios no
+los módulos que verifican que los datos publicados son correctos, cuántas de
+sus comprobaciones internas ejercita de verdad alguna prueba. Existe desde el
+23 de septiembre de 2026, cuando una medición encontró que **dos tercios no
 las ejercitaba nadie**: comprobaciones escritas, ejecutadas y jamás probadas,
 de modo que si una estuviera mal escrita nadie lo notaría y el simulador daría
 por bueno un fichero incorrecto.
+
+Vigila **cinco módulos**: el oráculo de aceptación de F5
+(`src/f5_oracle.rs`), el oráculo semántico del VCF
+(`src/vcf_semantic_validation.rs`), la auditoría de identidad y publicación
+(`src/f5_closure.rs`), el juez de los recursos publicados, de la configuración
+efectiva y del manifiesto general (`src/results.rs`) y el del manifiesto de
+evento (`src/event_manifest.rs`). Los dos últimos entraron el 29 de septiembre
+de 2026. **La autoridad es el array `judges` de
+`scripts/check-guard-coverage.sh`**, que fija cada módulo y los nombres de sus
+constructoras de error; la fila de `scripts/guard-coverage-baseline.tsv` es
+obligatoria pero no basta: una fila sin entrada en el array se ignora sin
+avisar. Para añadir un módulo hay que tocar los dos ficheros y este párrafo.
 
 Compara contra `scripts/guard-coverage-baseline.tsv`, que declara por juez
 cuántas comprobaciones tiene y cuántas pueden quedar sin ejercitar. **Se

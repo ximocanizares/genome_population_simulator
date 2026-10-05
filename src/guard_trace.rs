@@ -22,8 +22,11 @@
 //!
 //! ## Cómo funciona
 //!
-//! Los tres jueces canalizan todos sus rechazos por dos o tres funciones
-//! constructoras de error. Esas funciones llevan la anotación
+//! Los cinco módulos vigilados (la lista autoritativa es el array `judges` de
+//! `scripts/check-guard-coverage.sh`) canalizan sus rechazos por unas pocas
+//! funciones constructoras de error; en `src/results.rs`, además, por `reason`,
+//! que anota el motivo de los validadores que devuelven texto en vez de un
+//! diagnóstico. Esas funciones llevan la anotación
 //! [`track_caller`](https://doc.rust-lang.org/reference/attributes/codegen.html#the-track_caller-attribute),
 //! que hace que la función sepa desde qué fichero y línea la han llamado, y
 //! llaman a [`record`]. Con eso, una sola ejecución de la batería dice qué

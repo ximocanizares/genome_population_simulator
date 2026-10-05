@@ -28,7 +28,7 @@ documenta mejor.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026) |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | Abierta |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | Abierta |
@@ -51,6 +51,8 @@ documenta mejor.
 | DT-021 | El juez de la verdad no ancla los casos todo-REF, deja pasar un SNP quitado y clasifica mal una corrupción estructural | Media | 03/10/2026 | **Cerrada (04/10/2026)** |
 | DT-022 | El juez de los recursos publicados resuelve la ruta de una matriz reutilizada respecto al directorio de trabajo, no al paquete | Media | 04/10/2026 | **Cerrada (04/10/2026)** |
 | DT-023 | Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete | Baja | 04/10/2026 | **Cerrada por aceptación (04/10/2026)** |
+| DT-024 | `validate_published_resources` no termina con `lineages` = 18446744073709551615 en la configuración efectiva | Media | 04/10/2026 | Abierta |
+| DT-025 | `validate_published_resources` aborta con `capacity overflow` si `reference_units[1]` = 18446744073709551615 en la efectiva | Media | 04/10/2026 | Abierta |
 
 ---
 
@@ -104,23 +106,98 @@ empeora porque el código empeore, sino porque antes no se veía — el mismo
 efecto que cuando se enderezaron los trece rechazos construidos a mano del
 verificador del VCF y las guardas sin disparar subieron de 17 a 37.
 
-**Y 499 y 147 siguen siendo un mínimo, no el total**, porque queda la segunda
-familia, que es estructural:
+**Y 499 y 147 eran un mínimo, no el total**, porque quedaba la segunda
+familia, que es estructural, y que **se cerró el 04/10/2026**:
 
-- los validadores auxiliares que devuelven `Err("texto")` en vez de un
-  diagnóstico (catorce funciones que devuelven `Result<_, &'static str>`,
-  con setenta y seis `Err("texto")` a pelo, y además guardas con `ok_or("texto")`):
-  su texto lo convierte, en el llamante, **una sola llamada** a `effective_error` o
-  `repeat_section_error` así que decenas de guardas cuentan
-  como un único punto, que basta que se dispare una vez para darlas por
-  cubiertas.
+- los validadores auxiliares que devuelven un motivo como texto en vez de un
+  diagnóstico (quince funciones de `src/results.rs`: catorce con
+  `Result<_, &'static str>` y una, el rehacedor del abanico de deslizamiento,
+  con `Result<_, String>`, con ciento setenta rechazos entre `Err("texto")` y
+  `ok_or("texto")`): su texto lo convertía, en el llamante, **una sola
+  llamada** a `effective_error`, `manifest_error` o `repeat_section_error`, así
+  que decenas de guardas contaban como un único punto, y bastaba con que se
+  disparase uno para darlas por cubiertas. Había además un cierre `reject` y
+  `repeat_section_error` sin `#[track_caller]`, con el mismo efecto sobre
+  veinticinco rechazos del juez del abanico y nueve llamadores de
+  `repeat_section_error` (ocho en `validate_published_tract_output_accounting`
+  y uno en el lector del manifiesto).
+
+**Cómo se cerró.** Cada rechazo de texto se escribe ahora
+`Err(reason("..."))` (o `ok_or_else(|| reason("..."))`, nunca `ok_or(reason(..))`,
+que anotaría siempre). `reason` es una constructora genérica con
+`#[track_caller]` que anota la línea y devuelve el texto tal cual, de modo que
+**las firmas, los llamantes, los mensajes, los códigos y el orden de las
+comprobaciones no cambian**: se comprobó que la secuencia de literales de
+`src/results.rs` es idéntica salvo cuatro nombres de esquema nuevos que
+repiten los que ya usaban los envoltorios. Los envoltorios que reciben texto ya
+anotado construyen el diagnóstico sin anotar (`manifest_diagnostic` y
+`effective_diagnostic`) para no contar como rechazo una línea que no decide
+nada. Dos pruebas léxicas nuevas en `tests/guard_constructors.rs` impiden que
+vuelva a escribirse un `Err("literal")` sin `reason` y comprueban que su
+instrumento lo ve.
+
+**Cifras tras el cierre**, medidas con la puerta sobre el árbol final:
+
+| Módulo vigilado | Comprobaciones antes | Sin disparar antes | Comprobaciones hoy | Sin disparar hoy |
+|---|---|---|---|---|
+| `src/results.rs` | 541 | 423 | **739** | **586** |
+
+Los otros cuatro módulos no se mueven. **Suben las dos cifras y no es una
+regresión**: es lo que antes estaba oculto. Ejemplo medido: el validador de la
+sección `repeat_loci` del manifiesto tenía 24 rechazos y **ningún** punto
+propio —todos eran una línea que disparaba cualquier otra prueba—; ahora tiene
+24, y **17 no los dispara ninguna prueba**. El techo de la línea base pasa a la
+cifra medida, 586; cubrirlas sigue siendo el trabajo de esta deuda.
+
+**Corregido el mismo día tras la revisión adversarial: 773 y 619.** La
+revisión encontró dos puntos ciegos más del mismo tipo en `src/results.rs`:
+`physical_error` agrupaba 33 llamadores en una sola llamada a `effective_error`
+(ahora lleva `#[track_caller]` y está vigilado), y dos `GPS-IO-002` de
+identidad de artefacto se construían a mano (ahora pasan por
+`artifact_identity_error`, vigilada). Las comprobaciones pasan de 739 a 773 y
+las sin disparar de 586 a 619: de las 34 netas, 33 no las ejercita ninguna
+prueba. Además se cerraron tres vías por las que un rechazo nuevo podía
+esquivar la puerta, todas con una prueba léxica que se verificó **muriendo**
+contra un mutante: construir un rechazo con `effective_diagnostic` o
+`manifest_diagnostic` fuera de sus envoltorios, llamar a `*_from_reason` con un
+literal, y escribir `ok_or(reason(..))`, que anota siempre.
+
+**Lo que sigue sin verse.** Los ayudantes que reciben el motivo como argumento
+y hacen un único rechazo para muchos llamantes (`required_non_empty_text` y
+similares) se cuentan una vez: son comprobaciones genéricas, no texto suelto. Y
+hay otros módulos que juzgan lo publicado y que la puerta **no** mira, con
+una estimación léxica (no medida) de sus comprobaciones:
+
+- `src/truth_validation.rs`, el juez semántico de la verdad: unas 82
+  construcciones de `TruthValidationError` y unas 20 llamadas a `mismatch`,
+  que recibe el motivo como texto (el mismo defecto estructural);
+- `src/truth_schema.rs`, el contrato de la verdad: unas 64 variantes de
+  `TruthContractError`;
+- `src/fastq_validation.rs`, el juez del FASTQ final: unas 13;
+- `src/population_snvs.rs`, la validación de la matriz de SNV y de su
+  auditoría de normalización: unos 67 `Err`;
+- `src/f5_publication.rs` (`verify_published_f5_package`): unos 38;
+- `src/f5_artifacts.rs`: unos 45;
+- `src/reference_fasta.rs` (`validate_supplied_fasta*`, sobre el FASTA
+  publicado): unos 31;
+- `src/reference_reduction_io.rs` (`validate_reduction_map_document`): unos 33;
+- `src/integrity.rs` (`identify_file` y `verify_identity`): unos 6;
+- `src/technical_profile.rs`: `invalid`, con 7 usos y el motivo como texto.
+
+`src/vcf_contract.rs` (unas 20 variantes de `VcfContractError`) es sobre todo
+un escritor, no un juez. Ampliar la puerta a estos módulos está pendiente de
+decisión del responsable; la lista autoritativa de lo que la puerta vigila es
+el array `judges` de `scripts/check-guard-coverage.sh`.
 
 En `src/event_manifest.rs` no hay este segundo problema (no tiene ningún
 `Err("...")` a pelo), y su única construcción de diagnóstico fuera de la
 constructora es `retag_event_manifest_schema`, que reetiqueta un error ya
 rechazado. Una prueba léxica (`tests/guard_constructors.rs`) prohíbe construir
-un `GPS-FMT-006` fuera de las constructoras de ambos módulos; **no cubre** las
-dos familias anteriores.
+un `GPS-FMT-006` fuera de las constructoras de ambos módulos y, desde el
+04/10/2026, limita dónde pueden llamarse los constructores sin anotar
+(`effective_diagnostic`, `manifest_diagnostic` y los `*_from_reason`); lo que
+**no** puede ver es un rechazo nuevo escrito dentro de una de las funciones
+permitidas.
 
 Tres advertencias sobre la comparación, para que nadie la lea mal:
 
@@ -1059,6 +1136,16 @@ versión declarada; lo comprueba
 `the_reference_judge_reads_the_blocks_from_the_effective_config`. El resto de
 rechazos del juez sigue citando v4.
 
+### Ampliación del 04/10/2026
+
+El juez del abanico de deslizamiento (`validate_published_slippage_fans`,
+`reject`) también cita `effective-config-v4.schema.json` sobre una
+configuración efectiva v6: el corpus de la revisión adversarial del 04/10/2026
+produjo **630 diagnósticos** así, idénticos en la base `aef5ed4` y en el árbol
+corregido (no es una regresión). **Ninguna prueba fija el nombre del esquema de
+ese juez.** Encaja aquí: es el mismo mecanismo, un rechazo de la configuración
+efectiva que no se reetiqueta.
+
 ### Qué haría falta para cerrarla
 
 Que el juez de recursos publicados reetiquete sus rechazos de la configuración
@@ -1727,3 +1814,30 @@ pruebas, con paquetes pequeños. **Reconsiderarla si una orden de la CLI llega
 a usarla con paquetes grandes**; la alternativa entonces sería un juez ligero,
 solo de la referencia y del manifiesto, lo que exigiría decidir qué
 comprobaciones bastan. Documentado también en la documentación de la función.
+
+---
+
+## DT-024. El juez del abanico no termina con un número de linajes enorme
+
+**Gravedad: media.** Un juez que cuelga en vez de rechazar no protege a nadie.
+
+Lo encontró el corpus de corrupciones de la revisión adversarial del
+04/10/2026. Con `lineages = 18446744073709551615` en la configuración efectiva
+de un paquete publicado, `validate_published_resources` no termina: con
+`timeout 30` sale con el código 124. **Igual en la base `aef5ed4`**: no es una
+regresión. No hay ningún límite sobre `lineages` antes de `recompute_slippage_fan`,
+que recorre un linaje tras otro. Haría falta rechazar, antes de rehacer el
+abanico, un número de linajes mayor que lo que el generador admite o que el
+presupuesto de recursos declarado. No se ha corregido: es una deuda registrada.
+
+---
+
+## DT-025. El juez de recursos publicados aborta con `capacity overflow`
+
+**Gravedad: media.** Aborta el proceso en vez de devolver un rechazo.
+
+Lo encontró el mismo corpus. Con `reference_units[1] = 18446744073709551615`
+en la configuración efectiva, `validate_published_resources` aborta con el
+pánico `capacity overflow` en vez de rechazar el documento. **Igual en la base
+`aef5ed4`**: no es una regresión. Falta validar el valor antes de reservar con
+él. No se ha corregido: es una deuda registrada.

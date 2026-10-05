@@ -17,8 +17,10 @@
 # `src/event_manifest.rs`, que comprueban la configuración efectiva y el
 # manifiesto de evento. **Su cifra es un suelo del suelo**: la puerta solo ve
 # los rechazos que pasan por sus constructoras (`effective_error`,
-# `effective_error_for_schema` y `event_error`). En `results.rs` quedan fuera
-# los validadores que devuelven `Err("texto")`; véase DT-001. El techo de los
+# `effective_error_for_schema` y `event_error`). En `results.rs` quedaban
+# fuera los validadores que devuelven `Err("texto")`; ese punto ciego se cerró
+# el 04/10/2026 (nota de esa fecha, más abajo; DT-001 sigue abierta por lo
+# demás). El techo de los
 # dos módulos nuevos es lo medido hoy, sin cubrir nada: el objetivo es que no
 # crezca.
 #
@@ -157,6 +159,49 @@
 # Los dispara la misma prueba, con un individuo quitado, una copia quitada y
 # una copia de más.
 #
+# **El 04/10/2026 `src/results.rs` pasa de 541 a 739 comprobaciones y su techo
+# de sin disparar de 425 a 586; los otros cuatro módulos no se mueven.** Es el
+# cierre del punto ciego estructural de DT-001: los validadores de `results.rs`
+# que devuelven `Result<_, &'static str>` o `Result<_, String>` no construyen un
+# diagnóstico, y su llamante lo envolvía en **una sola** llamada a
+# `effective_error`, `manifest_error` o `repeat_section_error`. Para la puerta
+# eran un único punto, y bastaba con que se disparase uno para dar por
+# ejercitados los demás: 24 rechazos del validador de la sección `repeat_loci`
+# eran una línea que disparaba cualquier otra prueba. Ahora cada rechazo de
+# texto se escribe `Err(reason("..."))` —quince funciones, 170 rechazos, más
+# los veinticinco del cierre `reject` del juez del abanico de deslizamiento— y
+# `reason` lleva `#[track_caller]`, de modo que se anota la línea de cada uno.
+# Los envoltorios que reciben ese texto ya anotado construyen el diagnóstico
+# sin anotar (`manifest_diagnostic` y `effective_diagnostic`), para no contar
+# como rechazo una línea que no decide nada; y `repeat_section_error` gana
+# `#[track_caller]`, de modo que sus nueve llamadores —ocho en
+# `validate_published_tract_output_accounting` y uno en el lector del
+# manifiesto— dejan de ser uno.
+#
+# **No es una regresión: se ve lo que antes estaba oculto.** Las 198
+# comprobaciones netas son de rechazos que ya existían, con el mismo texto y
+# el mismo código (salen los envoltorios que los agrupaban); de ellas 35 las
+# dispara alguna prueba y 163 no. Por eso las sin disparar suben de 423
+# medidas (425 de techo) a 586. Pasó dos veces antes, la
+# última al pasar el manifiesto general de 364 a 499. El techo es la cifra
+# medida; bajarlo es DT-001, no este cambio.
+#
+# **Lo que sigue sin verse**: los ayudantes que reciben el motivo o la causa
+# como argumento y hacen un único rechazo para muchos llamantes
+# (`required_non_empty_text` y similares). Son comprobaciones genéricas, no
+# texto suelto; se cuentan una vez.
+#
+# **Corregido el mismo 04/10/2026 tras la revisión adversarial: 773 y 619.**
+# Dos puntos ciegos más de `src/results.rs`, del mismo tipo: `physical_error`
+# agrupaba 33 llamadores en una sola llamada a `effective_error`, y los dos
+# `GPS-IO-002` de identidad de artefacto se construían a mano, fuera de toda
+# constructora. `physical_error` gana `#[track_caller]` y se vigila; los dos
+# `GPS-IO-002` pasan por `artifact_identity_error`, nueva y vigilada, que
+# devuelve el mismo diagnóstico base. Las comprobaciones pasan de 739 a 773 y
+# las sin disparar de 586 a 619: **de las 34 netas, 33 no las ejercita ninguna
+# prueba**. Es lo mismo que en la nota anterior: se ve lo que estaba oculto.
+# El techo es la cifra medida.
+#
 # Medido el 23/09/2026; oráculo y verificador del VCF remedidos el 29/09/2026
 # (168 a 52 y 25 a 22, con el mismo número de comprobaciones); `results.rs` y
 # `event_manifest.rs` medidos por primera vez el 29/09/2026.
@@ -164,5 +209,5 @@
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	109	22
 src/f5_closure.rs	42	5
-src/results.rs	541	425
+src/results.rs	773	619
 src/event_manifest.rs	147	117

@@ -4,6 +4,12 @@
 # error del módulo. El barrido de `src/guard_trace.rs` anota la línea de esa
 # llamada, de modo que esta enumeración y aquella medición hablan de lo mismo.
 #
+# Los rechazos de **texto suelto** —un validador que devuelve `Err("texto")` y
+# deja que el llamante lo envuelva en un diagnóstico— se cuentan por su propia
+# llamada a `reason(`, que anota la línea del rechazo (DT-001); el envoltorio
+# que lo convierte en diagnóstico no es un punto de rechazo y no llama a una
+# constructora anotada.
+#
 # Se descartan:
 #   - las **definiciones** de las constructoras y sus cuerpos, porque la
 #     anotación `#[track_caller]` los atraviesa y anota al llamante;
