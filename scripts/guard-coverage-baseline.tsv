@@ -246,6 +246,20 @@
 # termina en salto de línea» (407; el lector de líneas rechaza antes toda línea
 # final sin salto) y «la cabecera no tiene identidad» (503; partir por espacios
 # siempre da un primer trozo).
+# **El 05/10/2026 `src/fastq_validation.rs` pasa de 71 a 83 comprobaciones,
+# con el mismo techo de 36 sin disparar.** Es el cierre de DT-029: el juez
+# compara cada registro con la identidad esperada (evento, biblioteca y UDI
+# completo), rechaza una pareja repetida en R1, exige la forma `LIB_` con 26
+# símbolos Base32 y `TP_` con 128 bits canónicos, la longitud del perfil y la
+# `N` con Phred 0, y el juez de la pareja compara los recuentos de parejas,
+# bases y `N` con los del resumen, cada uno en su sitio de rechazo. Las doce
+# comprobaciones nuevas son doce sitios con doce motivos distintos (evento,
+# biblioteca, UDI, pareja repetida, forma de la biblioteca, forma de la pareja,
+# longitud, longitud esperada fuera de 1 a 150, `N` con Phred 0 y los tres
+# recuentos) y se disparan, cada una con el motivo exacto, en
+# `tests/final_fastq_record_validation.rs`; las 36 que no se disparan son las
+# mismas de antes. Para no añadir guardas inalcanzables, los contadores de
+# bases y de `N` del mate saturan en vez de rechazar el desbordamiento.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	109	22
@@ -254,7 +268,7 @@ src/results.rs	773	619
 src/event_manifest.rs	147	117
 src/truth_validation.rs	118	95
 src/truth_schema.rs	69	46
-src/fastq_validation.rs	71	36
+src/fastq_validation.rs	83	36
 src/population_snvs.rs	143	123
 src/f5_publication.rs	52	36
 src/reference_fasta.rs	41	30

@@ -240,6 +240,9 @@ pub struct FinalPairedFastqStream {
     r1_writer: Option<bgzf::io::Writer<File>>,
     r2_writer: Option<bgzf::io::Writer<File>>,
     summary: FinalPairSummary,
+    /// Lo que cada registro del fichero debe llevar; el juez lo compara con el
+    /// contenido real al cerrar.
+    expected: crate::fastq_validation::FinalFastqIdentity,
 }
 
 impl FinalPairedFastqStream {
@@ -251,6 +254,8 @@ impl FinalPairedFastqStream {
         event_id: &str,
         individual_id: &str,
         library_id: &LibraryId,
+        udi: &crate::demultiplexing::Udi,
+        read_length: u16,
     ) -> Result<Self, Diagnostic> {
         let (r1_path, r2_path) = paired_fastq_relative_paths(event_id, individual_id);
         let mut r1 = workspace.begin_streamed_artifact(
@@ -275,6 +280,12 @@ impl FinalPairedFastqStream {
             r1_writer: Some(r1_writer),
             r2_writer: Some(r2_writer),
             summary: FinalPairSummary::default(),
+            expected: crate::fastq_validation::FinalFastqIdentity {
+                event_id: event_id.to_owned(),
+                library_id: library_id.as_str().to_owned(),
+                udi: udi.literal(),
+                read_length,
+            },
         })
     }
 
@@ -349,6 +360,7 @@ impl FinalPairedFastqStream {
             r2_path,
             r1,
             r2,
+            expected,
             ..
         } = self;
         // Cada mate se juzga una sola vez, dentro de `validate_final_paired_fastq`
@@ -370,6 +382,14 @@ impl FinalPairedFastqStream {
             &record_r1,
             &workspace.root().join(&r2_path),
             &record_r2,
+            &expected,
+            // Los recuentos que acumuló el escritor son los que el manifiesto
+            // publicará; el juez los compara con el contenido real.
+            &crate::fastq_validation::FinalFastqCounts {
+                pair_count: summary.pair_count,
+                base_count: summary.base_count,
+                n_base_count: summary.n_base_count,
+            },
         )
         .and(maybe_inject_final_pair_validation_failure())
         {
@@ -422,9 +442,18 @@ pub fn write_final_paired_fastq(
     event_id: &str,
     individual_id: &str,
     library_id: &LibraryId,
+    udi: &crate::demultiplexing::Udi,
+    read_length: u16,
     pairs: Vec<DemultiplexedPair<ObservedPair>>,
 ) -> Result<FinalPairedFastqPublication, Diagnostic> {
-    let mut stream = FinalPairedFastqStream::open(workspace, event_id, individual_id, library_id)?;
+    let mut stream = FinalPairedFastqStream::open(
+        workspace,
+        event_id,
+        individual_id,
+        library_id,
+        udi,
+        read_length,
+    )?;
     for pair in pairs {
         stream.write_pair(pair)?;
     }
@@ -1126,6 +1155,8 @@ mod tests {
                 "event-final-test",
                 "sample-final-test",
                 &library_id,
+                &crate::demultiplexing::Udi::new("ACGTACGT", "TGCATGCA").expect("UDI"),
+                ILLUMINA_SE_MINIMAL_READ_LENGTH,
                 Vec::<DemultiplexedPair<ObservedPair>>::new(),
             );
             assert!(result.is_err(), "{label} failure must propagate");
@@ -1159,6 +1190,8 @@ mod tests {
             "event-abandoned",
             "sample-abandoned",
             &library_id,
+            &crate::demultiplexing::Udi::new("ACGTACGT", "TGCATGCA").expect("UDI"),
+            ILLUMINA_SE_MINIMAL_READ_LENGTH,
         )
         .expect("open the paired stream");
         assert_eq!(stream.library_id(), &library_id);

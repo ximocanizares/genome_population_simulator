@@ -829,6 +829,13 @@ fn decode_derived_id(class: TechnicalIdClass, text: &str) -> Option<[u8; 16]> {
     Some(digest)
 }
 
+/// Decodifica un `TechnicalPairId` publicado: `TP_` y los 128 bits en 26
+/// símbolos Base32 canónicos (los 2 bits sobrantes a cero). Es la comprobación
+/// de forma que usa el juez del FASTQ final.
+pub(crate) fn decode_technical_pair_id(text: &str) -> Option<[u8; 16]> {
+    decode_derived_id(TechnicalIdClass::TechnicalPair, text)
+}
+
 /// Registro de las cinco clases añadidas por `id-catalog-v4`.
 ///
 /// Es independiente de las clases heredadas: publicar F5 no modifica sus

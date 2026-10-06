@@ -56,7 +56,7 @@ documenta mejor.
 | DT-026 | El juez de cada mate del FASTQ final no leía ni un registro: toda la validación de registros era código muerto en producción | **Grave** | 05/10/2026 | **Cerrada (05/10/2026)** |
 | DT-027 | La verdad de un paquete sin poblaciones no se juzga: 31 alteraciones de la cabecera pasan el juez de los recursos publicados | Media | 05/10/2026 | Abierta |
 | DT-028 | Sospecha: un alelo de referencia con una clave desconocida se acepta, el alelo SNP las rechaza | Baja | 05/10/2026 | Abierta, sin reproducir del todo |
-| DT-029 | El juez del FASTQ final no comprueba siete propiedades del contrato: identidad del fichero, unicidad de la pareja, formato de los identificadores, longitud, `N` con Phred 0, R1 frente a R2 y resúmenes del manifiesto | Media | 05/10/2026 | Abierta; destino F4.5.3 |
+| DT-029 | El juez del FASTQ final no comprueba siete propiedades del contrato: identidad del fichero, unicidad de la pareja, formato de los identificadores, longitud, `N` con Phred 0, R1 frente a R2 y resúmenes del manifiesto | Media | 05/10/2026 | **Cerrada (05/10/2026)** |
 | DT-030 | Un bloque BGZF que declara más de 64 KiB descomprimidos hace abortar al juez con un pánico en vez de rechazar el fichero | Media | 05/10/2026 | Abierta; bloqueada por la versión de `noodles-bgzf` |
 | DT-031 | Una referencia corta con tasa de quimeras alta aborta como «invariante imposible» en vez de rechazarse como configuración | Baja | 05/10/2026 | Abierta |
 
@@ -2055,7 +2055,7 @@ y seis corrupciones, las que cambian `TP_` por `XX_` (DT-029).
 comprobaciones sin disparar, con las mismas 71. El techo baja a 36.
 
 **Lo que el juez sigue sin mirar** no vive aquí: son siete propiedades del
-contrato, reunidas en DT-029, abierta. La revisión encontró además que un
+contrato, reunidas en DT-029, cerrada después. La revisión encontró además que un
 bloque BGZF con un tamaño declarado imposible hace abortar al juez en vez de
 rechazar el fichero (DT-030), y que una referencia corta con muchas quimeras
 aborta como defecto interno (DT-031). Ninguna de las tres es parte de este
@@ -2087,52 +2087,87 @@ quiere ese rechazo también para el alelo de referencia.
 
 ---
 
-## DT-029. El juez del FASTQ final no comprueba siete propiedades del contrato
+## DT-029. El juez del FASTQ final no comprobaba siete propiedades del contrato
 
-**Gravedad: media. Destino: F4.5.3**, la validación de cada pareja final
-contra la reconstrucción independiente de su clave técnica
-(`design/plan-implementacion-f4-0.1.md`).
+**Gravedad: media. Estado: cerrada el 5 de octubre de 2026.**
 
 Al cerrar DT-026, el juez del FASTQ final —el de cada mate y el de la pareja,
-en `src/fastq_validation.rs`— exige la forma de cada registro: cabecera,
-separador, alfabeto de bases y de calidades, y longitud igual de secuencia y
-calidades. **Hoy nada se publica mal por estas siete**: el juez estricto de la
-revisión adversarial del 05/10/2026 (`judge_full.py`) no encontró ningún
-incumplimiento en 16,4 millones de parejas, ni en las 5 485 685 de la
-exploración del cierre de DT-026. Pero si el escritor las incumpliera, el juez
-no lo vería.
+en `src/fastq_validation.rs`— exigía la forma de cada registro, pero no siete
+propiedades del contrato. **Nada se publicaba mal por ellas**: el juez estricto
+de la revisión adversarial del 05/10/2026 (`judge_full.py`) no encontró ningún
+incumplimiento en 16,4 millones de parejas. Si el escritor las hubiera
+incumplido, el juez no lo habría visto.
 
-1. **La identidad del fichero no se ata a lo esperado.** El juez del mate no
-   recibe el evento, la biblioteca ni el UDI que el fichero debe llevar
-   (`validate_final_fastq_mate`, `src/fastq_validation.rs:230`), y el de la
-   pareja solo compara R1 con R2 (`:301`). Un mismo fichero con registros de
-   eventos, bibliotecas o UDI mezclados pasa (casos `undecl_mixed_*` de la
-   revisión). Va contra REQ-DAT-33, REQ-DAT-68 y DTC-083.
-2. **Un identificador de pareja repetido en el fichero pasa**
-   (`undecl_duplicate_pair_id`). Va contra REQ-DAT-68 y REQ-DAT-71.
-3. **El identificador de pareja y el de biblioteca solo se validan como
-   identificadores genéricos** (`:528` y `:530`, con las reglas de
-   `validate_provided_id` de `src/identity.rs`). DTC-086 y DTC-087 fijan para
-   la pareja el prefijo `TP_` y veintiséis caracteres Base32, y el catálogo de
-   identificadores fija `LIB_` para la biblioteca. Por eso pasan las seis
-   corrupciones del corpus de DT-026 que cambian `TP_` por `XX_`.
-4. **La longitud de lectura no se compara con el perfil.** El contrato fija una
-   longitud común de 1 a 150 bases (DTPD-106 y `read_length_bases`); el juez
-   admite hasta 255 (el límite de línea de 256 bytes, `:37`) y longitudes
-   distintas dentro de un fichero.
-5. **Una `N` no se exige con Phred 0.** REQ-DAT-72 lo pide; el juez solo
-   comprueba que la calidad esté entre `!` y `~`.
-6. **R1 y R2 de una pareja no se comparan en longitud.**
-7. **Nadie compara los recuentos del resumen del manifiesto** —parejas, bases
-   y `N`— **con el contenido de los ficheros.** `validate_final_fastq_summary`
-   (`src/event_manifest.rs:1267`) solo mira su coherencia interna. El plan de
-   F4 da por hecho F4.5.2 diciendo que «el validador independiente comprueba
-   FASTQ, pareja, hashes y resúmenes», y lo de los resúmenes no es cierto.
+**Cómo se cerró.** El juez ya no deduce lo esperado del fichero: quien publica
+se lo dice. `validate_final_fastq_mate` recibe una `FinalFastqIdentity` (evento,
+biblioteca, UDI `i7+i5` y longitud de lectura) y `validate_final_paired_fastq`
+recibe además unos `FinalFastqCounts` (parejas, bases y `N`). El escritor
+(`FinalPairedFastqStream`) fija la identidad al abrir y los recuentos al cerrar.
+Cada rechazo tiene su motivo propio:
 
-En sentido contrario, el juez es **más estricto que el formato FASTQ general**
-en un punto: exige que el separador sea `+` a secas, cuando el formato admite
-repetir el nombre tras el `+`. Es lo que el escritor publica y ningún documento
-normativo dice otra cosa, así que no hay nada que decidir.
+1. **Identidad del fichero.** Cada registro se compara con el evento, la
+   biblioteca y el UDI esperados. **Salto de índice:** una pareja que salta se
+   escribe en el fichero de su biblioteca *final* y lleva el UDI de esa
+   biblioteca, porque el demultiplexador asigna a la vez biblioteca y UDI
+   finales (`src/demultiplexing.rs`, `accept`). Así que un solo UDI esperado vale
+   para todo el fichero y un salto legítimo no se rechaza; lo comprueba el
+   control positivo de `tests/f3_end_to_end.rs`, con dos bibliotecas, salto a
+   tasa uno y contaminación.
+2. **Pareja repetida** dentro de un fichero, comprobada solo en R1: la
+   comparación de cabeceras de R1 con R2 ya ata cada registro de R2 al de R1.
+   Se guardan los 128 bits de cada identificador en un `Vec<u128>` (16 bytes por
+   pareja) y se ordenan al final. Un primer intento con un `HashSet` de los 26
+   símbolos en cada mate costaba memoria: medido con una ejecución de 5 Mb de
+   referencia a 30x (alrededor de medio millón de parejas), el pico pasó de
+   510 264 kB (base) a 551 716 kB (+8,1 %); con el `Vec<u128>` en R1 es de
+   510 480 kB (+0,04 %), con los FASTQ idénticos byte a byte.
+   **Límite que conviene decir:** REQ-DAT-68 pide la unicidad por evento y esta
+   comprobación es por fichero. La de todo el evento la impone DTC-039 al
+   derivar los identificadores (`TechnicalIdentityRegistry` detecta la
+   colisión), sin comprobación independiente posterior.
+3. **Forma de los identificadores:** `LIB_` y 26 símbolos Base32 para la
+   biblioteca (las de un FASTQ publicado son siempre automáticas,
+   `derive_library`); para la pareja, `TP_` y los 128 bits canónicos, es decir,
+   con los 2 bits sobrantes del último símbolo a cero, reutilizando
+   `decode_derived_id` de `src/identity.rs` mediante
+   `decode_technical_pair_id` (DTC-087). Un `TP_` con 26 símbolos Base32 pero
+   no canónico se rechaza.
+4. **Longitud de lectura** igual a la del evento, y la propia longitud esperada
+   dentro de 1 a 150.
+5. **`N` con Phred 0.** Solo en ese sentido: una `N` exige `!`; el contrato no
+   prohíbe un Phred 0 sobre una base `ACGT`.
+6. **R1 frente a R2 en longitud.** Queda cubierto por el punto 4, porque los dos
+   mates deben medir lo mismo que el perfil. Una comparación directa entre R1 y
+   R2 no podría dispararse sola, así que no se escribió; la prueba
+   `mates_of_different_lengths_are_rejected` lo ejercita por el motivo de la
+   longitud.
+7. **Recuentos de parejas, bases y `N`.** Cada mate devuelve lo que recuenta al
+   leerse, sin una pasada más, y el juez de la pareja lo compara con los
+   contadores que el escritor acumuló, que son los que el manifiesto del evento
+   publica. **Límite que conviene decir:** la comparación ocurre al publicar,
+   contra el resumen que se va a escribir; no hay una relectura posterior de un
+   manifiesto ya publicado contra los ficheros, porque `src/event_manifest.rs`
+   solo recibe bytes de manifiesto, sin acceso a los ficheros. No cambia ningún
+   formato publicado.
+
+**Pruebas.** Nueve nuevas en `tests/final_fastq_record_validation.rs` (una por
+hueco, más la longitud esperada fuera de 1 a 150 y el recuento por mate) que exigen el motivo exacto, con casos de un `TP_` de 27 símbolos, uno no canónico, un i7 igual con otro i5 y un repetido no contiguo;
+el control positivo de `tests/f3_end_to_end.rs` ahora pasa la identidad y los
+recuentos del manifiesto; y el de un FASTQ publicado de verdad toma la
+biblioteca y los recuentos del manifiesto y los compara con los ficheros, en un
+escenario que sí tiene `N`. Los casos `undecl_mixed_*`, `undecl_duplicate_pair_id`
+y `hole_*` de la revisión, regenerados con identificadores canónicos, se
+rechazan todos con su motivo (la base los aceptaba).
+
+La batería pasa de 1690 a 1699 pruebas, sin fallos y con 11 ignoradas.
+Exploración: 140 escenarios (extremos de longitud 1 y 150, varias bibliotecas,
+salto de índice, contaminación, quimeras, muchas `N`, PCR y tartamudeo) con la
+base `8ac6e02` y con el árbol final: ninguno aborta y los 818 FASTQ son
+byte a byte idénticos; el juez externo estricto da OK en los 140.
+La revisión adversarial repitió la comparación con 2200 escenarios, sin abortos
+nuevos, y tras sus correcciones se repitió en 320 más (1712 FASTQ y los
+manifiestos de evento, idénticos byte a byte frente a la base; juez externo OK
+en los 320).
 
 ---
 

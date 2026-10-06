@@ -33,7 +33,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::execution::execute_validated_config;
 use genome_population_simulator::fastq_validation::{
-    FastqValidationError, validate_final_fastq_mate, validate_final_paired_fastq,
+    FastqValidationError, FinalFastqCounts, FinalFastqIdentity, validate_final_fastq_mate,
+    validate_final_paired_fastq,
 };
 use genome_population_simulator::integrity::identify_file;
 use genome_population_simulator::results::ArtifactRecord;
@@ -41,11 +42,23 @@ use genome_population_simulator::technical_identity::TechnicalMate;
 use noodles_bgzf as bgzf;
 
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
-const R1_HEADER: &str =
-    "@GPS:reads-main:library-main:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 1:N:0:ACGTACGT+TGCATGCA\n";
-const R2_HEADER: &str =
-    "@GPS:reads-main:library-main:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 2:N:0:ACGTACGT+TGCATGCA\n";
+const R1_HEADER: &str = "@GPS:reads-main:LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ:TP_ABCDEFGHIJKLMNOPQRSTUVWXYY 1:N:0:ACGTACGT+TGCATGCA\n";
+const R2_HEADER: &str = "@GPS:reads-main:LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ:TP_ABCDEFGHIJKLMNOPQRSTUVWXYY 2:N:0:ACGTACGT+TGCATGCA\n";
+const LIBRARY: &str = "LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const PAIR_A: &str = "TP_ABCDEFGHIJKLMNOPQRSTUVWXYY";
+const PAIR_B: &str = "TP_ZYXWVUTSRQPONMLKJIHGFEDCBA";
 static NONCE: AtomicU64 = AtomicU64::new(0);
+
+/// Identidad que esperan casi todas las pruebas: los registros de este fichero
+/// miden cuatro bases salvo que la prueba diga otra cosa.
+fn identity() -> FinalFastqIdentity {
+    FinalFastqIdentity {
+        event_id: "reads-main".to_owned(),
+        library_id: LIBRARY.to_owned(),
+        udi: "ACGTACGT+TGCATGCA".to_owned(),
+        read_length: 4,
+    }
+}
 
 fn temporary(suffix: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -83,18 +96,18 @@ fn record(header: &str, sequence: &[u8], separator: &[u8], qualities: &[u8]) -> 
 }
 
 fn valid_record() -> Vec<u8> {
-    record(R1_HEADER, b"ACGTN", b"+", b"II!~I")
+    record(R1_HEADER, b"ACNT", b"+", b"II!~")
 }
 
 /// Motivo estructural del rechazo de `content` como mate `mate`.
 fn rejection(content: &[u8], mate: TechnicalMate) -> String {
     let path = bgzf_file(content);
-    let result = validate_final_fastq_mate(&path, mate);
+    let result = validate_final_fastq_mate(&path, mate, &identity());
     fs::remove_file(&path).ok();
     match result {
         Err(FastqValidationError::Structural { detail, .. }) => detail.to_owned(),
         Err(other) => panic!("unexpected non-structural rejection: {other:?}"),
-        Ok(()) => panic!(
+        Ok(_) => panic!(
             "the final FASTQ judge accepted invalid content:\n{}",
             String::from_utf8_lossy(content)
         ),
@@ -117,12 +130,18 @@ fn garbage_with_canonical_bgzf_eof_is_rejected() {
 #[test]
 fn canonical_records_are_accepted_for_both_mates() {
     let mut r1 = valid_record();
-    r1.extend_from_slice(&record(R1_HEADER, b"T", b"+", b"!"));
+    r1.extend_from_slice(&record(
+        &R1_HEADER.replace(PAIR_A, PAIR_B),
+        b"TNNT",
+        b"+",
+        b"~!!~",
+    ));
     let path = bgzf_file(&r1);
-    validate_final_fastq_mate(&path, TechnicalMate::R1).expect("canonical R1");
+    let tally = validate_final_fastq_mate(&path, TechnicalMate::R1, &identity()).expect("R1");
     fs::remove_file(&path).ok();
-    let path = bgzf_file(&record(R2_HEADER, b"ACGTN", b"+", b"II!~I"));
-    validate_final_fastq_mate(&path, TechnicalMate::R2).expect("canonical R2");
+    assert_eq!((tally.records, tally.bases, tally.n_bases), (2, 8, 3));
+    let path = bgzf_file(&record(R2_HEADER, b"ACNT", b"+", b"II!~"));
+    validate_final_fastq_mate(&path, TechnicalMate::R2, &identity()).expect("canonical R2");
     fs::remove_file(&path).ok();
 }
 
@@ -163,10 +182,10 @@ fn header_with_identity_or_mate_errors_is_rejected() {
 #[test]
 fn every_header_rejection_names_its_own_reason() {
     const MATE: &str = " 1:N:0:ACGTACGT+TGCATGCA\n";
-    const PAIR: &str = "TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const PAIR: &str = "TP_ABCDEFGHIJKLMNOPQRSTUVWXYY";
     for (header, detail) in [
         (
-            format!("@GPS:reads-main:library-main:{PAIR}\n"),
+            format!("@GPS:reads-main:LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ:{PAIR}\n"),
             "FASTQ final header lacks mate metadata",
         ),
         (
@@ -179,15 +198,15 @@ fn every_header_rejection_names_its_own_reason() {
             "FASTQ final header lacks library ID",
         ),
         (
-            format!("@GPS:reads-main:library-main{MATE}"),
+            format!("@GPS:reads-main:LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ{MATE}"),
             "FASTQ final header lacks technical pair ID",
         ),
         (
-            format!("@GPS:reads-main:library-main:{PAIR}:extra{MATE}"),
+            format!("@GPS:reads-main:LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ:{PAIR}:extra{MATE}"),
             "FASTQ final header has invalid identity fields",
         ),
         (
-            format!("@GPS::library-main:{PAIR}{MATE}"),
+            format!("@GPS::LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ:{PAIR}{MATE}"),
             "FASTQ final event ID is invalid",
         ),
         (
@@ -195,7 +214,8 @@ fn every_header_rejection_names_its_own_reason() {
             "FASTQ final library ID is invalid",
         ),
         (
-            "@GPS:reads-main:library-main:_TP 1:N:0:ACGTACGT+TGCATGCA\n".to_owned(),
+            "@GPS:reads-main:LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ:_TP 1:N:0:ACGTACGT+TGCATGCA\n"
+                .to_owned(),
             "FASTQ final pair ID is invalid",
         ),
         (
@@ -369,6 +389,28 @@ i5 = "TGCATGCA"
     )
 }
 
+/// Identidad de lo publicado: la biblioteca sale del manifiesto del evento y el
+/// UDI y la longitud, de la configuración que se ejecutó, no de los ficheros.
+fn published_manifest_entry(root: &Path) -> serde_json::Value {
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(root.join("published/events/reads-main/manifest.json")).expect("manifiesto"),
+    )
+    .expect("JSON");
+    manifest["final_fastq_summary"][0].clone()
+}
+
+fn published_identity(root: &Path) -> FinalFastqIdentity {
+    FinalFastqIdentity {
+        event_id: "reads-main".to_owned(),
+        library_id: published_manifest_entry(root)["library_id"]
+            .as_str()
+            .expect("biblioteca")
+            .to_owned(),
+        udi: "ACGTACGT+TGCATGCA".to_owned(),
+        read_length: 150,
+    }
+}
+
 fn decompressed(path: &Path) -> Vec<u8> {
     let mut bytes = Vec::new();
     bgzf::io::Reader::new(fs::File::open(path).expect("mate publicado"))
@@ -388,8 +430,60 @@ fn decompressed(path: &Path) -> Vec<u8> {
 #[test]
 fn real_published_mates_are_accepted_and_a_corrupted_copy_is_rejected() {
     let (root, r1, r2) = published_mates();
-    validate_final_fastq_mate(&r1, TechnicalMate::R1).expect("published R1");
-    validate_final_fastq_mate(&r2, TechnicalMate::R2).expect("published R2");
+    let published = published_identity(&root);
+    validate_final_fastq_mate(&r1, TechnicalMate::R1, &published).expect("published R1");
+    validate_final_fastq_mate(&r2, TechnicalMate::R2, &published).expect("published R2");
+
+    // Los recuentos que publica el manifiesto del evento son los del contenido
+    // real. Este escenario sí tiene `N` (la referencia lleva una tirada y las
+    // lecturas la cruzan): con un fixture sin `N`, un manifiesto que publicara
+    // cero `N` pasaría.
+    let manifest = published_manifest_entry(&root);
+    let published_counts = FinalFastqCounts {
+        pair_count: manifest["pair_count"].as_u64().expect("parejas"),
+        base_count: manifest["base_count"].as_u64().expect("bases"),
+        n_base_count: manifest["n_base_count"].as_u64().expect("N"),
+    };
+    assert!(
+        published_counts.n_base_count > 0,
+        "the fixture must publish N bases"
+    );
+    validate_final_paired_fastq(
+        &r1,
+        &artifact_of(&r1, "outputs/fastq/reads-main/sample-A_R1.fastq.gz"),
+        &r2,
+        &artifact_of(&r2, "outputs/fastq/reads-main/sample-A_R2.fastq.gz"),
+        &published,
+        &published_counts,
+    )
+    .expect("the published manifest counts are those of the files");
+    for altered in [
+        FinalFastqCounts {
+            pair_count: published_counts.pair_count + 1,
+            ..published_counts
+        },
+        FinalFastqCounts {
+            base_count: published_counts.base_count + 1,
+            ..published_counts
+        },
+        FinalFastqCounts {
+            n_base_count: 0,
+            ..published_counts
+        },
+    ] {
+        assert!(
+            validate_final_paired_fastq(
+                &r1,
+                &artifact_of(&r1, "outputs/fastq/reads-main/sample-A_R1.fastq.gz"),
+                &r2,
+                &artifact_of(&r2, "outputs/fastq/reads-main/sample-A_R2.fastq.gz"),
+                &published,
+                &altered,
+            )
+            .is_err(),
+            "a summary that differs from the files must be rejected: {altered:?}"
+        );
+    }
 
     let content = decompressed(&r1);
     let lines: Vec<&[u8]> = content.split(|byte| *byte == b'\n').collect();
@@ -419,10 +513,15 @@ fn real_published_mates_are_accepted_and_a_corrupted_copy_is_rejected() {
     let quality_offset = lines[..3].iter().map(|line| line.len() + 1).sum::<usize>();
     let mut corrupted = content.clone();
     corrupted[quality_offset] = b' ';
-    assert_rejected(
-        &corrupted,
-        "FASTQ final sequence or quality alphabet is invalid",
-    );
+    let path = bgzf_file(&corrupted);
+    match validate_final_fastq_mate(&path, TechnicalMate::R1, &published) {
+        Err(FastqValidationError::Structural { detail, .. }) => assert_eq!(
+            detail,
+            "FASTQ final sequence or quality alphabet is invalid"
+        ),
+        other => panic!("expected the alphabet rejection, got {other:?}"),
+    }
+    fs::remove_file(&path).ok();
     fs::remove_dir_all(root).ok();
 }
 
@@ -436,7 +535,7 @@ fn valid_records_without_the_canonical_eof_marker_are_rejected() {
     let bytes = fs::read(&path).expect("fixture");
     let marker = 28;
     fs::write(&path, &bytes[..bytes.len() - marker]).expect("strip EOF marker");
-    let result = validate_final_fastq_mate(&path, TechnicalMate::R1);
+    let result = validate_final_fastq_mate(&path, TechnicalMate::R1, &identity());
     fs::remove_file(&path).ok();
     match result {
         Err(FastqValidationError::Structural { detail, .. }) => assert_eq!(
@@ -460,10 +559,31 @@ struct Pair {
     r2: PathBuf,
     r1_artifact: ArtifactRecord,
     r2_artifact: ArtifactRecord,
+    /// Recuentos de una pareja de un solo registro, contados aquí a mano.
+    counts: FinalFastqCounts,
+}
+
+/// Recuento independiente de un fichero de un solo registro.
+fn counts_of(r1: &[u8], r2: &[u8]) -> FinalFastqCounts {
+    let sequence = |content: &[u8]| {
+        content
+            .split(|byte| *byte == b'\n')
+            .nth(1)
+            .unwrap()
+            .to_vec()
+    };
+    let (a, b) = (sequence(r1), sequence(r2));
+    FinalFastqCounts {
+        pair_count: 1,
+        base_count: u64::try_from(a.len() + b.len()).unwrap(),
+        n_base_count: u64::try_from(a.iter().chain(&b).filter(|base| **base == b'N').count())
+            .unwrap(),
+    }
 }
 
 impl Pair {
     fn new(r1: &[u8], r2: &[u8]) -> Self {
+        let counts = counts_of(r1, r2);
         let r1 = bgzf_file(r1);
         let r2 = bgzf_file(r2);
         let r1_artifact = artifact_of(&r1, "outputs/fastq/reads-main/sample-A_R1.fastq.gz");
@@ -473,11 +593,27 @@ impl Pair {
             r2,
             r1_artifact,
             r2_artifact,
+            counts,
         }
     }
 
     fn judge(&self) -> Result<(), FastqValidationError> {
-        validate_final_paired_fastq(&self.r1, &self.r1_artifact, &self.r2, &self.r2_artifact)
+        self.judge_expecting(&identity(), &self.counts)
+    }
+
+    fn judge_expecting(
+        &self,
+        identity: &FinalFastqIdentity,
+        counts: &FinalFastqCounts,
+    ) -> Result<(), FastqValidationError> {
+        validate_final_paired_fastq(
+            &self.r1,
+            &self.r1_artifact,
+            &self.r2,
+            &self.r2_artifact,
+            identity,
+            counts,
+        )
     }
 }
 
@@ -490,8 +626,8 @@ impl Drop for Pair {
 
 fn canonical_pair() -> Pair {
     Pair::new(
-        &record(R1_HEADER, b"ACGTN", b"+", b"II!~I"),
-        &record(R2_HEADER, b"TTGCA", b"+", b"IIIII"),
+        &record(R1_HEADER, b"ACNT", b"+", b"II!~"),
+        &record(R2_HEADER, b"TTGC", b"+", b"IIII"),
     )
 }
 
@@ -507,7 +643,7 @@ fn a_canonical_pair_with_its_artifacts_is_accepted() {
 #[test]
 fn mates_naming_different_pairs_are_rejected() {
     let other = R2_HEADER.replace(
-        "TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "TP_ABCDEFGHIJKLMNOPQRSTUVWXYY",
         "TP_ZYXWVUTSRQPONMLKJIHGFEDCBA",
     );
     let pair = Pair::new(
@@ -562,5 +698,291 @@ fn the_pair_judge_judges_the_records_of_each_mate() {
             "FASTQ final sequence or quality alphabet is invalid"
         ),
         other => panic!("expected the record rejection, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DT-029: lo que el juez exige además de la forma del registro. Cada prueba
+// compara el motivo exacto, porque varias comprobaciones se solapan.
+// ---------------------------------------------------------------------------
+
+/// Motivo de rechazo de `content` como R1 con una identidad esperada dada.
+fn rejection_expecting(content: &[u8], identity: &FinalFastqIdentity) -> String {
+    let path = bgzf_file(content);
+    let result = validate_final_fastq_mate(&path, TechnicalMate::R1, identity);
+    fs::remove_file(&path).ok();
+    match result {
+        Err(FastqValidationError::Structural { detail, .. }) => detail.to_owned(),
+        other => panic!("expected a structural rejection, got {other:?}"),
+    }
+}
+
+/// Un fichero que mezcla registros de otro evento, otra biblioteca u otro UDI
+/// se rechaza, cada cosa por su motivo (hueco 1; casos `undecl_mixed_*` de la
+/// revisión). El registro ajeno va en segunda posición: el primero es el
+/// correcto, así que solo la comparación con la identidad esperada, registro a
+/// registro, puede verlo.
+#[test]
+fn a_file_mixing_events_libraries_or_udis_is_rejected() {
+    for (foreign, detail) in [
+        (
+            R1_HEADER.replace("reads-main", "reads-other"),
+            "FASTQ final record belongs to a different event than expected",
+        ),
+        (
+            R1_HEADER.replace(LIBRARY, "LIB_ZYXWVUTSRQPONMLKJIHGFEDCBA"),
+            "FASTQ final record belongs to a different library than expected",
+        ),
+        (
+            R1_HEADER.replace("ACGTACGT+TGCATGCA", "CGTACGTA+GCATGCAT"),
+            "FASTQ final record carries a different UDI than its library",
+        ),
+        // Mismo i7 y otro i5: la forma de un salto de índice real, que cambia
+        // un solo índice. Comparar solo el i7 lo dejaría pasar.
+        (
+            R1_HEADER.replace("ACGTACGT+TGCATGCA", "ACGTACGT+GCATGCAT"),
+            "FASTQ final record carries a different UDI than its library",
+        ),
+    ] {
+        let mut content = valid_record();
+        content.extend_from_slice(&record(
+            &foreign.replace(PAIR_A, PAIR_B),
+            b"ACGT",
+            b"+",
+            b"IIII",
+        ));
+        assert_eq!(rejection_expecting(&content, &identity()), detail);
+    }
+}
+
+/// Hueco 2 (`undecl_duplicate_pair_id`): el mismo identificador de pareja dos
+/// veces en un fichero.
+#[test]
+fn a_repeated_pair_id_within_one_file_is_rejected() {
+    let mut content = valid_record();
+    content.extend_from_slice(&valid_record());
+    assert_eq!(
+        rejection_expecting(&content, &identity()),
+        "FASTQ final repeats a technical pair ID within the file"
+    );
+    // El repetido no es contiguo: A, B, A. La unicidad se comprueba ordenando
+    // los identificadores al final, y sin ordenar este fichero pasaría.
+    let mut separated = valid_record();
+    separated.extend_from_slice(&record(
+        &R1_HEADER.replace(PAIR_A, PAIR_B),
+        b"ACNT",
+        b"+",
+        b"II!~",
+    ));
+    separated.extend_from_slice(&valid_record());
+    assert_eq!(
+        rejection_expecting(&separated, &identity()),
+        "FASTQ final repeats a technical pair ID within the file"
+    );
+}
+
+/// Hueco 3: la pareja es `TP_` y 26 símbolos Base32; la biblioteca, `LIB_` y
+/// 26. Los identificadores de abajo son todos válidos como identificadores
+/// genéricos, que es lo único que se exigía antes (las seis corrupciones del
+/// corpus de DT-026 cambiaban `TP_` por `XX_`).
+#[test]
+fn pair_and_library_ids_must_have_the_derived_shape() {
+    for (header, detail) in [
+        (
+            R1_HEADER.replace(PAIR_A, "XX_ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            "FASTQ final pair ID is not TP_ followed by 26 canonical Base32 symbols",
+        ),
+        (
+            R1_HEADER.replace(PAIR_A, "TP_ABCDEFGHIJKLMNOPQRSTUVWXY"),
+            "FASTQ final pair ID is not TP_ followed by 26 canonical Base32 symbols",
+        ),
+        (
+            R1_HEADER.replace(PAIR_A, "TP_ABCDEFGHIJKLMNOPQRSTUVWXY1"),
+            "FASTQ final pair ID is not TP_ followed by 26 canonical Base32 symbols",
+        ),
+        // Un símbolo de más: sin la comprobación de longitud llegaría a
+        // copiar 27 símbolos en un hueco de 26.
+        (
+            R1_HEADER.replace(PAIR_A, "TP_ABCDEFGHIJKLMNOPQRSTUVWXYYA"),
+            "FASTQ final pair ID is not TP_ followed by 26 canonical Base32 symbols",
+        ),
+        // Veintiséis símbolos Base32, pero no canónico: el último lleva 01 en
+        // los dos bits que sobran de los 128 (DTC-087).
+        (
+            R1_HEADER.replace(PAIR_A, "TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            "FASTQ final pair ID is not TP_ followed by 26 canonical Base32 symbols",
+        ),
+        (
+            R1_HEADER.replace(LIBRARY, "LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZA"),
+            "FASTQ final library ID is not LIB_ followed by 26 Base32 symbols",
+        ),
+        (
+            R1_HEADER.replace(PAIR_A, "TP_abcdefghijklmnopqrstuvwxyz"),
+            "FASTQ final pair ID is not TP_ followed by 26 canonical Base32 symbols",
+        ),
+        (
+            R1_HEADER.replace(LIBRARY, "XXX_ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            "FASTQ final library ID is not LIB_ followed by 26 Base32 symbols",
+        ),
+        (
+            R1_HEADER.replace(LIBRARY, "LIB_ABCDEFGHIJKLMNOPQRSTUVWX"),
+            "FASTQ final library ID is not LIB_ followed by 26 Base32 symbols",
+        ),
+    ] {
+        assert_eq!(
+            rejection(&record(&header, b"ACGT", b"+", b"IIII"), TechnicalMate::R1),
+            detail,
+            "{header}"
+        );
+    }
+}
+
+/// Hueco 4: la longitud de cada lectura es la del perfil. Una más, una menos y
+/// longitudes mezcladas dentro del fichero.
+#[test]
+fn read_length_must_equal_the_profile_length() {
+    const DETAIL: &str = "FASTQ final read length differs from the profile read length";
+    assert_eq!(
+        rejection_expecting(&record(R1_HEADER, b"ACGTA", b"+", b"IIIII"), &identity()),
+        DETAIL
+    );
+    assert_eq!(
+        rejection_expecting(&record(R1_HEADER, b"ACG", b"+", b"III"), &identity()),
+        DETAIL
+    );
+    let mut mixed = valid_record();
+    mixed.extend_from_slice(&record(
+        &R1_HEADER.replace(PAIR_A, PAIR_B),
+        b"ACGTAC",
+        b"+",
+        b"IIIIII",
+    ));
+    assert_eq!(rejection_expecting(&mixed, &identity()), DETAIL);
+}
+
+/// La longitud esperada misma debe estar en 1..=150 (DTPD-106).
+#[test]
+fn an_expected_read_length_outside_one_to_150_is_rejected() {
+    for read_length in [0_u16, 151] {
+        let expected = FinalFastqIdentity {
+            read_length,
+            ..identity()
+        };
+        assert_eq!(
+            rejection_expecting(&valid_record(), &expected),
+            "FASTQ final expected read length is outside 1..=150"
+        );
+    }
+}
+
+/// Hueco 5 (REQ-DAT-72): una `N` con cualquier calidad que no sea Phred 0.
+#[test]
+fn an_n_base_must_carry_phred_zero() {
+    for (sequence, qualities) in [
+        (&b"ACNT"[..], &b"IIII"[..]),
+        (b"NCGT", b"\"!!!"),
+        (b"ACGN", b"!!!\""),
+    ] {
+        assert_eq!(
+            rejection_expecting(&record(R1_HEADER, sequence, b"+", qualities), &identity()),
+            "FASTQ final N base does not carry Phred 0",
+        );
+    }
+}
+
+/// Hueco 6: R1 y R2 de una pareja de longitud distinta. Lo rechaza el juez del
+/// mate que se sale de la longitud común, por el motivo de la longitud: con
+/// una longitud esperada igual para los dos mates, la comparación directa de
+/// R1 con R2 no puede dispararse sola.
+#[test]
+fn mates_of_different_lengths_are_rejected() {
+    let pair = Pair::new(
+        &record(R1_HEADER, b"ACGT", b"+", b"IIII"),
+        &record(R2_HEADER, b"ACGTA", b"+", b"IIIII"),
+    );
+    match pair.judge() {
+        Err(FastqValidationError::Structural { detail, .. }) => assert_eq!(
+            detail,
+            "FASTQ final read length differs from the profile read length"
+        ),
+        other => panic!("expected the read-length rejection, got {other:?}"),
+    }
+}
+
+/// Hueco 7: los recuentos del resumen frente al contenido, uno por uno. En
+/// cada caso los otros dos son correctos y solo el alterado puede rechazar.
+#[test]
+fn summary_counts_that_differ_from_the_content_are_rejected() {
+    let pair = canonical_pair();
+    let right = pair.counts;
+    assert_eq!(
+        (right.pair_count, right.base_count, right.n_base_count),
+        (1, 8, 1),
+        "the fixture must contain a pair, eight bases and one N"
+    );
+    for (counts, detail) in [
+        (
+            FinalFastqCounts {
+                pair_count: 2,
+                ..right
+            },
+            "FASTQ final pair count differs from the published summary",
+        ),
+        (
+            FinalFastqCounts {
+                base_count: 9,
+                ..right
+            },
+            "FASTQ final base count differs from the published summary",
+        ),
+        (
+            FinalFastqCounts {
+                n_base_count: 0,
+                ..right
+            },
+            "FASTQ final N count differs from the published summary",
+        ),
+    ] {
+        match pair.judge_expecting(&identity(), &counts) {
+            Err(FastqValidationError::Structural { detail: found, .. }) => {
+                assert_eq!(found, detail);
+            }
+            other => panic!("expected {detail}, got {other:?}"),
+        }
+    }
+    pair.judge_expecting(&identity(), &right)
+        .expect("the true counts are accepted");
+}
+
+/// Un mate con más registros que parejas publica el resumen, y el otro con las
+/// justas. Se rechaza por el recuento de parejas y no por el de huérfanos, que
+/// vendría después: sin esta prueba, comprobar solo uno de los dos mates no
+/// la haría fallar, porque la comparación de cabeceras rechazaría igual aunque
+/// por otro motivo.
+#[test]
+fn a_mate_with_more_records_than_published_pairs_is_rejected_by_count() {
+    let one = |header: &str| record(header, b"ACNT", b"+", b"II!~");
+    let two = |header: &str| {
+        let mut bytes = one(header);
+        bytes.extend_from_slice(&one(&header.replace(PAIR_A, PAIR_B)));
+        bytes
+    };
+    for (r1, r2) in [
+        (two(R1_HEADER), one(R2_HEADER)),
+        (one(R1_HEADER), two(R2_HEADER)),
+    ] {
+        let pair = Pair::new(&r1, &r2);
+        let counts = FinalFastqCounts {
+            pair_count: 1,
+            base_count: 8,
+            n_base_count: 1,
+        };
+        match pair.judge_expecting(&identity(), &counts) {
+            Err(FastqValidationError::Structural { detail, .. }) => assert_eq!(
+                detail,
+                "FASTQ final pair count differs from the published summary"
+            ),
+            other => panic!("expected the pair-count rejection, got {other:?}"),
+        }
     }
 }

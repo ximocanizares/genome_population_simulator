@@ -94,7 +94,7 @@ fn final_paired_fastq_is_gzip_hashed_paired_and_manifested_without_individual_pr
         .demultiplex(vec![PostContaminationPair::new(
             library.library_id().clone(),
             pair.pre_hop_identity().pre_hop_instance_id().clone(),
-            udi,
+            udi.clone(),
             false,
             observed,
         )])
@@ -120,6 +120,8 @@ fn final_paired_fastq_is_gzip_hashed_paired_and_manifested_without_individual_pr
         event.event_id().as_str(),
         individual.id().as_str(),
         library.library_id(),
+        &udi,
+        event.read_length(),
         pairs,
     )
     .expect("final FASTQ");
@@ -498,7 +500,7 @@ fn the_writer_rejects_and_discards_a_pair_whose_records_break_the_contract() {
         .demultiplex(vec![PostContaminationPair::new(
             library.library_id().clone(),
             pair.pre_hop_identity().pre_hop_instance_id().clone(),
-            udi,
+            udi.clone(),
             false,
             observed,
         )])
@@ -514,6 +516,8 @@ fn the_writer_rejects_and_discards_a_pair_whose_records_break_the_contract() {
         "-not-an-event-id",
         individual.id().as_str(),
         library.library_id(),
+        &udi,
+        event.read_length(),
         pairs,
     )
     .expect_err("the judge must reject a header with an invalid event ID");

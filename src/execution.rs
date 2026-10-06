@@ -1050,11 +1050,19 @@ fn publish_technical_event(
             .get(library.individual_id())
             .expect("selected above")
             .0;
+        let udi = udis.get(library.library_id()).ok_or_else(|| {
+            Box::new(TechnicalEventAssemblyFailure {
+                cause: technical_event_error("technical_event.udi", "biblioteca sin UDI declarado"),
+                link: None,
+            })
+        })?;
         let stream = FinalPairedFastqStream::open(
             workspace,
             event.event_id().as_str(),
             individual.id().as_str(),
             library.library_id(),
+            udi,
+            event.read_length(),
         )
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         streams.insert(library.library_id().clone(), stream);

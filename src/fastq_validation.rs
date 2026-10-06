@@ -225,12 +225,60 @@ pub enum FastqValidationError {
     InvalidCoverageSummary,
 }
 
-/// Comprueba una sola salida PE descomprimida, sin consultar verdad biológica
-/// ni claves transitorias. La comparación contra esa verdad pertenece a F4.5.3.
+/// Lo que un FASTQ final debe llevar en cada registro, fijado por quien lo
+/// publica y no leído del propio fichero: el evento, la biblioteca, el UDI
+/// `i7+i5` de esa biblioteca y la longitud común de lectura (REQ-DAT-33,
+/// REQ-DAT-68, DTC-083 y DTPD-106).
+///
+/// Una pareja que saltó de índice se escribe en el fichero de su biblioteca
+/// **final** y lleva el UDI de esa biblioteca, no el de la de origen: el
+/// demultiplexador asigna a la vez la biblioteca y el UDI finales. Por eso un
+/// solo UDI esperado sirve para todo el fichero.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FinalFastqIdentity {
+    pub event_id: String,
+    pub library_id: String,
+    /// Literal `i7+i5`.
+    pub udi: String,
+    /// Longitud común de todas las lecturas, de 1 a 150.
+    pub read_length: u16,
+}
+
+/// Recuentos que el manifiesto del evento publica para la biblioteca y que el
+/// contenido real de los dos ficheros debe reproducir (hueco 7 de DT-029).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FinalFastqCounts {
+    pub pair_count: u64,
+    pub base_count: u64,
+    pub n_base_count: u64,
+}
+
+/// Lo que el juez de un mate recuenta al leerlo.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FinalMateTally {
+    pub records: u64,
+    pub bases: u64,
+    pub n_bases: u64,
+}
+
+const FINAL_FASTQ_MAXIMUM_READ_LENGTH: u16 = ILLUMINA_SE_MINIMAL_READ_LENGTH;
+const BASE32_ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+/// Comprueba una sola salida PE descomprimida frente a la identidad esperada,
+/// sin consultar verdad biológica ni claves transitorias, y devuelve lo que
+/// recuenta. La comparación contra esa verdad pertenece a F4.5.3.
 pub fn validate_final_fastq_mate(
     path: &Path,
     expected_mate: crate::technical_identity::TechnicalMate,
-) -> Result<(), FastqValidationError> {
+    identity: &FinalFastqIdentity,
+) -> Result<FinalMateTally, FastqValidationError> {
+    if !(1..=FINAL_FASTQ_MAXIMUM_READ_LENGTH).contains(&identity.read_length) {
+        return Err(rejected(FastqValidationError::Structural {
+            path: path.display().to_string(),
+            record_ordinal: 0,
+            detail: "FASTQ final expected read length is outside 1..=150",
+        }));
+    }
     let mut file = File::open(path).map_err(|error| io_error(path, "open_final_fastq", error))?;
     validate_canonical_bgzf_eof(&mut file, path, 0)?;
     // La comprobación del marcador deja la posición al final del fichero. Sin
@@ -240,39 +288,93 @@ pub fn validate_final_fastq_mate(
         .map_err(|error| io_error(path, "rewind_after_eof_check", error))?;
     let mut reader = bgzf::io::Reader::new(file);
     let mut lines = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-    let mut ordinal = 0_u64;
+    // La unicidad se exige solo en R1: la comparación de cabeceras del juez de
+    // la pareja ata cada registro de R2 al de R1. Se guardan los 128 bits de
+    // cada identificador (16 bytes por pareja) y se ordenan al final.
+    let mut pair_bits = Vec::<u128>::new();
+    let mut tally = FinalMateTally::default();
     loop {
         lines
             .iter_mut()
-            .try_for_each(|line| read_final_line(&mut reader, line, path, ordinal))?;
+            .try_for_each(|line| read_final_line(&mut reader, line, path, tally.records))?;
         if lines[0].is_empty() && lines[1].is_empty() && lines[2].is_empty() && lines[3].is_empty()
         {
-            return Ok(());
+            pair_bits.sort_unstable();
+            if pair_bits.windows(2).any(|pair| pair[0] == pair[1]) {
+                // Tras ordenar se pierde la posición del repetido; el ordinal
+                // que se informa es el número de registros del fichero.
+                return Err(rejected(FastqValidationError::Structural {
+                    path: path.display().to_string(),
+                    record_ordinal: tally.records,
+                    detail: "FASTQ final repeats a technical pair ID within the file",
+                }));
+            }
+            return Ok(tally);
         }
         if lines.iter().any(Vec::is_empty) {
             return Err(rejected(FastqValidationError::Structural {
                 path: path.display().to_string(),
-                record_ordinal: ordinal,
+                record_ordinal: tally.records,
                 detail: "FASTQ final has a truncated record",
             }));
         }
-        validate_final_record(path, ordinal, &lines, expected_mate)?;
-        ordinal = ordinal
+        let facts = validate_final_record(path, tally.records, &lines, expected_mate, identity)?;
+        if expected_mate == crate::technical_identity::TechnicalMate::R1 {
+            pair_bits.push(facts.pair_bits);
+        }
+        tally.records = tally
+            .records
             .checked_add(1)
             .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
+        // Saturar basta: un recuento que llegara a `u64::MAX` no coincidiría con
+        // el publicado, y así no hace falta una guarda inalcanzable por contador.
+        tally.bases = tally.bases.saturating_add(facts.bases);
+        tally.n_bases = tally.n_bases.saturating_add(facts.n_bases);
     }
 }
 
 /// Comprueba que R1/R2 contienen exactamente las mismas parejas en el mismo
-/// orden y que sus hashes corresponden a los bytes comprimidos publicados.
+/// orden, que cada registro lleva la identidad esperada, que sus hashes
+/// corresponden a los bytes comprimidos publicados y que los recuentos de
+/// parejas, bases y `N` que publica el manifiesto son los del contenido real.
 pub fn validate_final_paired_fastq(
     r1_path: &Path,
     r1_artifact: &ArtifactRecord,
     r2_path: &Path,
     r2_artifact: &ArtifactRecord,
+    identity: &FinalFastqIdentity,
+    counts: &FinalFastqCounts,
 ) -> Result<(), FastqValidationError> {
-    validate_final_fastq_mate(r1_path, crate::technical_identity::TechnicalMate::R1)?;
-    validate_final_fastq_mate(r2_path, crate::technical_identity::TechnicalMate::R2)?;
+    let r1_tally = validate_final_fastq_mate(
+        r1_path,
+        crate::technical_identity::TechnicalMate::R1,
+        identity,
+    )?;
+    let r2_tally = validate_final_fastq_mate(
+        r2_path,
+        crate::technical_identity::TechnicalMate::R2,
+        identity,
+    )?;
+    let mismatch = |detail| FastqValidationError::Structural {
+        path: format!("{} / {}", r1_path.display(), r2_path.display()),
+        record_ordinal: 0,
+        detail,
+    };
+    if r1_tally.records != counts.pair_count || r2_tally.records != counts.pair_count {
+        return Err(rejected(mismatch(
+            "FASTQ final pair count differs from the published summary",
+        )));
+    }
+    if r1_tally.bases.checked_add(r2_tally.bases) != Some(counts.base_count) {
+        return Err(rejected(mismatch(
+            "FASTQ final base count differs from the published summary",
+        )));
+    }
+    if r1_tally.n_bases.checked_add(r2_tally.n_bases) != Some(counts.n_base_count) {
+        return Err(rejected(mismatch(
+            "FASTQ final N count differs from the published summary",
+        )));
+    }
     validate_final_artifact(r1_path, r1_artifact)?;
     validate_final_artifact(r2_path, r2_artifact)?;
     let mut r1 = bgzf::io::Reader::new(
@@ -390,12 +492,23 @@ fn read_final_line(
     Ok(())
 }
 
+/// Número de símbolos Base32 de un identificador automático (DTC-086, DTC-087).
+const DERIVED_ID_SYMBOLS: usize = 26;
+
+/// Lo que el juez de un mate saca de un registro ya validado.
+struct FinalRecordFacts {
+    pair_bits: u128,
+    bases: u64,
+    n_bases: u64,
+}
+
 fn validate_final_record(
     path: &Path,
     ordinal: u64,
     lines: &[Vec<u8>; 4],
     expected_mate: crate::technical_identity::TechnicalMate,
-) -> Result<(), FastqValidationError> {
+    identity: &FinalFastqIdentity,
+) -> Result<FinalRecordFacts, FastqValidationError> {
     let structural = |detail| FastqValidationError::Structural {
         path: path.display().to_string(),
         record_ordinal: ordinal,
@@ -408,7 +521,22 @@ fn validate_final_record(
     let Some(header) = header.strip_prefix('@') else {
         return Err(rejected(structural("FASTQ final header lacks @")));
     };
-    parse_final_header(header, expected_mate).map_err(structural)?;
+    let parsed = parse_final_header(header, expected_mate).map_err(structural)?;
+    if parsed.event_id != identity.event_id {
+        return Err(rejected(structural(
+            "FASTQ final record belongs to a different event than expected",
+        )));
+    }
+    if parsed.library_id != identity.library_id {
+        return Err(rejected(structural(
+            "FASTQ final record belongs to a different library than expected",
+        )));
+    }
+    if parsed.udi != identity.udi {
+        return Err(rejected(structural(
+            "FASTQ final record carries a different UDI than its library",
+        )));
+    }
     if lines[2] != b"+\n"
         || lines[1].len() < 2
         || lines[1].last() != Some(&b'\n')
@@ -419,10 +547,12 @@ fn validate_final_record(
             "FASTQ final record structure is invalid",
         )));
     }
-    if !lines[1][..lines[1].len() - 1]
+    let sequence = &lines[1][..lines[1].len() - 1];
+    let qualities = &lines[3][..lines[3].len() - 1];
+    if !sequence
         .iter()
         .all(|base| matches!(base, b'A' | b'C' | b'G' | b'T' | b'N'))
-        || !lines[3][..lines[3].len() - 1]
+        || !qualities
             .iter()
             .all(|quality| (b'!'..=b'~').contains(quality))
     {
@@ -430,7 +560,28 @@ fn validate_final_record(
             "FASTQ final sequence or quality alphabet is invalid",
         )));
     }
-    Ok(())
+    if sequence.len() != usize::from(identity.read_length) {
+        return Err(rejected(structural(
+            "FASTQ final read length differs from the profile read length",
+        )));
+    }
+    // REQ-DAT-72: toda `N` lleva Phred 0, que en Sanger es `!`.
+    if sequence
+        .iter()
+        .zip(qualities)
+        .any(|(base, quality)| *base == b'N' && *quality != b'!')
+    {
+        return Err(rejected(structural(
+            "FASTQ final N base does not carry Phred 0",
+        )));
+    }
+    let n_bases = sequence.iter().filter(|base| **base == b'N').count();
+    Ok(FinalRecordFacts {
+        pair_bits: parsed.pair_bits,
+        // Una línea mide como mucho 256 bytes (`FINAL_FASTQ_MAXIMUM_LINE_LENGTH`).
+        bases: u64::try_from(sequence.len()).unwrap_or(u64::MAX),
+        n_bases: u64::try_from(n_bases).unwrap_or(u64::MAX),
+    })
 }
 
 fn read_final_header(
@@ -490,6 +641,8 @@ struct FinalFastqHeader {
     event_id: String,
     library_id: String,
     technical_pair_id: String,
+    /// Los 128 bits que codifica el identificador de la pareja.
+    pair_bits: u128,
     udi: String,
 }
 
@@ -529,6 +682,18 @@ fn parse_final_header(
         .map_err(|_| rejected("FASTQ final library ID is invalid"))?;
     TechnicalPairId::parse(technical_pair_id, "final_fastq")
         .map_err(|_| rejected("FASTQ final pair ID is invalid"))?;
+    // La biblioteca y la pareja de un FASTQ publicado son siempre automáticas:
+    // el prefijo de su clase y 128 bits en 26 símbolos Base32 (DTC-086,
+    // DTC-087). El analizador genérico de identificadores admite mucho más.
+    if !has_derived_shape(library_id, "LIB_") {
+        return Err(rejected(
+            "FASTQ final library ID is not LIB_ followed by 26 Base32 symbols",
+        ));
+    }
+    let pair_bits =
+        crate::identity::decode_technical_pair_id(technical_pair_id).ok_or_else(|| {
+            rejected("FASTQ final pair ID is not TP_ followed by 26 canonical Base32 symbols")
+        })?;
     let expected_prefix = format!("{}:N:0:", expected_mate.number());
     let udi = mate
         .strip_prefix(&expected_prefix)
@@ -544,7 +709,17 @@ fn parse_final_header(
         event_id: event_id.to_owned(),
         library_id: library_id.to_owned(),
         technical_pair_id: technical_pair_id.to_owned(),
+        pair_bits: u128::from_be_bytes(pair_bits),
         udi: udi.to_owned(),
+    })
+}
+
+fn has_derived_shape(identifier: &str, prefix: &str) -> bool {
+    identifier.strip_prefix(prefix).is_some_and(|symbols| {
+        symbols.len() == DERIVED_ID_SYMBOLS
+            && symbols
+                .bytes()
+                .all(|symbol| BASE32_ALPHABET.contains(&symbol))
     })
 }
 
@@ -560,10 +735,8 @@ mod final_header_tests {
     use super::parse_final_header;
     use crate::technical_identity::TechnicalMate;
 
-    const R1: &str =
-        "GPS:event-main:library-main:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 1:N:0:ACGTACGT+TGCATGCA";
-    const R2: &str =
-        "GPS:event-main:library-main:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 2:N:0:ACGTACGT+TGCATGCA";
+    const R1: &str = "GPS:event-main:LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ:TP_ABCDEFGHIJKLMNOPQRSTUVWXYY 1:N:0:ACGTACGT+TGCATGCA";
+    const R2: &str = "GPS:event-main:LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ:TP_ABCDEFGHIJKLMNOPQRSTUVWXYY 2:N:0:ACGTACGT+TGCATGCA";
 
     #[test]
     fn final_headers_require_gps_identity_and_matching_pair_components() {
@@ -571,10 +744,10 @@ mod final_header_tests {
         let r2 = parse_final_header(R2, TechnicalMate::R2).expect("canonical R2");
         assert_eq!(r1, r2);
         for mutated in [
-            "GPS:event-other:library-main:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 2:N:0:ACGTACGT+TGCATGCA",
-            "GPS:event-main:library-other:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 2:N:0:ACGTACGT+TGCATGCA",
-            "GPS:event-main:library-main:TP_ZYXWVUTSRQPONMLKJIHGFEDCBA 2:N:0:ACGTACGT+TGCATGCA",
-            "GPS:event-main:library-main:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 2:N:0:TGCATGCA+ACGTACGT",
+            "GPS:event-other:LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ:TP_ABCDEFGHIJKLMNOPQRSTUVWXYY 2:N:0:ACGTACGT+TGCATGCA",
+            "GPS:event-main:LIB_ZYXWVUTSRQPONMLKJIHGFEDCBA:TP_ABCDEFGHIJKLMNOPQRSTUVWXYY 2:N:0:ACGTACGT+TGCATGCA",
+            "GPS:event-main:LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ:TP_ZYXWVUTSRQPONMLKJIHGFEDCBA 2:N:0:ACGTACGT+TGCATGCA",
+            "GPS:event-main:LIB_ABCDEFGHIJKLMNOPQRSTUVWXYZ:TP_ABCDEFGHIJKLMNOPQRSTUVWXYY 2:N:0:TGCATGCA+ACGTACGT",
         ] {
             let parsed =
                 parse_final_header(mutated, TechnicalMate::R2).expect("well-formed mutation");
@@ -585,7 +758,7 @@ mod final_header_tests {
         }
         assert!(
             parse_final_header(
-                "TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 1:N:0:ACGTACGT+TGCATGCA",
+                "TP_ABCDEFGHIJKLMNOPQRSTUVWXYY 1:N:0:ACGTACGT+TGCATGCA",
                 TechnicalMate::R1,
             )
             .is_err()

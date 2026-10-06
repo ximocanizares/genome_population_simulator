@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::execution::execute_validated_config;
-use genome_population_simulator::fastq_validation::validate_final_paired_fastq;
+use genome_population_simulator::fastq_validation::{
+    FinalFastqCounts, FinalFastqIdentity, validate_final_paired_fastq,
+};
 use genome_population_simulator::results::{ArtifactRecord, validate_published_resources};
 use genome_population_simulator::technical_identity::TechnicalMate;
 
@@ -99,11 +101,34 @@ fn valid_matrix_contamination_and_hopping_publish_only_final_paired_fastq() {
         let outputs = event["outputs"].as_array().expect("outputs");
         let r1 = output_artifact(outputs, individual, TechnicalMate::R1);
         let r2 = output_artifact(outputs, individual, TechnicalMate::R2);
+        // Con el salto de índice a tasa uno, todas las parejas están en el
+        // fichero de su biblioteca de destino y llevan el UDI de esa
+        // biblioteca. La identidad y los recuentos salen del manifiesto y de
+        // la configuración, no del fichero.
+        let udi = match individual {
+            "sample-A" => "ACGTACGT+TGCATGCA",
+            "sample-B" => "CGTACGTA+GCATGCAT",
+            other => panic!("unexpected individual {other}"),
+        };
+        let identity = FinalFastqIdentity {
+            event_id: "reads-known".to_owned(),
+            library_id: summary["library_id"].as_str().expect("library").to_owned(),
+            udi: udi.to_owned(),
+            read_length: 150,
+        };
+        let counts = FinalFastqCounts {
+            pair_count: summary["pair_count"].as_u64().expect("pairs"),
+            base_count: summary["base_count"].as_u64().expect("bases"),
+            n_base_count: summary["n_base_count"].as_u64().expect("N bases"),
+        };
+        assert!(counts.pair_count > 0, "each library must receive pairs");
         validate_final_paired_fastq(
             &destination.join(&r1.path),
             &r1,
             &destination.join(&r2.path),
             &r2,
+            &identity,
+            &counts,
         )
         .expect("R1/R2 final paired FASTQ");
     }
