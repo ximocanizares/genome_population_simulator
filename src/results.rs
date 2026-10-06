@@ -2625,11 +2625,19 @@ fn validate_published_reference_names(
                 format!("la cabecera de la verdad no nombra la referencia de la simulación, {id}"),
             ));
         }
-        if let Ok(content) = crate::truth_validation::reference_content_sha256(reference)
-            && header
-                .get("reference_content_sha256")
-                .and_then(Value::as_str)
-                != Some(content.as_str())
+        // La huella viaja con la referencia cuando esta se leyó sin bases (se
+        // calculó recorriendo el FASTA publicado, en la misma pasada que lo
+        // valida); con bases, se calcula. Si no hay ninguna de las dos, o la
+        // cabecera no la trae igual, se rechaza: un digest discordante falla
+        // (DTC-061).
+        let content = reference
+            .content_sha256()
+            .map(str::to_owned)
+            .or_else(|| crate::truth_validation::reference_content_sha256(reference).ok());
+        if header
+            .get("reference_content_sha256")
+            .and_then(Value::as_str)
+            != content.as_deref()
         {
             return Err(effective_error(
                 effective_path,
@@ -4204,16 +4212,19 @@ fn validate_physical_truth(
     matrix: Option<&PreparedPopulationSnvs>,
     effective_path: &Path,
 ) -> Result<(), Diagnostic> {
-    // Sin poblaciones iniciales la verdad no lleva copias ni casos, y la
-    // referencia puede haberse leído sin bases: su cabecera la juzga ya
-    // `validate_published_reference_names`.
+    // **Sin poblaciones iniciales** la verdad no lleva copias ni casos, pero su
+    // cabecera sigue siendo contrato (DT-027): el lector de la verdad la
+    // juzga siempre. El juez semántico completo, que solo añade algo con
+    // copias y casos, corre cuando hay poblaciones. La huella del contenido de
+    // la referencia la compara `validate_published_reference_names`, también
+    // sin bases.
     let Some(truth) = artifacts
         .iter()
         .find(|artifact| artifact.id == "truth-jsonl")
-        .filter(|_| !physical_config.initial_populations().is_empty())
     else {
         return Ok(());
     };
+    let judge_semantics = !physical_config.initial_populations().is_empty();
     let populations = physical_config
         .initial_populations()
         .iter()
@@ -4233,10 +4244,12 @@ fn validate_physical_truth(
         .and_then(|file| {
             crate::truth_validation::read_truth_jsonl(&mut std::io::BufReader::new(file))
                 .and_then(|document| {
-                    crate::truth_validation::validate_published_truth(
-                        &document, reference, &case_loci,
-                    )
-                    .map(|()| document)
+                    if judge_semantics {
+                        crate::truth_validation::validate_published_truth(
+                            &document, reference, &case_loci,
+                        )?;
+                    }
+                    Ok(document)
                 })
                 .map_err(|error| format!("{error:?}"))
         })

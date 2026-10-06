@@ -6,6 +6,7 @@ use genome_population_simulator::reference::{ReversibleText, SequenceClass};
 use genome_population_simulator::reference_fasta::{
     SequenceExpectation, validate_supplied_fasta, validate_supplied_fasta_summary,
 };
+use genome_population_simulator::truth_validation::reference_content_sha256;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -196,6 +197,41 @@ fn reference_fasta_summary_matches_full_read() {
     assert_eq!(
         summary.source_identity().size_bytes(),
         full.source_identity().size_bytes()
+    );
+    // DT-027: la huella del contenido que el lector de resumen calcula
+    // recorriendo el FASTA sin retenerlo es exactamente la de la referencia
+    // materializada. Con minúsculas, `N` y finales de línea CRLF.
+    assert_eq!(
+        summary.content_sha256(),
+        reference_content_sha256(full.reference()).expect("full digest")
+    );
+}
+
+/// DT-027: la misma igualdad con secuencias en varias líneas de ancho
+/// desigual, que el fixture de arriba no tiene. Un resumen que digiriera las
+/// bases con los saltos de línea daría otra huella.
+#[test]
+fn summary_content_digest_equals_the_materialized_one_on_wrapped_sequences() {
+    let directory = TestDirectory::new("summary-digest-wrapped");
+    let path = directory.path().join("reference.fa");
+    fs::write(&path, b">chr1\nACGTAC\nGTNa\nCC\n>scaf-2\nTTGA\nCA\n").expect("write fixture");
+    let expected = [
+        SequenceExpectation {
+            id: "chr1",
+            class: SequenceClass::Chromosome,
+            length: 12,
+        },
+        SequenceExpectation {
+            id: "scaf-2",
+            class: SequenceClass::Scaffold,
+            length: 6,
+        },
+    ];
+    let full = validate_supplied_fasta(&path, "ref-main", &expected).expect("full read");
+    let summary = validate_supplied_fasta_summary(&path, "ref-main", &expected).expect("summary");
+    assert_eq!(
+        summary.content_sha256(),
+        reference_content_sha256(full.reference()).expect("full digest")
     );
 }
 

@@ -975,3 +975,131 @@ fn repeat_loci_at_the_same_coordinates_on_two_sequences_publish() {
     assert_eq!(repeat_cases, 2, "one repeat case per sequence");
     fs::remove_dir_all(root).expect("cleanup");
 }
+
+/// DT-027: un paquete **sin poblaciones** también pasa la cabecera de la verdad
+/// por el contrato. Hasta el 6 de octubre de 2026 el juez de los recursos
+/// publicados no leía en ese caso el documento: solo comparaba nombre, huella
+/// de contenido y huellas de fuente, y aceptaba cualquier otra alteración de
+/// la cabecera que el lector de la verdad rechaza.
+///
+/// Se repite con las dos referencias que existen sin poblaciones: la
+/// **simulada** y la **suministrada**, que el juez lee solo con su ficha, sin
+/// bases. La rama sin bases es la que protege el caso de la huella del
+/// contenido (`content-digest-flip` y `content-digest-zeros`), que antes se
+/// omitía en silencio.
+///
+/// Los casos `control-*` (`reference_id`, huella del contenido a ceros y huella
+/// de la referencia en mayúsculas) ya los cazaba la comparación de nombres con
+/// bases: son el control de que el arnés rechaza por la verdad y no por otra
+/// cosa. Lo que esta prueba no discrimina: con bases y sin poblaciones, el
+/// juez semántico completo no aporta nada medible sobre el lector.
+#[test]
+fn truth_header_of_a_package_without_populations_is_judged() {
+    type Tamper = fn(&mut Vec<Value>);
+    let cases: [(&str, Tamper); 13] = [
+        ("control-reference-id", |lines| {
+            lines[0]["reference_id"] = json!("ref-other");
+        }),
+        ("content-digest-zeros", |lines| {
+            lines[0]["reference_content_sha256"] = json!("0".repeat(64));
+        }),
+        ("content-digest-flip", |lines| {
+            let digest = lines[0]["reference_content_sha256"]
+                .as_str()
+                .expect("digest")
+                .to_owned();
+            let first = if digest.starts_with('0') { "1" } else { "0" };
+            lines[0]["reference_content_sha256"] = json!(format!("{first}{}", &digest[1..]));
+        }),
+        ("document-kind", |lines| {
+            lines[0]["document_kind"] = json!("gps_other");
+        }),
+        ("schema-version", |lines| {
+            lines[0]["schema_version"] = json!("3");
+        }),
+        ("promoted-schema-version", |lines| {
+            lines[0]["schema_version"] = json!("5");
+        }),
+        ("coordinate-convention", |lines| {
+            lines[0]["coordinate_convention"] = json!("one_based_closed");
+        }),
+        ("unknown-header-key", |lines| {
+            lines[0]["zz_extra"] = json!(1);
+        }),
+        ("copy-count", |lines| {
+            lines[0]["counts"]["copies"] = json!(1);
+        }),
+        ("control-uppercase-reference-digest", |lines| {
+            let digest = lines[0]["source_digests"][0]["sha256"]
+                .as_str()
+                .expect("digest")
+                .to_uppercase();
+            lines[0]["source_digests"][0]["sha256"] = json!(digest);
+        }),
+        ("malformed-group-digest", |lines| {
+            lines[0]["group_digests"] = json!([{
+                "sha256": "not-a-digest",
+                "source": {"kind": "founder", "source_id": "founder-1"}
+            }]);
+        }),
+        ("unknown-record-type", |lines| {
+            lines.push(json!({"record_type": "zz_extra"}));
+        }),
+        ("second-header", |lines| {
+            let header = lines[0].clone();
+            lines.push(header);
+        }),
+    ];
+    for (fixture_name, fixture) in [
+        ("simulated", simulated_fixture()),
+        ("supplied", supplied_fixture()),
+    ] {
+        for (label, tamper) in cases {
+            let label = &format!("{fixture_name}-{label}");
+            let parent = temporary(label);
+            fs::create_dir(&parent).expect("temporary root");
+            let destination = parent.join("result");
+            let effective_config = load_and_validate_config(&fixture).expect("fixture");
+            execute_validated_config(&effective_config, &destination).expect("complete baseline");
+            let effective_path = destination.join("effective-config.json");
+            let manifest_path = destination.join("manifest.json");
+            let mut manifest = read_json(&manifest_path);
+            let truth_path = destination.join(artifact_path(&manifest, "truth-jsonl"));
+            let text = fs::read_to_string(&truth_path).expect("truth");
+            let mut lines = text
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).expect("truth line"))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                lines.len(),
+                1,
+                "a package without populations has no records"
+            );
+            tamper(&mut lines);
+            let tampered = lines
+                .iter()
+                .map(|line| serde_json::to_string(line).expect("line") + "\n")
+                .collect::<String>();
+            assert_ne!(
+                tampered, text,
+                "case {label}: the tamper must change the truth"
+            );
+            fs::write(&truth_path, tampered).expect("tampered truth");
+            refresh_artifact(&destination, &mut manifest, "truth-jsonl");
+            write_json(&manifest_path, &manifest);
+            let effective_bytes = fs::read(&effective_path).expect("effective bytes");
+            let manifest_bytes = fs::read(&manifest_path).expect("manifest bytes");
+            let error = validate_published_resources(
+                &destination,
+                &effective_path,
+                &effective_bytes,
+                &manifest_path,
+                &manifest_bytes,
+                None,
+            )
+            .expect_err(label);
+            assert_eq!(error.code(), "GPS-FMT-006", "case {label}: {error:?}");
+            fs::remove_dir_all(parent).expect("cleanup");
+        }
+    }
+}

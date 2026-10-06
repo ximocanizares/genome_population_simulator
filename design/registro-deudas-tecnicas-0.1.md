@@ -54,11 +54,12 @@ documenta mejor.
 | DT-024 | `validate_published_resources` no termina con `lineages` = 18446744073709551615 en la configuración efectiva | Media | 04/10/2026 | **Cerrada (06/10/2026)** |
 | DT-025 | `validate_published_resources` aborta con `capacity overflow` si `reference_units[1]` = 18446744073709551615 en la efectiva | Media | 04/10/2026 | **Cerrada (06/10/2026)** |
 | DT-026 | El juez de cada mate del FASTQ final no leía ni un registro: toda la validación de registros era código muerto en producción | **Grave** | 05/10/2026 | **Cerrada (05/10/2026)** |
-| DT-027 | La verdad de un paquete sin poblaciones no se juzga: 31 alteraciones de la cabecera pasan el juez de los recursos publicados | Media | 05/10/2026 | Abierta |
-| DT-028 | Sospecha: un alelo de referencia con una clave desconocida se acepta, el alelo SNP las rechaza | Baja | 05/10/2026 | Abierta, sin reproducir del todo |
+| DT-027 | La verdad de un paquete sin poblaciones no se juzga: 31 alteraciones de la cabecera pasan el juez de los recursos publicados | Media | 05/10/2026 | **Cerrada (06/10/2026)** |
+| DT-028 | Sospecha: un alelo de referencia con una clave desconocida se acepta, el alelo SNP las rechaza | Baja | 05/10/2026 | **Cerrada (06/10/2026)**, reproducida |
 | DT-029 | El juez del FASTQ final no comprueba siete propiedades del contrato: identidad del fichero, unicidad de la pareja, formato de los identificadores, longitud, `N` con Phred 0, R1 frente a R2 y resúmenes del manifiesto | Media | 05/10/2026 | **Cerrada (05/10/2026)** |
 | DT-030 | Un bloque BGZF que declara más de 64 KiB descomprimidos hace abortar al juez con un pánico en vez de rechazar el fichero | Media | 05/10/2026 | **Cerrada (06/10/2026)**, sin cambiar dependencias |
-| DT-031 | Una referencia corta con tasa de quimeras alta aborta como «invariante imposible» en vez de rechazarse como configuración | Baja | 05/10/2026 | Abierta |
+| DT-031 | Una referencia corta con tasa de quimeras alta aborta como «invariante imposible» en vez de rechazarse como configuración | Baja | 05/10/2026 | **Cerrada (06/10/2026)** |
+| DT-032 | El lector de la verdad acepta como lista JSON objetos que el esquema exige objeto (`"counts":[6,8]`) | Baja | 06/10/2026 | Abierta |
 
 ---
 
@@ -2149,6 +2150,57 @@ mira la referencia. Resultado medido por el corpus: **31 alteraciones de la
 cabecera de `truth.jsonl`** que el lector rechaza **pasan** el juez de los
 recursos publicados. No se ha corregido.
 
+
+### Cómo se cerró (06/10/2026)
+
+**Corrección, en dos partes.**
+
+1. `validate_physical_truth` (`src/results.rs`) ya no se salta la verdad
+   cuando no hay poblaciones: el lector de la verdad (`read_truth_jsonl`)
+   la lee siempre y aplica el contrato de la cabecera. El juez semántico
+   completo sigue corriendo solo cuando hay poblaciones, porque solo entonces
+   hay copias y casos que juzgar. Se midió con el corpus de la revisión
+   (105 alteraciones de la cabecera, con referencia simulada y con
+   suministrada) que correrlo también con bases y sin poblaciones da
+   exactamente los mismos veredictos: no aporta nada medible, y por eso no se
+   deja.
+2. **La huella del contenido de la referencia ya no se omite sin bases.**
+   `validate_published_reference_names` solo la comparaba si podía
+   calcularla sobre las bases materializadas, y con una referencia suministrada
+   leída solo con su ficha la omitía en silencio, contra DTC-061 («los
+   digests discordantes fallan»). Ahora usa la huella que el lector del FASTA
+   publicado calcula en la misma pasada que lo valida, sin retenerlo en
+   memoria (`ValidatedFastaSummary::content_sha256`), y si no hay ninguna de
+   las dos, o la cabecera no trae la misma, rechaza. Esa pasada la hace el
+   propio juez sobre el FASTA publicado, así que sigue siendo independiente de
+   quien escribió la verdad. Los dos cálculos dan la misma huella:
+   `reference_fasta_summary_matches_full_read` y
+   `summary_content_digest_equals_the_materialized_one_on_wrapped_sequences`
+   (`tests/fasta_validation.rs`) lo comprueban con minúsculas, `N`, CRLF y
+   secuencias en varias líneas de ancho desigual.
+
+**Prueba.** `truth_header_of_a_package_without_populations_is_judged`
+(`tests/published_resource_validation.rs`): trece alteraciones, con la
+referencia simulada y con la suministrada (esta última sin bases). Nueve
+alteraciones de la cabecera y del documento (tipo de documento, versión,
+versión promovida, convención de coordenadas, clave desconocida, recuento de
+copias, huella de grupo mal formada, registro de tipo desconocido, segunda
+cabecera) pasaban el juez antes; dos casos de huella del contenido (a ceros y
+con un dígito cambiado) se rechazaban con bases y se aceptaban sin ellas; dos
+controles ya los cazaba la comparación de nombres. Se verificó fallando contra
+tres variantes: restaurar el filtro por poblaciones (mueren las 18 alteraciones
+de la cabecera en las dos referencias), saltarse el lector solo sin bases
+(mueren las 9 con la suministrada) y volver a omitir la huella sin bases
+(mueren las 2 de huella con la suministrada). Lo que la prueba no discrimina:
+el juez semántico con bases y sin poblaciones, que por lo dicho no cambia
+ningún veredicto.
+
+**Lo que sigue abierto, y no es de esta deuda.** En el corpus de la revisión
+pasan el juez, también con poblaciones, un `execution_id` cambiado en la
+cabecera y un `source_digests` de más; no hay norma que obligue a que el
+`execution_id` de la verdad coincida con el del manifiesto. Queda anotado en
+DT-032.
+
 ---
 
 ## DT-028. Sospecha: un alelo de referencia admite claves desconocidas
@@ -2159,6 +2211,23 @@ Un alelo `{"kind":"reference","zz_extra":1}` se acepta, mientras que el alelo
 `snp` rechaza las claves desconocidas. Lo anotó la revisión adversarial del
 05/10/2026 como sospecha; no se ha investigado si el contrato de la verdad
 quiere ese rechazo también para el alelo de referencia.
+
+
+### Cómo se cerró (06/10/2026)
+
+**Reproducida.** El esquema de la verdad (`schemas/truth-v5.schema.json`, y los
+anteriores) cierra el alelo de referencia con `additionalProperties: false`,
+igual que el resto, así que el contrato es inequívoco. El lector aceptaba
+`{"kind":"reference","zz_extra":1}` porque una variante sin campos de un enum
+etiquetado por dentro no aplica `deny_unknown_fields` de serde. Es la única
+variante de ese tipo en el lector de la verdad.
+
+**Corrección.** `WireAllele::Reference` pasa a variante con llaves vacías
+(`Reference {}`) en `src/truth_validation.rs`.
+
+**Prueba.** `schema_reader_rejects_unknown_keys_in_every_allele_kind`
+(`tests/truth_validation.rs`): una clave de más en un alelo de referencia, uno
+SNP y uno de inserción, cada uno con su control (el fichero intacto se lee).
 
 ---
 
@@ -2367,3 +2436,69 @@ falla antes de publicar, sin reintento ni reducción silenciosa de la tasa».
 Lo que no prevé es que se presente como un **defecto interno** del programa:
 para quien lo ejecuta, es una configuración que no cabe en su referencia y
 debería recibir un diagnóstico de configuración que lo diga.
+
+### Cómo se cerró (06/10/2026)
+
+**Reproducida** con una sola copia (`ploidy = 1`). El caso del registro con
+dos copias publica, y el fallo con una sola **depende de la semilla**: con la
+configuración de la prueba, 19 de 20 semillas publican y `validate` la acepta.
+Que con dos copias la otra copia ofrezca siempre un segundo origen no está
+demostrado: no se ha comprobado con una copia que lleve deleciones grandes.
+
+**Corrección.** `wgs_paired_sampler_error` (`src/execution.rs`) traduce
+`Chimera(NoSecondSource)` a `GPS-DOMAIN-003` (salida 1), el mismo código del
+precedente DT-006, con el individuo como `entity`, `segundo_origen_de_quimera`
+como `invariant` y, en `detail`, la dependencia de la semilla y la sugerencia
+de una referencia más larga o una tasa de quimeras menor. Se descarta una
+salida de configuración (`GPS-CONF-008`, salida 2) porque el fallo depende de
+la semilla y DTC-044 reserva la salida 2 a la configuración inválida. Sin
+código nuevo, sin reintento, sin bajar la tasa y sin tocar DTC-084. Además,
+`select_second_source` (`src/chimera.rs`) devuelve ahora su propia variante,
+`SelectedSourceOutOfRange`, cuando el índice sorteado se sale de las candidatas
+contadas, que es una invariante interna y no la falta real de candidatas: la
+traducción solo atrapa esta última.
+
+**Pruebas.** `a_chimera_rate_that_does_not_fit_a_short_reference_is_a_domain_diagnostic`
+(`tests/f4_chimeras_pairs.rs`), de extremo a extremo: código, categoría,
+salida 1, individuo, invariante y sugerencia, con control de tasa 0 que
+publica. **Usa la semilla de las pruebas porque con ella el sorteo falla**; no
+demuestra que 600 pb con una copia y tasa 1 nunca quepan. Y
+`a_selected_index_outside_the_counted_candidates_is_not_a_missing_source`
+(`src/chimera.rs`), que ejercita la rama de la variante nueva.
+
+---
+
+## DT-032. El lector de la verdad acepta objetos escritos como lista JSON
+
+**Gravedad: baja.** Nada se publica mal por esto: el escritor siempre emite
+objetos. Es un hueco del lector, anterior al cambio de DT-027 a DT-031, que
+encontró la revisión adversarial del 06/10/2026.
+
+`read_truth_jsonl` (`src/truth_validation.rs`) deserializa con `serde` unas
+estructuras que, por defecto, **aceptan también una secuencia de valores en el
+orden de los campos**. `deny_unknown_fields` no lo impide. Así, el
+`truth.jsonl` con `"counts":[6,8]` en lugar de `"counts":{"copies":6,"genotypes":8}`
+se lee, y el esquema JSON de la verdad (`schemas/truth-v4.schema.json` y
+`truth-v5.schema.json`, validados con `jsonschema` 4.10.3) lo rechaza.
+
+**Reproducción medida el 06/10/2026**, sobre un paquete real con poblaciones
+(dos individuos diploides, una fila de matriz): se sustituye, una a una, cada
+estructura del documento por la lista de sus valores, 85 alteraciones. El juez
+de los recursos publicados **acepta 40** y `jsonschema` rechaza las 85. Entre
+ellas, `counts` de la cabecera, la fuente de cada huella (`source_digests[*].source`
+y `group_digests[0].source`), la procedencia de cada copia y de cada
+modificación, la fuente de cada segmento y de cada pieza, la procedencia
+de cada SNP y cada alelo y cada portador de un genotipo. El revisor había anotado
+tres casos con `counts`, la fuente de la huella y la procedencia de una copia;
+el barrido los amplía.
+
+**Qué haría falta.** Un deserializador de estructuras que rechace secuencias
+(una pasada por un `serde_json::Value` o `deserialize_map` explícito), o una
+comprobación del esquema en el lector. No se ha corregido: es una deuda
+registrada.
+
+**Otras dos observaciones de la misma revisión, que no son este defecto y no
+se corrigen aquí.** Un `execution_id` cambiado en la cabecera de la verdad y
+un `source_digests` de más pasan el juez, con y sin poblaciones: no hay norma
+que fije que el `execution_id` de la verdad coincida con el del manifiesto, ni
+que prohíba entradas de fuente que ningún registro cita.

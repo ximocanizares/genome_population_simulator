@@ -953,7 +953,7 @@ fn publish_technical_event(
         for pair in &mut sampler {
             let pair = pair.map_err(|error| {
                 Box::new(TechnicalEventAssemblyFailure {
-                    cause: wgs_paired_sampler_error(error),
+                    cause: wgs_paired_sampler_error(error, individual.id()),
                     link: None,
                 })
             })?;
@@ -1490,7 +1490,10 @@ fn paired_sampler<'a>(
 /// conoce ningún código añadido después de F5. Un código nuevo se vería
 /// rechazado al publicar precisamente el fallo controlado que debía informar
 /// —la limitación en sí está registrada aparte, en DT-007—.
-fn wgs_paired_sampler_error(error: WgsSamplingError) -> Diagnostic {
+fn wgs_paired_sampler_error(
+    error: WgsSamplingError,
+    individual: &crate::identity::IndividualId,
+) -> Diagnostic {
     match error {
         WgsSamplingError::ImpracticalInsertSampling {
             individual,
@@ -1510,6 +1513,31 @@ y el perfil técnico exige un inserto mínimo de {minimum_insert_bases} pb: ese 
 sorteo del inserto. Usa una referencia más larga para este individuo."
             ),
         ),
+        // DT-031: con una tasa de quimeras alta, una referencia corta puede no
+        // ofrecer a alguna pareja seleccionada un segundo origen que no toque
+        // su prefijo (DTC-084). Es un fallo previsto que se declara antes de
+        // publicar, sin reintento ni reducción silenciosa de la tasa, y no un
+        // defecto interno. Reutiliza `GPS-DOMAIN-003`, como DT-006, y no una
+        // salida de configuración: depende de la semilla (la misma
+        // configuración publica con la mayoría de las semillas y `validate` la
+        // acepta), y DTC-044 reserva la salida 2 a la configuración inválida.
+        WgsSamplingError::Chimera(crate::chimera::ChimeraError::NoSecondSource) => {
+            Diagnostic::domain(
+                "GPS-DOMAIN-003",
+                "Una invariante del estado biológico o técnico válido no se cumple.",
+            )
+            .with("entity", individual.as_str())
+            .with("invariant", "segundo_origen_de_quimera")
+            .with(
+                "detail",
+                format!(
+                    "con la tasa de quimeras pedida, a alguna pareja seleccionada del individuo {individual} \
+no le queda en su referencia un segundo origen que no toque su prefijo. Depende de la semilla y de la \
+longitud de las copias del individuo: otra semilla puede publicar. Usa una referencia más larga o una \
+tasa de quimeras menor; el simulador no la reduce por su cuenta."
+                ),
+            )
+        }
         other => technical_event_error("wgs_paired_sampler", format!("{other:?}")),
     }
 }
@@ -1604,7 +1632,7 @@ impl RegeneratedPairs {
         )?;
         let mut pairs = BTreeMap::new();
         for pair in sampler {
-            let pair = pair.map_err(wgs_paired_sampler_error)?;
+            let pair = pair.map_err(|error| wgs_paired_sampler_error(error, individual_id))?;
             let instance = crate::identity::CompactPreHopInstanceId::new(
                 pair.pre_hop_identity().pre_hop_instance_id(),
             )?;

@@ -418,3 +418,104 @@ fn initial_profile_exposes_the_zero_chimera_rate() {
         0.0
     );
 }
+
+/// DT-031: una referencia de 600 bases, una sola copia y una tasa de quimeras
+/// de 1 pueden dejar a una pareja sin segundo origen (DTC-084). Debe salir como
+/// diagnóstico de dominio (`GPS-DOMAIN-003`, salida 1, el mismo del precedente
+/// DT-006) que nombra al individuo, y no como invariante interna imposible
+/// (`GPS-INTERNAL-001`, salida 70), sin reintento ni bajada silenciosa de la
+/// tasa.
+///
+/// **Depende de la semilla.** Con esta configuración falla solo para algunas
+/// semillas (el revisor midió que 19 de 20 publican): la prueba usa `ROOT`
+/// porque con ella el sorteo falla, y no demuestra que 600 pb con una copia y
+/// tasa 1 nunca quepan. El control positivo es la misma configuración con tasa
+/// 0, que publica: lo que la rechaza es la tasa y no el resto del escenario.
+#[test]
+fn a_chimera_rate_that_does_not_fit_a_short_reference_is_a_domain_diagnostic() {
+    use genome_population_simulator::application::load_and_validate_config;
+    use genome_population_simulator::execution::execute_validated_config;
+
+    let toml = |chimera_rate: &str| {
+        format!(
+            r#"config_kind = "general"
+schema_version = "2"
+seed = "{ROOT}"
+
+[reference]
+kind = "simulated"
+id = "reference-main"
+
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 600
+
+[population_snvs]
+mode = "generate"
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 1
+ploidy = 1
+genotype_model = "hwe"
+individual_ids = ["sample-A"]
+
+[technical_event]
+event_id = "chimera-event"
+individual_ids = ["sample-A"]
+target_coverage_wgs = 0.5
+read_length_bases = 2
+chimera_rate = {chimera_rate}
+
+[[technical_event.libraries]]
+individual_id = "sample-A"
+i7 = "ACGTACGT"
+i5 = "TGCATGCA"
+"#
+        )
+    };
+    let root = std::env::temp_dir().join(format!("gps-dt031-{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("temporary directory");
+
+    let control_path = root.join("control.toml");
+    std::fs::write(&control_path, toml("0")).expect("control config");
+    let control = load_and_validate_config(&control_path).expect("control config validates");
+    execute_validated_config(&control, &root.join("control-result"))
+        .expect("without chimeras the scenario publishes");
+
+    let path = root.join("rate-one.toml");
+    std::fs::write(&path, toml("1")).expect("config");
+    let effective = load_and_validate_config(&path).expect("the configuration is admissible");
+    let error = execute_validated_config(&effective, &root.join("result"))
+        .expect_err("with this seed the chimera draw finds a pair without a second source");
+
+    assert_eq!(error.code(), "GPS-DOMAIN-003", "{error:?}");
+    assert_eq!(error.category(), "DOMAIN");
+    assert_eq!(error.exit_code(), 1);
+    let rendered = error.render_human();
+    assert!(rendered.contains("sample-A"), "{rendered}");
+    assert!(rendered.contains("segundo_origen_de_quimera"), "{rendered}");
+    assert!(rendered.contains("referencia más larga"), "{rendered}");
+    assert!(rendered.contains("semilla"), "{rendered}");
+    for forbidden in ["NoSecondSource", "ChimeraError", "INTERNAL"] {
+        assert!(!rendered.contains(forbidden), "{forbidden}: {rendered}");
+    }
+    std::fs::remove_dir_all(&root).ok();
+}

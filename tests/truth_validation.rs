@@ -194,6 +194,53 @@ fn schema_reader_rejects_isolated_json_schema_corruption() {
     ));
 }
 
+/// DT-028: el esquema de la verdad cierra cada alelo con
+/// `additionalProperties: false`, el de referencia incluido. Un alelo
+/// `{"kind":"reference"}` con una clave de más se aceptaba, porque la
+/// deserialización de una variante sin campos de un enum etiquetado por dentro
+/// no aplica `deny_unknown_fields`. La mutación de verificación es volver a la
+/// variante sin campos, y debe matar el primer caso.
+#[test]
+fn schema_reader_rejects_unknown_keys_in_every_allele_kind() {
+    let cases = [
+        (
+            "reference",
+            fixture(),
+            "{\"kind\":\"reference\"}",
+            "{\"kind\":\"reference\",\"zz_extra\":1}",
+        ),
+        (
+            "snp",
+            fixture(),
+            "\"kind\":\"snp\",\"base\"",
+            "\"kind\":\"snp\",\"zz_extra\":1,\"base\"",
+        ),
+        (
+            "insertion",
+            insertion_fixture(),
+            // `serde_json` ordena las claves: `kind` va tras `event_id`.
+            "\"event_id\":\"INS_01\",\"kind\":\"insertion\",\"piece_links\"",
+            "\"event_id\":\"INS_01\",\"kind\":\"insertion\",\"zz_extra\":1,\"piece_links\"",
+        ),
+    ];
+    for (label, text, old, new) in cases {
+        read_truth_jsonl(&mut Cursor::new(text.clone())).unwrap_or_else(|error| {
+            panic!("control {label}: the untouched fixture reads: {error:?}")
+        });
+        assert!(
+            text.contains(old),
+            "case {label}: the fixture carries the allele"
+        );
+        let corrupt = text.replacen(old, new, 1);
+        let error = read_truth_jsonl(&mut Cursor::new(corrupt))
+            .expect_err(&format!("case {label}: an unknown allele key must fail"));
+        assert!(
+            matches!(error, TruthValidationError::Schema { line: 4, .. }),
+            "case {label}: {error:?}"
+        );
+    }
+}
+
 #[test]
 fn numeric_grammar_preserves_exact_json_lexemes_and_u64_bounds() {
     let exact_float = fixture().replacen("\"copies\":2", "\"copies\":2.0", 1);

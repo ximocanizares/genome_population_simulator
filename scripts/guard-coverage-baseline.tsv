@@ -281,14 +281,22 @@
 #
 # El rechazo de `reference_units` que se sale del tramo ya existía y sigue
 # siendo uno solo; solo cambia su condición.
+# **El 06/10/2026 bajan dos techos al cerrar DT-027 y DT-028**, sin tocar el
+# número de comprobaciones: `src/truth_validation.rs` de 95 a 94 y
+# `src/truth_schema.rs` de 46 a 44. Las pruebas nuevas
+# (`schema_reader_rejects_unknown_keys_in_every_allele_kind` y
+# `truth_header_of_a_package_without_populations_is_judged`) disparan
+# rechazos del lector de la verdad que ninguna prueba alcanzaba. Es lo medido
+# por la puerta, un suelo y no una prueba de que esas comprobaciones fallarían
+# si estuvieran mal escritas.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
 src/results.rs	778	619
 src/event_manifest.rs	147	117
-src/truth_validation.rs	118	95
-src/truth_schema.rs	69	46
+src/truth_validation.rs	118	94
+src/truth_schema.rs	69	44
 src/fastq_validation.rs	84	36
 src/population_snvs.rs	143	123
 src/f5_publication.rs	52	36

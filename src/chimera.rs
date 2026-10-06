@@ -166,6 +166,9 @@ pub enum ChimeraError {
     PairSourceMissing,
     PairSourceMismatch,
     NoSecondSource,
+    /// El índice sorteado se sale de las candidatas que se acaban de contar:
+    /// una invariante interna, distinta de que no haya candidatas (DT-031).
+    SelectedSourceOutOfRange,
     LengthOverflow,
     CounterOverflow,
     Random(RandomSamplingError),
@@ -382,7 +385,7 @@ fn select_second_source<'a>(
         }
         cursor = next;
     }
-    Err(ChimeraError::NoSecondSource)
+    Err(ChimeraError::SelectedSourceOutOfRange)
 }
 
 fn find_copy<'a>(
@@ -394,4 +397,21 @@ fn find_copy<'a>(
         .iter()
         .flat_map(|genotype| genotype.copies())
         .find(|copy| copy.id() == copy_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// DT-031: un índice sorteado fuera de las candidatas contadas es una
+    /// invariante interna, y no debe confundirse con que no haya candidatas
+    /// (`NoSecondSource`), que es lo que el ejecutor presenta como fallo
+    /// previsto. Con la lista vacía no hay ningún rango que cubra el índice.
+    #[test]
+    fn a_selected_index_outside_the_counted_candidates_is_not_a_missing_source() {
+        assert!(matches!(
+            select_second_source(&[], 0),
+            Err(ChimeraError::SelectedSourceOutOfRange)
+        ));
+    }
 }

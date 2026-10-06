@@ -2997,7 +2997,10 @@ struct WireCarrier {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum WireAllele {
-    Reference,
+    // Variante con llaves vacías a propósito (DT-028): una variante sin campos
+    // de un enum etiquetado por dentro no aplica `deny_unknown_fields`, y el
+    // esquema de la verdad cierra también el alelo de referencia.
+    Reference {},
     Snp {
         base: String,
     },
@@ -3471,7 +3474,7 @@ impl From<WireCarrier> for AlleleCarrier {
 impl From<WireAllele> for TruthAllele {
     fn from(value: WireAllele) -> Self {
         match value {
-            WireAllele::Reference => Self::Reference,
+            WireAllele::Reference {} => Self::Reference,
             WireAllele::Snp { base } => Self::Snp { base },
             WireAllele::Repeat {
                 locus_id,
