@@ -9,6 +9,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::BufRead;
 
+use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer, de::Error as _};
 use serde_json::Number;
 use sha2::{Digest, Sha256};
@@ -203,12 +204,7 @@ pub fn read_truth_jsonl(reader: &mut impl BufRead) -> Result<TruthDocument, Trut
                 detail: "línea JSONL vacía".to_owned(),
             }));
         }
-        let value: WireLine = serde_json::from_str(line).map_err(|error| {
-            rejected(TruthValidationError::Schema {
-                line: line_number,
-                detail: error.to_string(),
-            })
-        })?;
+        let value = parse_wire_text(line, line_number)?;
         match value {
             WireLine::Header(value) => {
                 if line_number != 1 {
@@ -281,12 +277,24 @@ fn parse_wire_line(raw: &[u8], line_number: u64) -> Result<WireLine, TruthValida
             detail: error.to_string(),
         })
     })?;
-    serde_json::from_str(line).map_err(|error| {
+    parse_wire_text(line, line_number)
+}
+
+/// Lee una línea de texto: primero comprueba que ninguna estructura venga
+/// escrita como lista (DT-032) y después la deserializa a su tipo.
+fn parse_wire_text(line: &str, line_number: u64) -> Result<WireLine, TruthValidationError> {
+    let schema_error = |error: serde_json::Error| {
         rejected(TruthValidationError::Schema {
             line: line_number,
             detail: error.to_string(),
         })
-    })
+    };
+    ObjectShape {
+        list_allowed: false,
+    }
+    .deserialize(&mut serde_json::Deserializer::from_str(line))
+    .map_err(schema_error)?;
+    serde_json::from_str(line).map_err(schema_error)
 }
 
 /// SHA-256 canónico del contenido de `Reference`: etiqueta de versión, id de
@@ -3053,6 +3061,116 @@ struct WirePieceLink {
     end: u64,
 }
 
+/// Nombres de campo cuyo valor es una lista en el esquema de la verdad
+/// (`schemas/truth-v4.schema.json` y `truth-v5.schema.json`). **Cualquier
+/// otro valor que sea una lista se rechaza** (DT-032).
+///
+/// `serde` acepta, para una estructura, tanto un objeto como una secuencia con
+/// los valores en el orden de los campos (`"counts":[6,8]`), y
+/// `deny_unknown_fields` no lo impide. En vez de cerrar cada tipo, se
+/// recorre la línea una vez sin construir nada y se exige que una lista solo
+/// aparezca bajo uno de estos nombres y que sus elementos sean objetos o
+/// escalares, nunca otra lista. Un tipo nuevo queda cubierto sin tocar nada; un
+/// campo de lista nuevo hay que añadirlo aquí, y la prueba
+/// `list_field_names_are_exactly_the_schema_array_properties` lo exige.
+const TRUTH_LIST_FIELDS: [&str; 13] = [
+    "allele_dosages",
+    "alleles",
+    "blocks",
+    "carriers",
+    "current_pieces",
+    "group_digests",
+    "history",
+    "modifications",
+    "piece_links",
+    "segments",
+    "snps",
+    "source_digests",
+    "sources",
+];
+
+/// Recorre un valor JSON sin conservarlo y rechaza toda lista que no esté en
+/// posición de lista. Ver [`TRUTH_LIST_FIELDS`].
+struct ObjectShape {
+    list_allowed: bool,
+}
+
+impl<'de> DeserializeSeed<'de> for ObjectShape {
+    type Value = ();
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for ObjectShape {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a JSON value")
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_i64<E>(self, _: i64) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_u64<E>(self, _: u64) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_f64<E>(self, _: f64) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_str<E>(self, _: &str) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_unit<E>(self) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+        while let Some(IsListField(list_allowed)) = map.next_key()? {
+            map.next_value_seed(ObjectShape { list_allowed })?;
+        }
+        Ok(())
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+        if !self.list_allowed {
+            return Err(rejected(A::Error::invalid_type(
+                Unexpected::Seq,
+                &"an object, not a list of its values",
+            )));
+        }
+        while seq
+            .next_element_seed(ObjectShape {
+                list_allowed: false,
+            })?
+            .is_some()
+        {}
+        Ok(())
+    }
+}
+
+/// Clave de objeto leída solo para saber si nombra un campo de lista.
+struct IsListField(bool);
+
+impl<'de> Deserialize<'de> for IsListField {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct KeyVisitor;
+        impl Visitor<'_> for KeyVisitor {
+            type Value = IsListField;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("an object key")
+            }
+            fn visit_str<E>(self, key: &str) -> Result<IsListField, E> {
+                Ok(IsListField(TRUTH_LIST_FIELDS.contains(&key)))
+            }
+        }
+        deserializer.deserialize_str(KeyVisitor)
+    }
+}
+
 fn deserialize_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
     D: Deserializer<'de>,
@@ -3543,5 +3661,104 @@ impl From<WirePieceLink> for TruthPieceLink {
             start: value.start,
             end: value.end,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TRUTH_LIST_FIELDS;
+    use serde_json::Value;
+    use std::collections::BTreeSet;
+
+    /// Si el valor de una propiedad es una lista, siguiendo `#/$defs/..`,
+    /// `type` como cadena o como lista de tipos y las ramas de
+    /// `oneOf`/`anyOf`/`allOf` (basta que una lo sea).
+    fn is_array(node: &Value, root: &Value) -> bool {
+        if let Some(reference) = node.get("$ref").and_then(Value::as_str) {
+            let name = reference.strip_prefix("#/$defs/").expect("local reference");
+            return is_array(&root["$defs"][name], root);
+        }
+        let by_type = match node.get("type") {
+            Some(Value::String(kind)) => kind == "array",
+            Some(Value::Array(kinds)) => kinds.iter().any(|kind| kind == "array"),
+            _ => false,
+        };
+        by_type
+            || ["oneOf", "anyOf", "allOf"].iter().any(|key| {
+                node.get(key)
+                    .and_then(Value::as_array)
+                    .is_some_and(|branches| branches.iter().any(|branch| is_array(branch, root)))
+            })
+    }
+
+    /// Nombres de propiedad del esquema, separados en los que son lista y los
+    /// que no, en cualquier objeto `properties`.
+    fn properties_by_kind(schema: &Value) -> (BTreeSet<String>, BTreeSet<String>) {
+        fn walk(
+            node: &Value,
+            root: &Value,
+            lists: &mut BTreeSet<String>,
+            others: &mut BTreeSet<String>,
+        ) {
+            match node {
+                Value::Object(map) => {
+                    if let Some(Value::Object(properties)) = map.get("properties") {
+                        for (name, property) in properties {
+                            if is_array(property, root) {
+                                lists.insert(name.clone());
+                            } else {
+                                others.insert(name.clone());
+                            }
+                        }
+                    }
+                    for value in map.values() {
+                        walk(value, root, lists, others);
+                    }
+                }
+                Value::Array(items) => items
+                    .iter()
+                    .for_each(|item| walk(item, root, lists, others)),
+                _ => {}
+            }
+        }
+        let (mut lists, mut others) = (BTreeSet::new(), BTreeSet::new());
+        walk(schema, schema, &mut lists, &mut others);
+        (lists, others)
+    }
+
+    /// Si el esquema añade una propiedad de lista que esta lista no conoce, el
+    /// lector rechazaría una verdad válida; si esta lista conoce un nombre que
+    /// el esquema no tiene como lista, el lector aceptaría una estructura
+    /// escrita como lista. En los dos sentidos falla aquí. No ejercita nada del
+    /// lector: solo fija la lista contra el esquema, de ahí que el barrido
+    /// de `tests/truth_validation.rs` sea quien prueba el rechazo. Reconoce una
+    /// lista por `type` (cadena o lista de tipos), `$ref` a `#/$defs/..` y
+    /// ramas de `oneOf`/`anyOf`/`allOf`; otra forma de declararla no se vería.
+    #[test]
+    fn list_field_names_are_exactly_the_schema_array_properties() {
+        let expected = TRUTH_LIST_FIELDS
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect::<BTreeSet<_>>();
+        let v5: Value = serde_json::from_str(include_str!("../schemas/truth-v5.schema.json"))
+            .expect("schema v5 JSON");
+        let (lists, others) = properties_by_kind(&v5);
+        assert_eq!(lists, expected, "schema v5");
+        // Un nombre de la lista que en otro sitio del esquema es un objeto o
+        // un escalar dejaría pasar esa estructura escrita como lista.
+        assert_eq!(
+            others.intersection(&expected).collect::<Vec<_>>(),
+            Vec::<&String>::new(),
+            "a list name is also a non-list property"
+        );
+        // La v4 no tiene repeticiones: sus listas son las de la v5 menos `blocks`.
+        let v4: Value = serde_json::from_str(include_str!("../schemas/truth-v4.schema.json"))
+            .expect("schema v4 JSON");
+        let (lists, others) = properties_by_kind(&v4);
+        assert!(lists.is_subset(&expected), "schema v4");
+        assert!(
+            others.is_disjoint(&expected),
+            "schema v4: a list name is not a list"
+        );
     }
 }

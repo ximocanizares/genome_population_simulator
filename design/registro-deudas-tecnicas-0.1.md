@@ -59,7 +59,8 @@ documenta mejor.
 | DT-029 | El juez del FASTQ final no comprueba siete propiedades del contrato: identidad del fichero, unicidad de la pareja, formato de los identificadores, longitud, `N` con Phred 0, R1 frente a R2 y resúmenes del manifiesto | Media | 05/10/2026 | **Cerrada (05/10/2026)** |
 | DT-030 | Un bloque BGZF que declara más de 64 KiB descomprimidos hace abortar al juez con un pánico en vez de rechazar el fichero | Media | 05/10/2026 | **Cerrada (06/10/2026)**, sin cambiar dependencias |
 | DT-031 | Una referencia corta con tasa de quimeras alta aborta como «invariante imposible» en vez de rechazarse como configuración | Baja | 05/10/2026 | **Cerrada (06/10/2026)** |
-| DT-032 | El lector de la verdad acepta como lista JSON objetos que el esquema exige objeto (`"counts":[6,8]`) | Baja | 06/10/2026 | Abierta |
+| DT-032 | El lector de la verdad acepta como lista JSON objetos que el esquema exige objeto (`"counts":[6,8]`) | Baja | 06/10/2026 | **Cerrada (06/10/2026)** |
+| DT-033 | La verificación del paquete F5 publicado acepta manifiestos con enlaces escritos como lista JSON, que el esquema rechaza | Baja | 06/10/2026 | Abierta |
 
 ---
 
@@ -2494,11 +2495,105 @@ el barrido los amplía.
 
 **Qué haría falta.** Un deserializador de estructuras que rechace secuencias
 (una pasada por un `serde_json::Value` o `deserialize_map` explícito), o una
-comprobación del esquema en el lector. No se ha corregido: es una deuda
-registrada.
+comprobación del esquema en el lector.
+
+### Cómo se cerró (06/10/2026)
+
+**Solución.** Antes de deserializar cada línea (`parse_wire_text`, que usan el
+lector completo y el de flujo), `ObjectShape` recorre el JSON una vez, sin
+construir nada, y rechaza toda lista que no aparezca bajo uno de los trece
+nombres que el esquema declara como lista (`TRUTH_LIST_FIELDS`: `alleles`,
+`allele_dosages`, `blocks`, `carriers`, `current_pieces`, `group_digests`,
+`history`, `modifications`, `piece_links`, `segments`, `snps`,
+`source_digests`, `sources`), y toda lista cuyos elementos sean a su vez listas.
+Cubre de golpe todos los tipos, los presentes y los futuros, sin tocar ninguno.
+Falla cerrado, con una condición: un tipo nuevo queda protegido **mientras sus
+nombres de campo no coincidan con uno de la lista blanca** (un objeto que se
+llamase `sources` quedaría abierto), y la prueba de nombres lo exige tras la
+revisión; un campo de lista nuevo que se olvide aquí rechaza una verdad válida
+y la prueba lo delata. Se descartaron
+un envoltorio por campo o por tipo (obliga a no olvidarlo en cada tipo nuevo y
+no alcanza los structs dentro de enums etiquetados por dentro, que `serde`
+vuelve a leer desde un almacén que sí acepta secuencias) y un
+`serde_json::Value` previo (doble asignación por línea y, por sí solo, tampoco
+rechaza secuencias). No cambia el esquema ni lo que escribe el productor.
+
+**Medido el 06/10/2026.** El corpus de 85 de la revisión no se pudo
+reconstruir (sus generadores no estaban); se sustituyó por un barrido
+sistemático **mayor**: cada objeto de cada línea de cuatro verdades (la
+fixture con matriz, una inserción, una deleción y una verdad real publicada
+con cuatro individuos, matriz y un locus compuesto de tres bloques) se
+sustituye por la lista de sus valores: **350 alteraciones, 33 formas de objeto
+distintas**. Antes, el lector aceptaba **139** y rechazaba 211; ahora rechaza
+las **350**. Frente a `jsonschema` 4.10.3 (esquema de la versión de cada
+documento), antes había 139 casos aceptados por el lector y rechazados por el
+esquema, ahora **ninguno**; los cuatro controles sin alterar los aceptan los
+dos. El barrido no puede reproducir que «40 de 85» del informe fuesen las
+mismas 40: la cifra comparable es la de este corpus.
+
+**Coste medido por el revisor:** unos 1 ms por MB de verdad (145 a 167 ms en
+21 MB, +15 % en el parseo; el juez completo no se midió). **Efecto en la puerta
+de cobertura:** como el lector por flujo y el completo comparten ahora la misma
+línea de rechazo, la puerta ya no distingue cuál de los dos la dispara.
+
+**Pruebas.** `every_struct_written_as_a_list_is_rejected_by_the_truth_readers`
+(`tests/truth_validation.rs`), el barrido, con la fixture nueva
+`tests/fixtures/truth-v5/repeat-population.jsonl`; y
+`list_field_names_are_exactly_the_schema_array_properties`
+(`src/truth_validation.rs`), que fija la lista contra las propiedades de lista
+del esquema v5 (y la v4 como subconjunto). Seis mutaciones, todas muertas
+(sin la comprobación, `counts` permitido como lista, elementos de lista
+aceptados, el lector de flujo sin la comprobación, la lista aceptada siempre y
+`blocks` fuera de la lista).
+
+**Corrección tras la revisión adversarial.** (1) La lista de valores del
+barrido sale en orden **alfabético** de claves, no en el de los campos de
+Rust, de modo que en muchos casos el propio tipo ya rechazaba; el comentario
+decía lo contrario. Generarla en el orden de Rust exigiría conocer cada tipo
+campo a campo, que es justo lo que esta solución evita, y no se hizo. En su
+lugar el barrido exige que el error lleve el texto del rechazo nuevo, y así
+solo cuenta un caso si actúa la comprobación nueva: añadir `provenance`,
+`identity`, `copy`, `locus` o `source_event` a la lista blanca ahora lo mata el
+barrido solo. `units` (un escalar, no un objeto) sigue sin matarlo el barrido,
+que solo sustituye objetos; lo mata la prueba de nombres. (2) La prueba de
+nombres separaba solo las listas; ahora reúne también las propiedades que no
+lo son y exige que ninguna lleve un nombre de la lista blanca, y reconoce una
+lista por `type` (cadena o lista de tipos), `$ref` y `oneOf`/`anyOf`/`allOf`.
+Mutando el esquema en una copia, mueren un objeto llamado `sources`, una lista
+`["array","null"]`, una lista por `oneOf` y el control `"type":"array"`;
+reescribir el esquema sin cambiarlo no la rompe. No reconoce otras formas de
+declarar una lista (`items` sin `type`, por ejemplo).
+
+**Otros lectores con el mismo hueco, sin corregir.** Ver DT-033, que recoge el
+de la verificación del paquete F5. La auditoría de identidad
+(`audit_f5_identity_closure`, `src/f5_closure.rs`) acepta la `identity` de una
+copia escrita como lista y pierde su `reference_id`, pero el oráculo F5 la
+rechaza (por huella y, recalculadas, con «copy.identity no es un objeto»), de
+modo que queda cubierto de extremo a extremo. `src/results.rs` y
+`src/event_manifest.rs` leen `serde_json::Value` a mano y no tienen el hueco.
 
 **Otras dos observaciones de la misma revisión, que no son este defecto y no
 se corrigen aquí.** Un `execution_id` cambiado en la cabecera de la verdad y
 un `source_digests` de más pasan el juez, con y sin poblaciones: no hay norma
 que fije que el `execution_id` de la verdad coincida con el del manifiesto, ni
 que prohíba entradas de fuente que ningún registro cita.
+
+---
+
+## DT-033. La verificación del paquete F5 publicado acepta enlaces escritos como lista JSON
+
+**Gravedad: baja.** El productor no escribe así; es un hueco del juez, hallado
+por la revisión adversarial de DT-032 y reproducido sobre `ed50bbf`.
+
+`verify_published_f5_package` (`src/f5_publication.rs`) lee el manifiesto con
+las estructuras `gate::Link` y `gate::Root`, que usan `derive(Deserialize)`
+con `deny_unknown_fields`. Por defecto `serde` acepta también una secuencia con
+los valores en el orden de los campos. El juez **acepta cuatro manifiestos que
+el esquema `manifest-general-v5` rechaza**: el enlace de la verdad escrito como
+lista, un enlace de artefacto como lista, todos los enlaces como lista y el
+manifiesto entero como lista. Ningún otro juez de Rust lee ese manifiesto, así
+que el hueco existe de extremo a extremo. Es el mismo mecanismo de DT-032.
+
+**Qué haría falta.** La misma comprobación previa de forma que cerró DT-032
+(una pasada que rechace listas fuera de los campos que el esquema declara
+lista), adaptada a este manifiesto. No se ha corregido.

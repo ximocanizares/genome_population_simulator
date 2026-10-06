@@ -289,13 +289,20 @@
 # rechazos del lector de la verdad que ninguna prueba alcanzaba. Es lo medido
 # por la puerta, un suelo y no una prueba de que esas comprobaciones fallarían
 # si estuvieran mal escritas.
+# **El 06/10/2026 baja un techo al cerrar DT-032**, sin tocar el número de
+# comprobaciones: `src/truth_validation.rs` de 94 a 93 (sigue en 118: los dos
+# rechazos que lo dejaban pasar por `serde_json::from_str` se unen en una
+# constructora local y se suma el de la lista que no debía serlo). La prueba
+# `every_struct_written_as_a_list_is_rejected_by_the_truth_readers` dispara la
+# comprobación nueva con 350 alteraciones. Es lo medido por la puerta, un
+# suelo y no una prueba de que fallaría si estuviera mal escrita.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
 src/results.rs	778	619
 src/event_manifest.rs	147	117
-src/truth_validation.rs	118	94
+src/truth_validation.rs	118	93
 src/truth_schema.rs	69	44
 src/fastq_validation.rs	84	36
 src/population_snvs.rs	143	123

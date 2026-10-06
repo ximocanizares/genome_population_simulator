@@ -1,5 +1,6 @@
 //! F2.4.3: el oráculo consume solo JSONL y una referencia, nunca VCF.
 
+use std::collections::BTreeSet;
 use std::io::Cursor;
 
 use genome_population_simulator::identity::{ReferenceId, SequenceId};
@@ -810,5 +811,218 @@ fn both_readers_reject_a_segment_trimmed_at_either_end() {
                 "{trim}: {result:?}"
             );
         }
+    }
+}
+
+// ---- DT-032: ninguna estructura puede venir escrita como lista ----
+
+/// Texto del rechazo de la comprobación nueva (`ObjectShape`). El barrido lo
+/// exige en cada caso: sin eso, un caso que el propio tipo ya rechazaba por
+/// otro motivo contaría como cubierto aunque la comprobación no actuase.
+const LIST_REJECTION: &str = "not a list of its values";
+
+/// Cada posición de objeto del documento: la ruta de claves e índices hasta él.
+fn object_paths(value: &Value, path: &mut Vec<String>, found: &mut Vec<Vec<String>>) {
+    match value {
+        Value::Object(map) => {
+            found.push(path.clone());
+            for (key, child) in map {
+                path.push(key.clone());
+                object_paths(child, path, found);
+                path.pop();
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                path.push(index.to_string());
+                object_paths(child, path, found);
+                path.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Sustituye el objeto de `path` por la lista de sus valores **en orden
+/// alfabético de claves** (el de `serde_json::Map` sin `preserve_order`), que
+/// no es el orden de los campos de Rust. No hace falta que `serde` aceptara esa
+/// lista: lo que se exige es el rechazo de `ObjectShape`, que va antes del tipo.
+fn object_as_list(line: &Value, path: &[String]) -> Value {
+    let mut altered = line.clone();
+    let mut node = &mut altered;
+    for step in path {
+        node = match node {
+            Value::Object(map) => map.get_mut(step).expect("object step"),
+            Value::Array(items) => &mut items[step.parse::<usize>().expect("index")],
+            _ => unreachable!("a path only crosses containers"),
+        };
+    }
+    let Value::Object(map) = node.take() else {
+        unreachable!("the path ends at an object");
+    };
+    *node = Value::Array(map.into_iter().map(|(_, value)| value).collect());
+    altered
+}
+
+/// Una verdad con su referencia, si el juez completo puede leerla.
+struct SweepCorpus {
+    label: &'static str,
+    jsonl: String,
+    with_reference: bool,
+}
+
+fn sweep_corpus() -> Vec<SweepCorpus> {
+    vec![
+        SweepCorpus {
+            label: "snp-matrix",
+            jsonl: fixture(),
+            with_reference: true,
+        },
+        SweepCorpus {
+            label: "insertion",
+            jsonl: insertion_fixture(),
+            with_reference: true,
+        },
+        SweepCorpus {
+            label: "deletion",
+            jsonl: deletion_fixture(),
+            with_reference: true,
+        },
+        // Una verdad publicada de verdad: cuatro individuos con matriz, un
+        // locus compuesto de tres bloques, alelos de repetición. Su
+        // referencia no es el fixture de ocho bases, así que solo la lee el
+        // lector de esquema.
+        SweepCorpus {
+            label: "repeat-population",
+            jsonl: include_str!("fixtures/truth-v5/repeat-population.jsonl").to_owned(),
+            with_reference: false,
+        },
+    ]
+}
+
+/// DT-032: `serde` acepta una estructura escrita como la lista de sus valores
+/// en el orden de sus campos (`"counts":[6,8]`), y `deny_unknown_fields` no lo
+/// impide. El esquema JSON la rechaza, así que el lector tiene que rechazarla.
+///
+/// Recorre **cada objeto de cada línea** de cuatro verdades, lo sustituye por
+/// la lista de sus valores y exige el rechazo, por el lector de esquema y,
+/// cuando hay referencia, también por el juez completo y el de flujo, y con el
+/// texto del rechazo de `ObjectShape` (`LIST_REJECTION`), no con cualquier
+/// error. Los controles sin alterar se aceptan. Lo que no ejercita: un campo
+/// de lista del esquema escrito como objeto (lo vigila la prueba de nombres de
+/// `src/truth_validation.rs`), ni un escalar escrito como lista (`units` como
+/// lista: lo rechaza su tipo y el barrido solo sustituye objetos). Como la lista de valores sale en orden
+/// alfabético y no en el de los campos de Rust, el propio tipo no la aceptaría
+/// en muchos casos; da igual, porque `ObjectShape` va antes y es lo que se
+/// exige.
+#[test]
+fn every_struct_written_as_a_list_is_rejected_by_the_truth_readers() {
+    let mut variants = 0_usize;
+    let mut signatures = BTreeSet::new();
+    for corpus in sweep_corpus() {
+        let label = corpus.label;
+        read_truth_jsonl(&mut Cursor::new(corpus.jsonl.clone())).unwrap_or_else(|error| {
+            panic!("control {label}: the schema reader reads it: {error:?}")
+        });
+        if corpus.with_reference {
+            for (index, result) in both_readers(&corpus.jsonl).into_iter().enumerate() {
+                result.unwrap_or_else(|error| panic!("control {label}/{index}: {error:?}"));
+            }
+        }
+        let lines = corpus
+            .jsonl
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("line JSON"))
+            .collect::<Vec<_>>();
+        for (line_index, line) in lines.iter().enumerate() {
+            let mut paths = Vec::new();
+            object_paths(line, &mut Vec::new(), &mut paths);
+            for path in paths {
+                let mut altered_lines = lines.clone();
+                altered_lines[line_index] = object_as_list(line, &path);
+                let altered = lines_to_jsonl(&altered_lines);
+                let place = format!("{label} line {} at {path:?}", line_index + 1);
+                let mut node = line;
+                for step in &path {
+                    node = match node {
+                        Value::Object(map) => &map[step],
+                        Value::Array(items) => &items[step.parse::<usize>().expect("index")],
+                        _ => unreachable!(),
+                    };
+                }
+                signatures.insert(
+                    node.as_object()
+                        .expect("object")
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+                let error = read_truth_jsonl(&mut Cursor::new(altered.clone()))
+                    .expect_err(&format!("the schema reader accepted a list at {place}"));
+                assert!(
+                    matches!(&error, TruthValidationError::Schema { line, detail }
+                        if *line == line_index as u64 + 1 && detail.contains(LIST_REJECTION)),
+                    "{place}: {error:?}"
+                );
+                if corpus.with_reference {
+                    for (index, result) in both_readers(&altered).into_iter().enumerate() {
+                        let error = result
+                            .expect_err(&format!("reader {index} accepted a list at {place}"));
+                        assert!(
+                            matches!(&error, TruthValidationError::Schema { detail, .. }
+                                if detail.contains(LIST_REJECTION)),
+                            "reader {index} at {place}: {error:?}"
+                        );
+                    }
+                }
+                variants += 1;
+            }
+        }
+    }
+    // Un suelo contra un barrido vacío, y la lista de los tipos cubiertos —cada
+    // uno por el conjunto ordenado de sus claves—: si un fixture deja de
+    // llevar alguno, el barrido deja de probarlo.
+    assert!(variants >= 340, "variants: {variants}");
+    let expected: &[&str] = &[
+        "allele_dosages,alleles,carriers,case_id,case_kind,individual_id,locus,record_type,reference_id",
+        "allele_index,copy",
+        "alternate,event_id,kind,position,provenance,reference",
+        "alternate,event_id,position,provenance,reference",
+        "base,kind",
+        "bases,blocks,end,event_id,kind,locus_id,provenance,start",
+        "bases,blocks,kind,locus_id",
+        "bases,blocks,kind,locus_id,provenance,source",
+        "bases,event_id,kind,piece_links,source_event",
+        "bases,event_id,kind,point",
+        "bases,event_id,kind,point,provenance",
+        "bases,kind,provenance",
+        "bases,motif,motif_length,units",
+        "coordinate_convention,counts,document_kind,execution_id,group_digests,record_type,reference_content_sha256,reference_id,schema_version,source_digests",
+        "copies,genotypes",
+        "copy_index,individual_id,reference_id,sequence_id",
+        "current_pieces,history,identity,phase,provenance,record_type,segments",
+        "end,event_id,kind,piece_links,source_event,start",
+        "end,event_id,kind,provenance,start",
+        "end,event_id,kind,start",
+        "end,piece_index,start",
+        "end,reference_id,sequence_id,sequence_length,source,start",
+        "end,sequence_id,start",
+        "event_id,kind,position,provenance",
+        "kind",
+        "kind,matrix,source,version",
+        "kind,snps,source",
+        "kind,source,version",
+        "kind,source_id",
+        "matrix_source_id,population_id,variant_id",
+        "modifications,source",
+        "origin,sources",
+        "sha256,source",
+    ];
+    for expected in expected {
+        assert!(
+            signatures.contains(*expected),
+            "the corpus never turned `{expected}` into a list"
+        );
     }
 }
