@@ -1403,6 +1403,30 @@ fn every_corruption_of_an_inserted_publication_is_rejected_by_its_own_branch() {
             },
             "o con más unidades que su tope",
         ),
+        // DT-025: el tope `max_units` sale del mismo documento que las unidades y
+        // no acota nada; la cota que muerde es la física, que lo insertado
+        // quepa en el FASTA final. El primer caso, de tres millones de unidades,
+        // **termina** sin esa cota (reserva unos megabytes) y rechaza por otro
+        // motivo, de modo que la prueba muere por el motivo y no cuelga la
+        // batería; va delante del segundo, que sin la cota pediría 8 GiB.
+        (
+            "tres millones de unidades con un tope que las admite",
+            |effective, _, _, _| {
+                effective["repeat_loci"][0]["reference_units"] = serde_json::json!([3_000_000]);
+                effective["repeat_loci"][0]["max_units"] = serde_json::json!(3_000_000);
+            },
+            "o con más unidades que su tope",
+        ),
+        (
+            "u64::MAX / 3 unidades con un tope que las admite",
+            |effective, _, _, _| {
+                effective["repeat_loci"][0]["reference_units"] =
+                    serde_json::json!([6_148_914_691_236_517_205_u64]);
+                effective["repeat_loci"][0]["max_units"] =
+                    serde_json::json!(6_148_914_691_236_517_205_u64);
+            },
+            "o con más unidades que su tope",
+        ),
         (
             "el intervalo de un locus solo en el manifiesto",
             |_, manifest, _, _| {
@@ -1562,6 +1586,51 @@ fn every_corruption_of_an_inserted_publication_is_rejected_by_its_own_branch() {
             "{label}: se esperaba «{expected}» en {rendered}"
         );
     }
+}
+
+/// **La cota física de lo insertado es acumulada entre loci** (DT-025): dos
+/// tractos que caben cada uno en el FASTA final pero no los dos a la vez. Cada
+/// tracto es el 60 % del tamaño del fichero; sin acumular, los dos pasan la cota
+/// y el rechazo llega más tarde, por otro motivo (los cambios publicados no son
+/// los declarados).
+///
+/// Control positivo: la publicación de dos inserciones, intacta, pasa el juez.
+/// Debe fallar contra: una cota que no acumule. Se ejecutó.
+#[test]
+fn the_physical_bound_on_inserted_bases_adds_up_across_loci() {
+    let second = INSERT_AT_1000
+        .replace("STR-INS", "STR-INS-2")
+        .replace("insert_after = 1000", "insert_after = 500");
+    let scenario = publish(&with_insertion(&format!(
+        "{INSERT_AT_1000}{second}{EXISTING_CA}"
+    )));
+    judge(&scenario.destination).expect("control positivo");
+    let mut effective = scenario.json("effective-config.json");
+    let size = scenario.read("resources/references/ref-main-str.fa").len();
+    let units = (size * 6 / 10 / 3) as u64;
+    let inserting = effective["repeat_loci"]
+        .as_array_mut()
+        .expect("loci")
+        .iter_mut()
+        .filter(|locus| locus["declared"].get("insert_after").is_some())
+        .collect::<Vec<_>>();
+    assert_eq!(inserting.len(), 2, "el fixture inserta en dos puntos");
+    for locus in inserting {
+        locus["reference_units"] = serde_json::json!([units]);
+        locus["max_units"] = serde_json::json!(units);
+    }
+    let copy = temporary("corrupt").join("published");
+    copy_tree(&scenario.destination, &copy);
+    republish(
+        &copy,
+        "effective-config.json",
+        &serde_json::to_vec_pretty(&effective).expect("efectiva"),
+    );
+    let rendered = judge(&copy).expect_err("dos tractos que no caben juntos");
+    assert!(
+        rendered.contains("o con más unidades que su tope"),
+        "{rendered}"
+    );
 }
 
 /// La autorización de matriz vacía también funciona con inserción: una

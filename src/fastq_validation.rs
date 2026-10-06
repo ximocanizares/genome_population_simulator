@@ -286,6 +286,7 @@ pub fn validate_final_fastq_mate(
     // contenido sin leer un solo registro (DT-026).
     file.seek(SeekFrom::Start(0))
         .map_err(|error| io_error(path, "rewind_after_eof_check", error))?;
+    reject_oversized_blocks(&mut file, path)?;
     let mut reader = bgzf::io::Reader::new(file);
     let mut lines = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
     // La unicidad se exige solo en R1: la comparación de cabeceras del juez de
@@ -377,6 +378,9 @@ pub fn validate_final_paired_fastq(
     }
     validate_final_artifact(r1_path, r1_artifact)?;
     validate_final_artifact(r2_path, r2_artifact)?;
+    // Sin guarda de bloques aquí, a propósito (DT-030): `validate_final_fastq_mate`
+    // acaba de recorrer los mismos dos ficheros con la guarda y los leyó enteros,
+    // de modo que ninguno tiene un bloque que haga entrar en pánico al lector.
     let mut r1 = bgzf::io::Reader::new(
         File::open(r1_path).map_err(|error| io_error(r1_path, "open_final_r1", error))?,
     );
@@ -410,6 +414,26 @@ pub fn validate_final_paired_fastq(
         ordinal = ordinal
             .checked_add(1)
             .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
+    }
+}
+
+/// Rechaza un FASTQ BGZF con un bloque que declara más de 64 KiB
+/// descomprimidos, **antes** de dárselo al lector: `noodles-bgzf` 0.47 entra en
+/// pánico con él en vez de devolver un error (DT-030). Deja el fichero al
+/// principio.
+fn reject_oversized_blocks(file: &mut File, path: &Path) -> Result<(), FastqValidationError> {
+    match crate::bgzf_blocks::reject_oversized_bgzf_blocks(file) {
+        Ok(()) => Ok(()),
+        Err(crate::bgzf_blocks::BgzfBlockFault::Io(error)) => {
+            Err(io_error(path, "scan_bgzf_blocks", error))
+        }
+        Err(crate::bgzf_blocks::BgzfBlockFault::OversizedBlock { .. }) => {
+            Err(rejected(FastqValidationError::Structural {
+                path: path.display().to_string(),
+                record_ordinal: 0,
+                detail: "FASTQ BGZF block declares more than 65536 uncompressed bytes",
+            }))
+        }
     }
 }
 

@@ -51,13 +51,13 @@ documenta mejor.
 | DT-021 | El juez de la verdad no ancla los casos todo-REF, deja pasar un SNP quitado y clasifica mal una corrupción estructural | Media | 03/10/2026 | **Cerrada (04/10/2026)** |
 | DT-022 | El juez de los recursos publicados resuelve la ruta de una matriz reutilizada respecto al directorio de trabajo, no al paquete | Media | 04/10/2026 | **Cerrada (04/10/2026)** |
 | DT-023 | Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete | Baja | 04/10/2026 | **Cerrada por aceptación (04/10/2026)** |
-| DT-024 | `validate_published_resources` no termina con `lineages` = 18446744073709551615 en la configuración efectiva | Media | 04/10/2026 | Abierta |
-| DT-025 | `validate_published_resources` aborta con `capacity overflow` si `reference_units[1]` = 18446744073709551615 en la efectiva | Media | 04/10/2026 | Abierta |
+| DT-024 | `validate_published_resources` no termina con `lineages` = 18446744073709551615 en la configuración efectiva | Media | 04/10/2026 | **Cerrada (06/10/2026)** |
+| DT-025 | `validate_published_resources` aborta con `capacity overflow` si `reference_units[1]` = 18446744073709551615 en la efectiva | Media | 04/10/2026 | **Cerrada (06/10/2026)** |
 | DT-026 | El juez de cada mate del FASTQ final no leía ni un registro: toda la validación de registros era código muerto en producción | **Grave** | 05/10/2026 | **Cerrada (05/10/2026)** |
 | DT-027 | La verdad de un paquete sin poblaciones no se juzga: 31 alteraciones de la cabecera pasan el juez de los recursos publicados | Media | 05/10/2026 | Abierta |
 | DT-028 | Sospecha: un alelo de referencia con una clave desconocida se acepta, el alelo SNP las rechaza | Baja | 05/10/2026 | Abierta, sin reproducir del todo |
 | DT-029 | El juez del FASTQ final no comprueba siete propiedades del contrato: identidad del fichero, unicidad de la pareja, formato de los identificadores, longitud, `N` con Phred 0, R1 frente a R2 y resúmenes del manifiesto | Media | 05/10/2026 | **Cerrada (05/10/2026)** |
-| DT-030 | Un bloque BGZF que declara más de 64 KiB descomprimidos hace abortar al juez con un pánico en vez de rechazar el fichero | Media | 05/10/2026 | Abierta; bloqueada por la versión de `noodles-bgzf` |
+| DT-030 | Un bloque BGZF que declara más de 64 KiB descomprimidos hace abortar al juez con un pánico en vez de rechazar el fichero | Media | 05/10/2026 | **Cerrada (06/10/2026)**, sin cambiar dependencias |
 | DT-031 | Una referencia corta con tasa de quimeras alta aborta como «invariante imposible» en vez de rechazarse como configuración | Baja | 05/10/2026 | Abierta |
 
 ---
@@ -1912,6 +1912,32 @@ que recorre un linaje tras otro. Haría falta rechazar, antes de rehacer el
 abanico, un número de linajes mayor que lo que el generador admite o que el
 presupuesto de recursos declarado. No se ha corregido: es una deuda registrada.
 
+### Cómo se cerró (06/10/2026)
+
+**Corrección.** Antes de rehacer el abanico, `validate_published_slippage_fans`
+(`src/results.rs`) exige dos cotas, cada una con su rechazo propio:
+
+- **Los linajes han de ser las copias haplotípicas de las poblaciones
+  iniciales publicadas**: individuos por ploidía, sumados con aritmética
+  comprobada, que es el recuento que usa el productor
+  (`haplotype_copy_count` en `src/application.rs`). No es una cota nueva: el
+  generador no admite otro número, y el documento publica además la lista de
+  los individuos, de modo que el valor queda acotado por lo publicado.
+- **La media de pasos no pasa de `SLIPPAGE_MAX_MEAN_EVENTS`** (1000), el tope
+  que el productor ya impone. Es el otro número del documento que gobierna el
+  coste del recorrido (un paso por linaje y por evento); con el máximo del
+  muestreador de Poisson (2^52) el juez tampoco habría terminado.
+
+En el mismo juez no queda ningún otro bucle ni reserva gobernados por un número
+leído sin acotar: `max_units` solo se compara, y los alelos y los motivos
+recorren listas del propio documento.
+
+**Prueba.** `the_fan_judge_rejects_unsupportable_lineages_and_mean_events_without_hanging`
+(`tests/repeat_slippage.rs`). Va primero el caso de dos millones de linajes,
+que sin la cota **termina** (37 s en depuración) y rechaza por otro motivo, de
+modo que la prueba muere por el motivo y no cuelga la batería; después, el de
+`u64::MAX`. Con la media pasa lo mismo, con 10 000.
+
 ---
 
 ## DT-025. El juez de recursos publicados aborta con `capacity overflow`
@@ -1923,6 +1949,55 @@ en la configuración efectiva, `validate_published_resources` aborta con el
 pánico `capacity overflow` en vez de rechazar el documento. **Igual en la base
 `aef5ed4`**: no es una regresión. Falta validar el valor antes de reservar con
 él. No se ha corregido: es una deuda registrada.
+
+### Cómo se cerró (06/10/2026)
+
+**Corrección**, en `published_simulated_tracts` (`src/results.rs`), el lector de
+los tractos de la referencia simulada que publica la configuración efectiva:
+
+- **Cada bloque de `reference_units`** se calcula con `checked_mul` y se compara
+  con el hueco que queda en el tramo (`length - bases.len()`, que no desborda
+  porque ningún bloque aceptado pasa de ahí), **antes** de reservar. Antes
+  `units.saturating_mul(..)` y una suma sin comprobar dejaban pasar un valor
+  imposible hasta `repeat_motif_over`, que reserva tantos bytes como le piden.
+- **El final del tramo** ha de caber en la secuencia de la referencia publicada.
+  Es la misma reserva por la otra vía: un `end` enorme en un locus de un solo
+  motivo pedía `end - start + 1` bytes. No estaba en el encargo; se encontró
+  revisando las demás reservas del juez.
+
+- **El juez de la referencia final por inserción**
+  (`judge_inserted_reference`) acotaba la suma de `reference_units` solo con
+  `max_units`, que se lee del mismo documento y no acota nada: con
+  `reference_units = [6148914691236517205]` y `max_units` igual reservaba 8 GiB
+  («memory allocation of 8589934592 bytes failed», salida 134), y es alcanzable
+  desde un paquete ajeno al resolver una referencia desde su manifiesto. Lo
+  encontró la revisión adversarial. Ahora, antes del bucle que construye el
+  tracto, calcula Σ unidades × longitud del motivo con `checked_mul` y
+  `checked_add`, **acumulada entre loci**, y rechaza si pasa del tamaño en
+  bytes del FASTA final publicado, que contiene todo lo insertado. La cota
+  sale, pues, de un fichero y no del documento.
+
+**Reservas del juez revisadas** (todo `src/results.rs` fuera de pruebas: cada
+`with_capacity`, `vec![..; n]`, `repeat`, `resize` y bucle `0..n`): el resto se
+dimensiona con la longitud de listas del propio documento, con datos físicos ya
+leídos o con las cotas de arriba; la única otra reserva con un número del
+documento, el largo de las secuencias que pasa al regenerador de la referencia
+simulada, lo ata antes a la declaración TOML copiada en el paquete (se comprobó con
+`length` y `total_genome_size` de un terabase: «la referencia efectiva no
+coincide con la declaración TOML»).
+
+**Pruebas**, cuatro casos nuevos en
+`every_corruption_of_a_published_tract_is_rejected_by_its_own_branch`
+(`tests/simulated_reference_repeat_tract.rs`): el de `u64::MAX` del hallazgo y
+tres elegidos para que, sin su cota, el juez **termine** y rechace por otro
+motivo en vez de pedir terabytes —un bloque de diez millones de unidades, un
+producto que da la vuelta a `u64` y cae justo en el hueco, y un final de veinte
+millones en una secuencia de mil bases—; una prueba aparte para que el final
+tenga que caber en **su** secuencia y no en otra más larga; y dos casos en
+`every_corruption_of_an_inserted_publication_is_rejected_by_its_own_branch`
+(`tests/reference_tract_insertion_run.rs`) para el juez de la inserción: tres
+millones de unidades, que sin la cota terminan y rechazan por otro motivo, y
+`u64::MAX / 3`.
 
 ---
 
@@ -2186,20 +2261,92 @@ con el juez de cada mate ya corregido.
 
 - **Afectados confirmados**: el juez de cada mate del FASTQ final y la
   relectura de cabeceras del juez de la pareja
-  (`src/fastq_validation.rs:436`), que ya podía abortar así antes de DT-026.
-- **Posibles afectados, sin reproducir**: los dos lectores de VCF comprimidos
-  del juez de los recursos publicados (`src/results.rs:659` y `:2689`), que
-  usan el mismo lector.
+  (en el momento de abrir este asunto, `src/fastq_validation.rs:436`; hoy está
+  en las líneas 384 a 389), que ya podía abortar así antes de DT-026.
+- **Afectados, reproducidos el 06/10/2026 con un VCF manipulado**: los dos
+  lectores de VCF comprimidos del juez de los recursos publicados
+  (`src/results.rs:659` y `:2689`) y el juez semántico del VCF
+  (`src/vcf_semantic_validation.rs`), que usan el mismo lector.
 
 El fichero lo produce el propio simulador, así que el riesgo real es un
 fichero corrompido entre la escritura y la relectura, no una entrada del
 usuario. Aun así, un juez no debería abortar.
 
-**Por qué no se corrige ya.** La 0.51 acota el tamaño, pero `noodles-csi` y
-`noodles-tabix` dependen de la 0.47, y DTC-043 y DTC-048 fijan las versiones
-exactas del grafo. Las salidas son subir el grafo de `noodles` entero, en
-encargo propio, o comprobar el pie de cada bloque antes de entregarlo al
-lector.
+**Estado: cerrada el 06/10/2026, sin tocar `Cargo.toml` ni `Cargo.lock`.**
+
+### Las dos salidas, comparadas
+
+**(a) Comprobar el pie de cada bloque antes de entregarlo al lector. Es la que
+se aplicó.** El formato es sencillo: cabecera fija de 18 bytes con el tamaño del
+bloque (`BSIZE`) en los dos últimos, y `ISIZE` en los cuatro últimos del bloque.
+`src/bgzf_blocks.rs` recorre el fichero con el mismo encuadre que el lector,
+lee 18 bytes de cabecera y 4 de pie de cada bloque, salta el resto con un
+desplazamiento sin descomprimir nada, y rechaza un `ISIZE` mayor de 65 536.
+Coste: dos lecturas pequeñas y un salto por bloque, y los bloques son de 64 KiB
+**descomprimidos**: 784 MB descomprimidos son 12 026 bloques. Medido por la
+revisión, la guarda tarda de 26 a 33 ms, frente a 0,56 a 0,84 s de leer el
+fichero entero. Una cabecera que no es BGZF o un bloque cortado
+**no** los rechaza la guarda: detiene el recorrido y deja que el lector los
+diagnostique, como ya hacía. No cambia ninguna salida publicada (solo lee).
+
+**(b) Subir el grafo.** `Cargo.lock` ya lleva **dos** `noodles-bgzf`: la 0.47
+(la fija `Cargo.toml` para `noodles-csi` 0.56, `noodles-tabix` 0.62 y
+`noodles-vcf` 0.88) y la 0.51 (de `noodles-fasta` 0.66). Que la 0.51 sea la
+única exigiría subir a `noodles-csi` 0.60 o 0.61, `noodles-tabix` 0.66 o 0.67 y
+`noodles-vcf` 0.92 o 0.93, que piden la 0.51 (las 0.62, 0.68 y 0.94 piden la
+0.52). DTC-043 pide documentar propósito, mantenimiento, características y
+scripts de construcción de cada dependencia nueva, y DTC-048 exige que toda
+actualización sea «deliberada y aislada» y vaya con pruebas, validadores
+independientes y escenarios de rendimiento. El riesgo está en la salida: cuatro
+versiones menores de crates 0.x pueden cambiar la API y, sobre todo, los bytes
+del VCF comprimido y de su índice, que deben salir idénticos. Haría falta
+comparar el VCF `.gz`, el `.tbi` y el `.csi` byte a byte en un conjunto amplio
+de escenarios.
+
+**Elección.** (a): es pequeña, no cambia ninguna salida y no condiciona la
+decisión de (b), que sigue siendo razonable por otros motivos (quitar una
+versión duplicada) pero ya no es urgente.
+
+### Qué cubre
+
+La guarda se llama **antes** de cada lector BGZF de un juez de ficheros
+publicados:
+
+- cada mate del FASTQ final (`validate_final_fastq_mate`);
+- el recuento de bases de tracto del VCF comprimido (`recount_vcf_tract_bases`)
+  y la comprobación de que el VCF nombra la referencia
+  (`validate_published_reference_names`), en `src/results.rs`;
+- el juez semántico del VCF (`validate_published_vcf_semantics`).
+
+**Dónde no está, y por qué.**
+
+- La relectura de cabeceras de `validate_final_paired_fastq` no la lleva:
+  `validate_final_fastq_mate` acaba de recorrer y leer enteros esos mismos dos
+  ficheros, y un fichero que pasara una vez y no la otra solo existe si alguien
+  lo cambia entre las dos aperturas.
+- El juez del FASTQ de F3 (`validate_wgs_fastq`) la tiene sin llevar, pero no
+  lo llama ninguna ruta de publicación (solo sus pruebas); queda anotado.
+- Tampoco la llevan los lectores del **productor** que releen lo que él mismo
+  acaba de escribir (`src/fastq_output.rs`, `src/vcf_publication.rs` y
+  `src/vcf_contract.rs`).
+- **Los índices `.tbi` y `.csi` también son BGZF** (`noodles-tabix` y
+  `noodles-csi` entran por la 0.47), y uno manipulado **sí** hace entrar en
+  pánico a `read_index()` (reproducido por la revisión). Pero **ningún juez de
+  lo publicado lee esos índices**: solo los lee el productor
+  (`src/vcf_publication.rs`), justo después de escribirlos, de modo que no
+  hay entrada ajena que lo alcance. No es una sospecha, es un hecho acotado:
+  si algún día un juez de lo publicado los lee, hará falta la misma guarda.
+
+### Pruebas
+
+Un FASTQ con un `ISIZE` de 65 537 y de `u32::MAX`, el caso de un bloque
+truncado seguido del marcador de fin, el de un tercer bloque corrupto en un
+fichero de varios bloques (`tests/final_fastq_record_validation.rs`), un VCF
+comprimido con un bloque imposible en los dos lectores de `src/results.rs`
+(`tests/repeat_tract_budget.rs`) y en el juez semántico
+(`tests/vcf_publication.rs`), más cuatro pruebas de la propia guarda
+(`src/bgzf_blocks.rs`, una de ellas para un `BSIZE` menor que cabecera más pie). Cada una tiene su control positivo: el fichero válido
+se acepta.
 
 ---
 

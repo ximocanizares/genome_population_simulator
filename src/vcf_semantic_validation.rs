@@ -72,7 +72,11 @@ pub fn validate_published_vcf_semantics(
         .extension()
         .is_some_and(|extension| extension == "gz")
     {
-        let file = File::open(vcf_path).map_err(|error| io_error(vcf_path, error))?;
+        let mut file = File::open(vcf_path).map_err(|error| io_error(vcf_path, error))?;
+        // Un bloque que declara más de 64 KiB haría entrar en pánico al lector
+        // (DT-030): se rechaza antes de dárselo.
+        crate::bgzf_blocks::reject_oversized_bgzf_blocks(&mut file)
+            .map_err(|fault| io_reject(vcf_path.display().to_string(), fault.to_string()))?;
         validate_vcf_against_truth(&reference, &truth, &mut noodles_bgzf::io::Reader::new(file))
     } else {
         let file = File::open(vcf_path).map_err(|error| io_error(vcf_path, error))?;

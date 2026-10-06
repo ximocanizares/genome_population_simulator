@@ -33,7 +33,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::execution::execute_validated_config;
-use genome_population_simulator::results::validate_general_manifest_bytes;
+use genome_population_simulator::results::{
+    validate_general_manifest_bytes, validate_published_resources,
+};
 use serde_json::Value;
 
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -76,14 +78,46 @@ struct Published {
 
 /// Escenario con referencia suministrada y `individuals` individuos diploides.
 fn publish(loci: &str, individuals: usize) -> Published {
-    let root = temporary("run");
-    fs::create_dir_all(&root).expect("directorio");
-    let bases = reference_bases();
-    fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
     let ids = (1..=individuals)
         .map(|index| format!("\"I{index:03}\""))
         .collect::<Vec<_>>()
         .join(", ");
+    publish_with_populations(
+        loci,
+        &format!(
+            r#"[[initial_populations]]
+population_id = "P1"
+individual_count = {individuals}
+individual_ids = [{ids}]
+ploidy = 2
+genotype_model = "hwe"
+"#
+        ),
+        &["P1"],
+    )
+}
+
+/// El mismo escenario con las poblaciones iniciales que se den, ya escritas, y
+/// la lista de sus identificadores para el generador de la matriz.
+fn publish_with_populations(loci: &str, populations: &str, population_ids: &[&str]) -> Published {
+    let root = temporary("run");
+    fs::create_dir_all(&root).expect("directorio");
+    let bases = reference_bases();
+    fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
+    let snv_populations = population_ids
+        .iter()
+        .map(|id| {
+            format!(
+                r#"
+[[population_snvs.generate.populations]]
+population_id = "{id}"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+"#
+            )
+        })
+        .collect::<String>();
     let config = root.join("general.toml");
     fs::write(
         &config,
@@ -111,13 +145,7 @@ contig = "chr1"
 start = 1
 end = 50
 weight = 1.0
-
-[[population_snvs.generate.populations]]
-population_id = "P1"
-frequency_model = "uniform"
-min_alt_af = 0.2
-max_alt_af = 0.8
-
+{snv_populations}
 [reference]
 kind = "supplied"
 id = "ref-main"
@@ -128,13 +156,7 @@ id = "chr1"
 class = "chromosome"
 length = {}
 {loci}
-[[initial_populations]]
-population_id = "P1"
-individual_count = {individuals}
-individual_ids = [{ids}]
-ploidy = 2
-genotype_model = "hwe"
-"#,
+{populations}"#,
             bases.len()
         ),
     )
@@ -1381,6 +1403,145 @@ i5 = "TGCATGCA"
         manifest,
         effective,
     }
+}
+
+/// **El juez del abanico rechaza, y no cuelga, un número de linajes o una media
+/// de pasos que el documento publicado no puede sostener** (DT-024).
+///
+/// El juez rehace el abanico con un paso por linaje y por evento, y los dos
+/// números salían del documento sin acotar: con `lineages` de `u64::MAX` no
+/// terminaba. Ahora los linajes tienen que ser las copias haplotípicas de las
+/// poblaciones iniciales publicadas —lo que el productor usa— y la media, caer
+/// en el tope del generador.
+///
+/// **Por qué el caso de dos millones va antes que el de `u64::MAX`:** la prueba
+/// no puede colgar la batería si la cota desaparece. Con dos millones de linajes
+/// el recorrido sin cota termina en segundos y rechaza **por otro motivo** —el
+/// abanico rehecho no es el publicado—, de modo que la aserción sobre el motivo
+/// muere ahí, antes de llegar al caso que no terminaría.
+///
+/// **Control positivo:** el documento sin tocar se acepta, de modo que lo que
+/// rechaza es la corrupción y no el montaje.
+#[test]
+fn the_fan_judge_rejects_unsupportable_lineages_and_mean_events_without_hanging() {
+    let published = publish(GENERATED_RIGHT, 30);
+    let effective_path = published.destination.join("effective-config.json");
+    let manifest_path = published.destination.join("manifest.json");
+    let manifest = fs::read(&manifest_path).expect("manifiesto");
+    let judge = |document: &Value| {
+        validate_published_resources(
+            &published.destination,
+            &effective_path,
+            &serde_json::to_vec_pretty(document).expect("JSON"),
+            &manifest_path,
+            &manifest,
+            None,
+        )
+    };
+    judge(&published.effective).expect("el documento sin tocar se acepta");
+    assert_eq!(
+        published.effective["repeat_loci"][0]["slippage"]["lineages"], 60,
+        "el fixture son treinta diploides"
+    );
+
+    type Mutation = fn(&mut Value);
+    let cases: [(&str, Mutation, &str); 3] = [
+        (
+            "dos millones de linajes",
+            |document| {
+                document["repeat_loci"][0]["slippage"]["lineages"] = serde_json::json!(2_000_000);
+            },
+            "los linajes no son las copias haplotípicas de las poblaciones iniciales",
+        ),
+        (
+            "u64::MAX linajes",
+            |document| {
+                document["repeat_loci"][0]["slippage"]["lineages"] = serde_json::json!(u64::MAX);
+            },
+            "los linajes no son las copias haplotípicas de las poblaciones iniciales",
+        ),
+        (
+            "una media de pasos sin tope",
+            |document| {
+                document["repeat_loci"][0]["slippage"]["mean_events"] = serde_json::json!(10_000.0);
+            },
+            "la media de pasos rebasa el tope que el generador admite",
+        ),
+    ];
+    for (name, mutate, expected) in cases {
+        let mut document = published.effective.clone();
+        mutate(&mut document);
+        assert_ne!(document, published.effective, "{name}: no cambió nada");
+        let started = std::time::Instant::now();
+        let error = judge(&document).expect_err(name);
+        let detail = error.context().get("detail").cloned().unwrap_or_default();
+        assert!(detail.contains(expected), "{name}: {detail}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "{name}: el juez tardó {:?} en rechazar",
+            started.elapsed()
+        );
+    }
+    fs::remove_dir_all(published.root).ok();
+}
+
+/// **Controles positivos de las dos cotas del juez del abanico** (DT-024): lo
+/// válido que una cota mal escrita rechazaría.
+///
+/// - **Dos poblaciones de ploidías distintas**: 3 individuos diploides y 2
+///   tetraploides son 3×2 + 2×4 = 14 linajes. Una regla que sumara solo la
+///   primera población (6), que fijara la ploidía en 2 (10) o que multiplicara
+///   el total de individuos por la ploidía de la primera (10) rechazaría este
+///   paquete, y ninguna otra prueba de este fichero combina deslizamiento con
+///   varias poblaciones o con una ploidía distinta de 2.
+/// - **Una media de pasos de exactamente 1000**, el tope: una cota exclusiva
+///   (`0.0..1000.0`) la rechazaría.
+///
+/// Publicar ya pasa el juez, pero se vuelve a llamar explícitamente para que la
+/// prueba no dependa de ello.
+#[test]
+fn the_fan_judge_accepts_mixed_ploidy_populations_and_the_maximum_mean() {
+    let populations = r#"[[initial_populations]]
+population_id = "P1"
+individual_count = 3
+individual_ids = ["A1", "A2", "A3"]
+ploidy = 2
+genotype_model = "hwe"
+
+[[initial_populations]]
+population_id = "P2"
+individual_count = 2
+individual_ids = ["B1", "B2"]
+ploidy = 4
+genotype_model = "hwe"
+"#;
+    let published = publish_with_populations(GENERATED_RIGHT, populations, &["P1", "P2"]);
+    assert_eq!(
+        published.effective["repeat_loci"][0]["slippage"]["lineages"], 14,
+        "3×2 + 2×4"
+    );
+    let judge = |published: &Published| {
+        validate_published_resources(
+            &published.destination,
+            &published.destination.join("effective-config.json"),
+            &fs::read(published.destination.join("effective-config.json")).expect("efectiva"),
+            &published.destination.join("manifest.json"),
+            &fs::read(published.destination.join("manifest.json")).expect("manifiesto"),
+            None,
+        )
+    };
+    judge(&published).expect("dos poblaciones de ploidías distintas se aceptan");
+    fs::remove_dir_all(published.root).ok();
+
+    let maximum = GENERATED_RIGHT.replace("mean_events = 3.0", "mean_events = 1000.0");
+    assert_ne!(maximum, GENERATED_RIGHT, "el fixture cambió");
+    let published = publish(&maximum, 30);
+    assert_eq!(
+        published.effective["repeat_loci"][0]["slippage"]["mean_events"],
+        1000.0
+    );
+    judge(&published).expect("la media máxima se acepta");
+    fs::remove_dir_all(published.root).ok();
 }
 
 /// Bases de composición equilibrada y **sin periodo corto**, para que dos

@@ -656,7 +656,10 @@ fn recount_vcf_tract_bases(
     let bytes = std::fs::read(path)
         .map_err(|error| manifest_error(path, format!("VCF no legible: {error}")))?;
     let text = if path.extension().is_some_and(|extension| extension == "gz") {
-        let mut reader = noodles_bgzf::io::Reader::new(std::io::Cursor::new(bytes));
+        let mut bytes = std::io::Cursor::new(bytes);
+        crate::bgzf_blocks::reject_oversized_bgzf_blocks(&mut bytes)
+            .map_err(|fault| manifest_error(path, format!("VCF BGZF no legible: {fault}")))?;
+        let mut reader = noodles_bgzf::io::Reader::new(bytes);
         let mut decoded = String::new();
         std::io::Read::read_to_string(&mut reader, &mut decoded)
             .map_err(|error| manifest_error(path, format!("VCF BGZF no legible: {error}")))?;
@@ -2682,18 +2685,24 @@ fn validate_published_reference_names(
             ));
         }
     }
-    let vcf = read(VCF_ARTIFACT_ID).map(|bytes| {
-        if bytes.starts_with(&[0x1f, 0x8b]) {
+    let vcf = match read(VCF_ARTIFACT_ID) {
+        None => None,
+        Some(bytes) if bytes.starts_with(&[0x1f, 0x8b]) => {
+            // Un bloque que declara más de 64 KiB haría entrar en pánico al
+            // lector (DT-030): se rechaza antes de dárselo.
+            let mut cursor = std::io::Cursor::new(bytes);
+            crate::bgzf_blocks::reject_oversized_bgzf_blocks(&mut cursor).map_err(|fault| {
+                effective_error(effective_path, format!("VCF BGZF no legible: {fault}"))
+            })?;
             let mut text = String::new();
             let _ = std::io::Read::read_to_string(
-                &mut noodles_bgzf::io::Reader::new(bytes.as_slice()),
+                &mut noodles_bgzf::io::Reader::new(cursor),
                 &mut text,
             );
-            text
-        } else {
-            String::from_utf8_lossy(&bytes).into_owned()
+            Some(text)
         }
-    });
+        Some(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
+    };
     if let Some(vcf) = vcf {
         let header = vcf
             .lines()
@@ -2784,6 +2793,16 @@ fn judge_inserted_reference(
             .position(|candidate| candidate.id().as_str() == sequence)
     };
     let mut points: Vec<(usize, u64, String, String, Vec<u8>)> = Vec::new();
+    // **Cota física de lo que el juez reserva** (DT-025): los tractos insertados
+    // caben en el FASTA final publicado, que los contiene. El tope `max_units`
+    // se lee del mismo documento que las unidades y no acota nada por sí solo.
+    // Sin el fichero, la cota es cero y el locus se rechaza.
+    let fasta_size = effective_non_empty_text(inserted, "fasta_artifact_id", effective_path)
+        .ok()
+        .and_then(|artifact| artifact_paths.get(artifact))
+        .and_then(|relative| std::fs::metadata(root.join(relative)).ok())
+        .map_or(0, |metadata| metadata.len());
+    let mut reserved_bases = 0_u64;
     for locus in loci {
         let Some(insert_after) = locus
             .get("declared")
@@ -2820,9 +2839,26 @@ fn judge_inserted_reference(
         let within_cap = total_units
             .zip(locus.get("max_units").and_then(Value::as_u64))
             .is_some_and(|(total, cap)| total <= cap);
+        // Σ unidades × longitud del motivo, comprobada, y acumulada entre loci:
+        // todo lo que el juez va a reservar tiene que caber en el FASTA final.
+        let locus_bases = motifs
+            .iter()
+            .zip(units)
+            .try_fold(0_u64, |total, (motif, count)| {
+                total.checked_add((motif.as_str()?.len() as u64).checked_mul(count.as_u64()?)?)
+            });
+        let fits_in_fasta = locus_bases
+            .and_then(|bases| reserved_bases.checked_add(bases))
+            .filter(|total| *total <= fasta_size);
+        if let Some(total) = fits_in_fasta {
+            reserved_bases = total;
+        }
         let mut bases = Vec::new();
-        let mut well_formed =
-            anchored && within_cap && !motifs.is_empty() && motifs.len() == units.len();
+        let mut well_formed = anchored
+            && within_cap
+            && fits_in_fasta.is_some()
+            && !motifs.is_empty()
+            && motifs.len() == units.len();
         let checked = if well_formed { motifs.len() } else { 0 };
         for (motif, count) in motifs.iter().zip(units).take(checked) {
             match (motif.as_str(), count.as_u64()) {
@@ -2838,7 +2874,7 @@ fn judge_inserted_reference(
             return Err(effective_error(
                 effective_path,
                 format!(
-                    "referencia final: el locus {id} inserta un tracto sin secuencia conocida, sin una base a cada lado, sin motivos y unidades por bloque, o con más unidades que su tope"
+                    "referencia final: el locus {id} inserta un tracto sin secuencia conocida, sin una base a cada lado, sin motivos y unidades por bloque, o con más unidades que su tope o más bases que el FASTA final"
                 ),
             ));
         };
@@ -4970,6 +5006,7 @@ type PublishedTract<'a> = (&'a str, u64, Vec<u8>);
 /// `every_corruption_of_a_published_tract_is_rejected_by_its_own_branch`.
 fn published_simulated_tracts<'a>(
     repeat_loci: Option<&'a Value>,
+    physical: &Reference,
     effective_path: &Path,
 ) -> Result<Vec<PublishedTract<'a>>, Diagnostic> {
     let Some(loci) = repeat_loci else {
@@ -5041,6 +5078,20 @@ fn published_simulated_tracts<'a>(
                     })?,
             ),
         };
+        // **El tramo cabe en la secuencia publicada, antes de reservar nada con
+        // él** (DT-025): `repeat_motif_over` reserva `length` bytes, y un `end`
+        // leído del documento sin acotar abortaba el juez con `capacity
+        // overflow` en vez de rechazarlo.
+        if !physical
+            .sequences()
+            .iter()
+            .any(|sequence| sequence.id().as_str() == sequence_id && end <= sequence.length())
+        {
+            return Err(effective_error(
+                effective_path,
+                detail("el tramo no cabe en la secuencia de la referencia publicada"),
+            ));
+        }
         let length = end - start + 1;
         let bases = match (motifs.as_slice(), units) {
             ([motif], None) => repeat_motif_over(motif.as_bytes(), length),
@@ -5067,13 +5118,20 @@ fn published_simulated_tracts<'a>(
                 }
                 let mut bases = Vec::new();
                 for (motif, units) in motifs.iter().zip(units) {
-                    let block = units.saturating_mul(motif.len() as u64);
-                    if block == 0 || bases.len() as u64 + block > length {
+                    // Aritmética comprobada y **antes de reservar** (DT-025): un
+                    // `reference_units` de `u64::MAX` desbordaba la suma y llegaba a
+                    // `repeat_motif_over` con un tamaño imposible. `bases.len()` no
+                    // pasa nunca de `length`, de modo que la resta no desborda.
+                    let room = length - bases.len() as u64;
+                    let Some(block) = units
+                        .checked_mul(motif.len() as u64)
+                        .filter(|block| *block != 0 && *block <= room)
+                    else {
                         return Err(effective_error(
                             effective_path,
                             detail("un bloque de reference_units está vacío o se sale del tramo"),
                         ));
-                    }
+                    };
                     bases.extend(repeat_motif_over(motif.as_bytes(), block));
                 }
                 if bases.len() as u64 != length {
@@ -5122,7 +5180,7 @@ fn validate_generated_reference(
     effective_path: &Path,
     repeat_loci: Option<&Value>,
 ) -> Result<(), Diagnostic> {
-    let tracts = published_simulated_tracts(repeat_loci, effective_path)?;
+    let tracts = published_simulated_tracts(repeat_loci, physical, effective_path)?;
     let regions = tracts
         .iter()
         .map(
@@ -5538,6 +5596,24 @@ fn validate_published_slippage_fans(
             .get("lineages")
             .and_then(Value::as_u64)
             .ok_or_else(|| reject(reason("los linajes no son un entero")))?;
+        // **Las dos cotas, antes de rehacer el abanico** (DT-024). El
+        // recorrido cuesta un paso por linaje y por evento, y ambos números
+        // salen del documento: con `lineages` de `u64::MAX` el juez no
+        // terminaba. Los linajes son las copias haplotípicas de las
+        // poblaciones iniciales, que es lo que el productor usa
+        // (`haplotype_copy_count`) y que el documento publica con la lista de
+        // sus individuos, de modo que el valor está acotado por lo publicado.
+        // La media de pasos tiene el tope que el productor admite.
+        if Some(lineages) != published_haplotype_copies(effective) {
+            return Err(reject(reason(
+                "los linajes no son las copias haplotípicas de las poblaciones iniciales",
+            )));
+        }
+        if !(0.0..=crate::repeat_slippage::SLIPPAGE_MAX_MEAN_EVENTS).contains(&mean_events) {
+            return Err(reject(reason(
+                "la media de pasos rebasa el tope que el generador admite",
+            )));
+        }
         let mut rng = crate::repeat_slippage::slippage_subseed(root_seed, reference_id, locus_id)
             .map_err(|error| reject(&reason(error.detail())))?
             .local_rng();
@@ -5553,6 +5629,22 @@ fn validate_published_slippage_fans(
         compare_published_fan_against_oracle(locus, slippage, &recomputed, lineages, &reject)?;
     }
     Ok(())
+}
+
+/// Las copias haplotípicas de las poblaciones iniciales **publicadas**:
+/// individuos por ploidía, sumadas con aritmética comprobada. `None` si algo
+/// falta o desborda. Es el mismo recuento que usa el productor
+/// (`haplotype_copy_count`), leído del documento.
+fn published_haplotype_copies(effective: &serde_json::Map<String, Value>) -> Option<u64> {
+    effective
+        .get("initial_populations")?
+        .as_array()?
+        .iter()
+        .try_fold(0_u64, |total, population| {
+            let individuals = population.get("individual_count")?.as_u64()?;
+            let ploidy = population.get("ploidy")?.as_u64()?;
+            total.checked_add(individuals.checked_mul(ploidy)?)
+        })
 }
 
 /// El tramo que la **referencia publicada** lleva en el intervalo del locus, ya

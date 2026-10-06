@@ -260,15 +260,36 @@
 # `tests/final_fastq_record_validation.rs`; las 36 que no se disparan son las
 # mismas de antes. Para no añadir guardas inalcanzables, los contadores de
 # bases y de `N` del mate saturan en vez de rechazar el desbordamiento.
+# **El 06/10/2026 `src/results.rs` pasa de 773 a 778 comprobaciones,
+# `src/fastq_validation.rs` de 83 a 84 y `src/vcf_semantic_validation.rs` de
+# 109 a 110; los tres techos de sin disparar no se mueven (619, 36 y 22).** Es
+# el cierre de DT-024, DT-025 y DT-030, medido con esta misma puerta, y las
+# siete comprobaciones nuevas las dispara alguna prueba:
+#
+# - en `results.rs`, cinco: los dos lectores de VCF comprimidos rechazan un
+#   bloque BGZF que declara más de 64 KiB (`a_bgzf_vcf_with_an_oversized_block_is_rejected_by_both_results_readers`),
+#   el juez del abanico rechaza unos linajes que no son las copias
+#   haplotípicas publicadas y una media de pasos sobre el tope
+#   (`the_fan_judge_rejects_unsupportable_lineages_and_mean_events_without_hanging`)
+#   y el lector de tractos de la referencia simulada rechaza un tramo que no
+#   cabe en su secuencia
+#   (`every_corruption_of_a_published_tract_is_rejected_by_its_own_branch`);
+# - en `fastq_validation.rs`, una: el bloque imposible de un mate
+#   (`tests/final_fastq_record_validation.rs`);
+# - en `vcf_semantic_validation.rs`, una: el mismo bloque en el juez semántico
+#   del VCF (`the_semantic_judge_rejects_a_bgzf_vcf_with_an_oversized_block`).
+#
+# El rechazo de `reference_units` que se sale del tramo ya existía y sigue
+# siendo uno solo; solo cambia su condición.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
-src/vcf_semantic_validation.rs	109	22
+src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
-src/results.rs	773	619
+src/results.rs	778	619
 src/event_manifest.rs	147	117
 src/truth_validation.rs	118	95
 src/truth_schema.rs	69	46
-src/fastq_validation.rs	83	36
+src/fastq_validation.rs	84	36
 src/population_snvs.rs	143	123
 src/f5_publication.rs	52	36
 src/reference_fasta.rs	41	30

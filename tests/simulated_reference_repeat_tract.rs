@@ -883,7 +883,7 @@ fn every_corruption_of_a_published_tract_is_rejected_by_its_own_branch() {
     judge(&original).expect("el documento reserializado se acepta");
 
     type Mutation = fn(&mut Value);
-    let cases: [(&str, Mutation, &str); 11] = [
+    let cases: [(&str, Mutation, &str); 15] = [
         (
             "sin secuencia",
             |document| {
@@ -957,6 +957,42 @@ fn every_corruption_of_a_published_tract_is_rejected_by_its_own_branch() {
             },
             "los bloques de reference_units no cubren el tramo entero",
         ),
+        // DT-025: cuatro números del documento que llegaban a una reserva de
+        // memoria sin acotar. El primero abortaba el juez con `capacity
+        // overflow` (en depuración, con un desbordamiento de suma). Los otros
+        // tres están elegidos para que, **sin su cota, el juez termine** y
+        // rechace por otro motivo, en vez de pedir terabytes y colgar la
+        // batería: un bloque de veinte millones de bases, un producto que
+        // **da la vuelta** a `u64` y cae justo en el hueco que queda (2^63 + 9
+        // unidades de dos bases son 18 módulo 2^64), y un final de veinte
+        // millones en una secuencia de mil.
+        (
+            "último bloque de u64::MAX unidades",
+            |document| {
+                document["repeat_loci"][1]["reference_units"] = serde_json::json!([4, u64::MAX]);
+            },
+            "un bloque de reference_units está vacío o se sale del tramo",
+        ),
+        (
+            "último bloque de diez millones de unidades",
+            |document| {
+                document["repeat_loci"][1]["reference_units"] = serde_json::json!([4, 10_000_000]);
+            },
+            "un bloque de reference_units está vacío o se sale del tramo",
+        ),
+        (
+            "último bloque cuyo producto da la vuelta a u64",
+            |document| {
+                document["repeat_loci"][1]["reference_units"] =
+                    serde_json::json!([4, (1_u64 << 63) + 9]);
+            },
+            "un bloque de reference_units está vacío o se sale del tramo",
+        ),
+        (
+            "final de veinte millones de bases",
+            |document| document["repeat_loci"][0]["end"] = serde_json::json!(20_000_000),
+            "el tramo no cabe en la secuencia de la referencia publicada",
+        ),
     ];
     for (name, mutate, expected) in cases {
         let mut document = original.clone();
@@ -980,6 +1016,50 @@ fn every_corruption_of_a_published_tract_is_rejected_by_its_own_branch() {
         detail.contains(
             "el manifiesto registra loci de repetición que la configuración efectiva no declara"
         ),
+        "{detail}"
+    );
+}
+
+/// **El final de un tramo tiene que caber en SU secuencia, no en cualquiera**
+/// (DT-025). Con `chr2` de 2000 bases y `chr1` de 1000, un final de 1500 en un
+/// locus de `chr1` cabe en `chr2` pero no en `chr1`: una cota que mirase el
+/// largo de cualquier secuencia lo dejaría pasar hasta otro rechazo.
+///
+/// **Control positivo**: el documento sin tocar se acepta.
+/// Debe fallar contra: una cota que no compare el identificador de la
+/// secuencia. Se ejecutó.
+#[test]
+fn a_tract_end_must_fit_in_its_own_sequence_and_not_in_another_one() {
+    let document = scenario(TWO_LOCI, 2).replace(
+        "id = \"chr2\"\nclass = \"chromosome\"\nlength = 1000",
+        "id = \"chr2\"\nclass = \"chromosome\"\nlength = 2000",
+    );
+    assert!(document.contains("length = 2000"), "el fixture cambió");
+    let destination = publish(&document);
+    let effective_path = destination.join("effective-config.json");
+    let manifest_path = destination.join("manifest.json");
+    let manifest = fs::read(&manifest_path).expect("manifiesto");
+    let original: Value =
+        serde_json::from_slice(&fs::read(&effective_path).expect("configuración efectiva"))
+            .expect("JSON");
+    let judge = |document: &Value| {
+        validate_published_resources(
+            &destination,
+            &effective_path,
+            &serde_json::to_vec_pretty(document).expect("JSON"),
+            &manifest_path,
+            &manifest,
+            None,
+        )
+    };
+    judge(&original).expect("el documento intacto se acepta");
+    assert_eq!(original["repeat_loci"][1]["sequence_id"], "chr1");
+    let mut corrupt = original.clone();
+    corrupt["repeat_loci"][1]["end"] = serde_json::json!(1500);
+    let error = judge(&corrupt).expect_err("un final fuera de su secuencia");
+    let detail = error.context().get("detail").cloned().unwrap_or_default();
+    assert!(
+        detail.contains("el tramo no cabe en la secuencia de la referencia publicada"),
         "{detail}"
     );
 }

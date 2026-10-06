@@ -986,3 +986,138 @@ fn a_mate_with_more_records_than_published_pairs_is_rejected_by_count() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// DT-030: un bloque BGZF con un tamaño imposible se rechaza, no hace abortar.
+// ---------------------------------------------------------------------------
+//
+// `noodles-bgzf` 0.47 no acota el tamaño descomprimido que declara el pie de
+// cada bloque: con más de 65 536 entraba en pánico («range end index 65537 out
+// of range»). El juez recorre ahora los bloques antes de dárselos al lector.
+//
+// Lo que estas pruebas **no** pueden ejercitar, dicho sin adornos: la relectura
+// de cabeceras de `validate_final_paired_fastq` no lleva la guarda, porque
+// `validate_final_fastq_mate` ya recorrió y leyó esos dos ficheros justo antes.
+// Un fichero que pasara la guarda del mate y la perdiera después solo existe si
+// alguien lo cambia entre dos aperturas, y eso no se puede provocar desde aquí.
+
+const OVERSIZED_BLOCK_DETAIL: &str = "FASTQ BGZF block declares more than 65536 uncompressed bytes";
+
+/// Dónde empieza cada bloque BGZF de `bytes`, leído de sus cabeceras.
+fn block_offsets(bytes: &[u8]) -> Vec<usize> {
+    let mut offsets = Vec::new();
+    let mut at = 0;
+    while at + 18 <= bytes.len() {
+        offsets.push(at);
+        at += usize::from(u16::from_le_bytes([bytes[at + 16], bytes[at + 17]])) + 1;
+    }
+    assert_eq!(at, bytes.len(), "el fixture es una sucesión de bloques");
+    offsets
+}
+
+/// Reescribe el `ISIZE` del bloque número `block` y devuelve el fichero.
+fn declare_block_isize(source: &Path, block: usize, declared: u32) -> PathBuf {
+    let mut bytes = fs::read(source).expect("fixture");
+    let offsets = block_offsets(&bytes);
+    let end = offsets.get(block + 1).copied().unwrap_or(bytes.len());
+    bytes[end - 4..end].copy_from_slice(&declared.to_le_bytes());
+    let path = temporary("fastq.gz");
+    fs::write(&path, bytes).expect("fixture corrupto");
+    path
+}
+
+/// El caso `rej_truncated_compressed_block_plus_eof` de la revisión: un bloque
+/// cuyos datos comprimidos están cortados, con un pie que declara `declared`,
+/// y a continuación el marcador de fin canónico.
+fn truncated_block_plus_eof(declared: u32) -> PathBuf {
+    let valid = bgzf_file(&valid_record());
+    let bytes = fs::read(&valid).expect("fixture");
+    fs::remove_file(&valid).ok();
+    let eof = bytes[bytes.len() - 28..].to_vec();
+    let mut block = bytes[..16].to_vec();
+    block.extend_from_slice(&29_u16.to_le_bytes());
+    block.extend_from_slice(&[0x01, 0x00, 0x00, 0xff]);
+    block.extend_from_slice(&0_u32.to_le_bytes());
+    block.extend_from_slice(&declared.to_le_bytes());
+    assert_eq!(block.len(), 30);
+    block.extend_from_slice(&eof);
+    let path = temporary("fastq.gz");
+    fs::write(&path, block).expect("fixture");
+    path
+}
+
+fn assert_mate_rejected_for_its_block(path: &Path, label: &str) {
+    let result = validate_final_fastq_mate(path, TechnicalMate::R1, &identity());
+    fs::remove_file(path).ok();
+    match result {
+        Err(FastqValidationError::Structural { detail, .. }) => {
+            assert_eq!(detail, OVERSIZED_BLOCK_DETAIL, "{label}");
+        }
+        other => panic!("{label}: se esperaba el rechazo del bloque, salió {other:?}"),
+    }
+}
+
+/// Registros únicos suficientes para que el fichero ocupe **varios bloques**:
+/// el identificador de pareja cambia en sus tres primeras letras.
+fn many_records(count: usize) -> Vec<u8> {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut content = Vec::new();
+    for index in 0..count {
+        let prefix: String = [index >> 10, index >> 5, index]
+            .iter()
+            .map(|digit| char::from(ALPHABET[digit & 31]))
+            .collect();
+        let pair = format!("TP_{prefix}{}", &PAIR_A[6..]);
+        content.extend_from_slice(&record(
+            &R1_HEADER.replace(PAIR_A, &pair),
+            b"ACNT",
+            b"+",
+            b"II!~",
+        ));
+    }
+    content
+}
+
+/// **El caso `panic_isize_65537` de la revisión**: el primer bloque declara un
+/// byte más del máximo. Debe fallar contra: el juez sin la guarda, que aborta
+/// con un pánico. Se ejecutó.
+#[test]
+fn a_block_declaring_more_than_64_kib_is_rejected_not_a_panic() {
+    let valid = bgzf_file(&valid_record());
+    for declared in [65_537, u32::MAX] {
+        let corrupt = declare_block_isize(&valid, 0, declared);
+        assert_mate_rejected_for_its_block(&corrupt, &format!("ISIZE {declared}"));
+    }
+    fs::remove_file(&valid).ok();
+}
+
+/// **El caso `rej_truncated_compressed_block_plus_eof`**: datos comprimidos
+/// cortados y el marcador de fin detrás. Debe fallar contra: el juez sin la
+/// guarda. Se ejecutó.
+#[test]
+fn a_truncated_block_followed_by_the_eof_marker_is_rejected_not_a_panic() {
+    assert_mate_rejected_for_its_block(&truncated_block_plus_eof(65_537), "bloque truncado");
+}
+
+/// La guarda recorre **todos** los bloques, no solo el primero: el que declara
+/// más de 64 KiB es el tercero de datos.
+///
+/// **Control positivo**: el mismo fichero de varios bloques, sin tocar, se
+/// acepta, de modo que lo que rechaza es el `ISIZE` y no el tamaño del fichero.
+#[test]
+fn the_guard_walks_every_block_and_a_valid_multi_block_mate_is_accepted() {
+    let content = many_records(6_000);
+    let valid = bgzf_file(&content);
+    let tally = validate_final_fastq_mate(&valid, TechnicalMate::R1, &identity())
+        .expect("un mate válido de varios bloques se acepta");
+    assert_eq!(tally.records, 6_000);
+    let blocks = block_offsets(&fs::read(&valid).expect("fixture")).len();
+    assert!(
+        blocks >= 4,
+        "el fixture tiene que ocupar varios bloques, tiene {blocks}"
+    );
+    // El tercer bloque de datos, no el primero.
+    let corrupt = declare_block_isize(&valid, 2, 70_000);
+    assert_mate_rejected_for_its_block(&corrupt, "tercer bloque");
+    fs::remove_file(&valid).ok();
+}

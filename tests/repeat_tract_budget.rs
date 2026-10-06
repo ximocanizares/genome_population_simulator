@@ -28,7 +28,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::execution::execute_validated_config;
-use genome_population_simulator::results::validate_published_tract_output_accounting;
+use genome_population_simulator::results::{
+    validate_published_resources, validate_published_tract_output_accounting,
+};
 use serde_json::Value;
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
@@ -864,4 +866,64 @@ fn the_judge_also_recounts_a_bgzf_vcf() {
     );
     fs::remove_dir_all(&text.root).ok();
     fs::remove_dir_all(&compressed.root).ok();
+}
+
+/// Declara `declared` como `ISIZE` del primer bloque del fichero BGZF `path`,
+/// sin tocar nada más. El primer bloque se localiza por su cabecera.
+fn declare_first_block_isize(path: &Path, declared: u32) {
+    let mut bytes = fs::read(path).expect("fichero BGZF");
+    let end = usize::from(u16::from_le_bytes([bytes[16], bytes[17]])) + 1;
+    let before = bytes.clone();
+    bytes[end - 4..end].copy_from_slice(&declared.to_le_bytes());
+    assert_ne!(bytes, before, "la corrupción no cambió nada");
+    fs::write(path, bytes).expect("fichero corrupto");
+}
+
+/// **Un VCF comprimido con un bloque que declara más de 64 KiB se rechaza en
+/// los dos lectores de `results.rs`, no hace abortar al juez** (DT-030).
+///
+/// `noodles-bgzf` 0.47 entra en pánico con un `ISIZE` de 65 537. Los dos
+/// lectores son el recuento de bases de tracto del VCF y la comprobación de
+/// que lo publicado nombra la referencia de la simulación; este último corre
+/// **antes** de la identidad de los artefactos, de modo que un fichero
+/// manipulado llega a él sin más.
+///
+/// **Control positivo**: las mismas dos llamadas aceptan el paquete intacto.
+/// Debe fallar contra: un lector sin la guarda, que aborta. Se ejecutó.
+#[test]
+fn a_bgzf_vcf_with_an_oversized_block_is_rejected_by_both_results_readers() {
+    let published = publish_on(&reference_bases(), SINGLE_ALLELE, Some("bgzf"));
+    let vcf = published.destination.join("outputs/truth.vcf.gz");
+    let effective_path = published.destination.join("effective-config.json");
+    let manifest_path = published.destination.join("manifest.json");
+    let effective_bytes = fs::read(&effective_path).expect("efectiva");
+    let manifest_bytes = fs::read(&manifest_path).expect("manifiesto");
+    let accounting =
+        |published: &Published| judge_with(published, &effective_bytes, "truth.vcf.gz");
+    let resources = || {
+        validate_published_resources(
+            &published.destination,
+            &effective_path,
+            &effective_bytes,
+            &manifest_path,
+            &manifest_bytes,
+            None,
+        )
+        .map_err(|error| error.render_human())
+    };
+    accounting(&published).expect("el recuento acepta el paquete intacto");
+    resources().expect("el juez de recursos acepta el paquete intacto");
+
+    declare_first_block_isize(&vcf, 65_537);
+    let error = accounting(&published).expect_err("el recuento rechaza el bloque");
+    assert!(
+        error.contains("VCF BGZF no legible") && error.contains("declara 65537 bytes"),
+        "{error}"
+    );
+    let error = resources().expect_err("el juez de recursos rechaza el bloque");
+    assert!(
+        error.contains("VCF BGZF no legible") && error.contains("declara 65537 bytes"),
+        "{error}"
+    );
+    fs::remove_dir_all(&published.root).ok();
 }

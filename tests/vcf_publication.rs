@@ -228,6 +228,40 @@ fn explicit_text_vcf_is_complete_and_has_no_index() {
     fs::remove_dir_all(root).expect("cleanup");
 }
 
+/// **El juez semántico de un VCF BGZF rechaza un bloque que declara más de
+/// 64 KiB, no hace abortar** (DT-030): `noodles-bgzf` 0.47 entra en pánico con
+/// un `ISIZE` de 65 537.
+///
+/// **Control positivo**: el mismo VCF comprimido, sin tocar, se acepta, de modo
+/// que lo que rechaza es el bloque. Debe fallar contra: un juez sin la guarda,
+/// que aborta. Se ejecutó.
+#[test]
+fn the_semantic_judge_rejects_a_bgzf_vcf_with_an_oversized_block() {
+    let (root, _) = publish(Some("bgzf"));
+    let destination = root.join("published");
+    let vcf = destination.join("outputs/truth.vcf.gz");
+    let judge = || {
+        validate_published_vcf_semantics(
+            &destination.join("resources/references/ref-main.fa"),
+            &destination.join("outputs/truth.jsonl"),
+            &vcf,
+        )
+    };
+    judge().expect("el VCF comprimido intacto se acepta");
+
+    let mut bytes = fs::read(&vcf).expect("VCF");
+    let end = usize::from(u16::from_le_bytes([bytes[16], bytes[17]])) + 1;
+    bytes[end - 4..end].copy_from_slice(&65_537_u32.to_le_bytes());
+    fs::write(&vcf, bytes).expect("VCF corrupto");
+    let error = judge().expect_err("un bloque de más de 64 KiB se rechaza");
+    let rendered = format!("{error:?}");
+    assert!(
+        rendered.contains("declara 65537 bytes descomprimidos"),
+        "{rendered}"
+    );
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
 #[test]
 fn fixed_fixture_keeps_the_text_vcf_byte_and_semantic_contract() {
     // SHA-256 congelado de la salida de HEAD anterior a PERF-VCF.1, obtenida
