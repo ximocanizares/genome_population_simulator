@@ -296,6 +296,14 @@
 # `every_struct_written_as_a_list_is_rejected_by_the_truth_readers` dispara la
 # comprobación nueva con 350 alteraciones. Es lo medido por la puerta, un
 # suelo y no una prueba de que fallaría si estuviera mal escrita.
+# **El 06/10/2026 sube una comprobación al cerrar DT-033**: `src/f5_publication.rs`
+# pasa de 52 / 36 a 53 / 36. La comprobación nueva es el rechazo de un objeto
+# del manifiesto escrito como lista JSON (`gate::Strict`), que antes no existía;
+# la dispara la prueba `the_gate_rejects_every_object_it_reads_when_written_as_a_json_list`,
+# de modo que el techo de sin disparar no cambia. El juez entra en el array de
+# `scripts/check-guard-coverage.sh` con la constructora genérica `rejected`.
+# Es lo medido por la puerta, un suelo y no una prueba de que fallaría si
+# estuviera mal escrita.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
@@ -306,7 +314,7 @@ src/truth_validation.rs	118	93
 src/truth_schema.rs	69	44
 src/fastq_validation.rs	84	36
 src/population_snvs.rs	143	123
-src/f5_publication.rs	52	36
+src/f5_publication.rs	53	36
 src/reference_fasta.rs	41	30
 src/reference_reduction_io.rs	55	45
 src/integrity.rs	1	0

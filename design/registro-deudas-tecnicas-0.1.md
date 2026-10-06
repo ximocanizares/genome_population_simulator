@@ -60,7 +60,9 @@ documenta mejor.
 | DT-030 | Un bloque BGZF que declara más de 64 KiB descomprimidos hace abortar al juez con un pánico en vez de rechazar el fichero | Media | 05/10/2026 | **Cerrada (06/10/2026)**, sin cambiar dependencias |
 | DT-031 | Una referencia corta con tasa de quimeras alta aborta como «invariante imposible» en vez de rechazarse como configuración | Baja | 05/10/2026 | **Cerrada (06/10/2026)** |
 | DT-032 | El lector de la verdad acepta como lista JSON objetos que el esquema exige objeto (`"counts":[6,8]`) | Baja | 06/10/2026 | **Cerrada (06/10/2026)** |
-| DT-033 | La verificación del paquete F5 publicado acepta manifiestos con enlaces escritos como lista JSON, que el esquema rechaza | Baja | 06/10/2026 | Abierta |
+| DT-033 | La verificación del paquete F5 publicado acepta manifiestos con enlaces escritos como lista JSON, que el esquema rechaza | Baja | 06/10/2026 | **Cerrada (06/10/2026)** |
+| DT-034 | Lo publicado atribuye las cifras de calibración del tartamudeo solo a Raz et al. (2019), cuando son de Gymrek (2016), cuya licencia exige atribuirlas | Baja | 06/10/2026 | Abierta |
+| DT-035 | La puerta del paquete F5 acepta manifiestos que el esquema rechaza en campos que no lee con forma tipada (`attempt_summary`, `quota_ties`, `limits`, `profile`) | Baja | 06/10/2026 | Abierta |
 
 ---
 
@@ -2564,8 +2566,8 @@ Mutando el esquema en una copia, mueren un objeto llamado `sources`, una lista
 reescribir el esquema sin cambiarlo no la rompe. No reconoce otras formas de
 declarar una lista (`items` sin `type`, por ejemplo).
 
-**Otros lectores con el mismo hueco, sin corregir.** Ver DT-033, que recoge el
-de la verificación del paquete F5. La auditoría de identidad
+**Otros lectores con el mismo hueco.** DT-033, ya cerrada, recogió el de la
+verificación del paquete F5. La auditoría de identidad
 (`audit_f5_identity_closure`, `src/f5_closure.rs`) acepta la `identity` de una
 copia escrita como lista y pierde su `reference_id`, pero el oráculo F5 la
 rechaza (por huella y, recalculadas, con «copy.identity no es un objeto»), de
@@ -2594,6 +2596,91 @@ lista, un enlace de artefacto como lista, todos los enlaces como lista y el
 manifiesto entero como lista. Ningún otro juez de Rust lee ese manifiesto, así
 que el hueco existe de extremo a extremo. Es el mismo mecanismo de DT-032.
 
-**Qué haría falta.** La misma comprobación previa de forma que cerró DT-032
-(una pasada que rechace listas fuera de los campos que el esquema declara
-lista), adaptada a este manifiesto. No se ha corregido.
+**Cómo se cerró (06/10/2026).** No hizo falta la pasada previa de forma de
+DT-032. Aquí los objetos que se leen con forma tipada son pocos y están todos
+en `mod gate`, y los campos que sí son lista (`artifacts`,
+`initialization_summaries`) ya están tipados como `Vec`, de modo que no hay
+lista blanca que mantener ni que fijar contra el esquema. Se añadió un
+envoltorio `gate::Strict<T>` que lee el valor con `deserialize_any`, acepta
+solo un objeto y delega en `T` con `MapAccessDeserializer`: el flujo y
+`deny_unknown_fields` quedan intactos, no se materializa nada y la lista se
+rechaza en `visit_seq` con `rejected(..)` («an object, not a list of its
+values»). Se envuelven la raíz del manifiesto, `/f5` de éxito y de fallo, la
+verdad, cada enlace y cada resumen de inicialización, `f5_failure`, la
+configuración efectiva (raíz y `/f5`) y el diagnóstico `f5-failure.json`: los
+doce tipos que `gate` deserializa con `derive`. Se usa `deserialize_any` y no
+`deserialize_map` porque `serde_json` rechaza entonces la lista por su cuenta,
+sin pasar por `rejected`, y la puerta de cobertura no vería la comprobación.
+Sin cambios en el esquema ni en el productor.
+
+Prueba: `the_gate_rejects_every_object_it_reads_when_written_as_a_json_list`
+(`tests/f5_publication.rs`) sustituye por la lista de sus valores cada objeto
+anterior (raíz, `/f5`, verdad, los siete enlaces, los resúmenes y la raíz y
+`/f5` del efectivo, en el éxito; raíz, `/f5`, `f5_failure`, su enlace y el
+diagnóstico, con el enlace rehecho, en el fallo) y exige el texto del rechazo
+nuevo, no uno cualquiera; y contrasta cada caso con el esquema
+`manifest-general-v5` (o `effective-config-v5`, `f5-failure-v1`) con el
+`python3` del entorno virtual: todos rechazados por los dos y los controles
+intactos aceptados por los dos. La lista sale en orden alfabético de claves,
+así que contra la puerta sin arreglar muchos casos mueren ya por tipo; lo que
+discrimina es el texto. La aceptación real se reprodujo aparte con la verdad y
+un enlace en orden de campos: la puerta anterior devolvía `Ok` y el esquema
+lo rechazaba. Mutaciones sobre copia (nueve, todas muertas): lista aceptada en
+`visit_seq` y el envoltorio retirado, uno a uno, de la raíz, `/f5` de éxito,
+`f5_failure`, la verdad, los enlaces, los resúmenes, el efectivo y el
+diagnóstico.
+
+Cobertura: `src/f5_publication.rs` pasa de 52 / 36 a 53 / 36 (la comprobación
+nueva la dispara la prueba, el techo no cambia); el juez incorpora `rejected` a
+su entrada del array de `scripts/check-guard-coverage.sh`; sin ello la puerta
+no contaba la comprobación nueva. `tests/guard_constructors.rs` no cambia: ya
+trata `rejected(` de forma fija.
+
+**Fuera de alcance, sin cambios.** Los campos `Value` del manifiesto
+(`limits`, `profile`, `sampling`, etc.) no se leen con forma tipada: la puerta
+solo los compara con la copia efectiva (y, en el éxito, lee `reference_bases_processed`
+de `resource_preflight`); no llama al oráculo, que en producción recibe su
+declaración desde memoria y no desde el manifiesto. Además salta sin leer
+`attempt_summary`, `quota_ties` y `f_realized`. Ver DT-035.
+`audit_f5_identity_closure` sigue como en DT-032 y no se tocó.
+
+Los envoltorios `Strict` de `SuccessDocument` y `FailedDocument` son defensa
+redundante que ninguna prueba alcanza: la puerta lee antes el mismo fichero
+como raíz envuelta y la lista se rechaza allí. Se dejan para que la lectura no
+dependa del orden de las lecturas.
+
+---
+
+## DT-034. La atribución de la calibración del tartamudeo omite a Gymrek (2016)
+
+**Gravedad: baja.** Decidido por el usuario: se corrige en un cambio aparte.
+
+Lo publicado atribuye las cifras de la calibración del tartamudeo solo a «Raz
+et al. (2019), Nucleic Acids Research 47(5):2436-2445, CC BY 4.0» (constante en
+`src/stutter.rs`, hacia la línea 153). Las cifras de la tabla por longitud de
+motivo son de Gymrek (2016), tabla 1, CC BY 4.0, cuya licencia exige
+atribuirlas; Raz aporta la forma del modelo. `design/calibracion-tartamudeo-0.1.md`
+(líneas ~51 y 223-224) lo dice bien. Gymrek no aparece en el código ni en los
+esquemas.
+
+**Qué haría falta.** Corregir la constante y lo que la cite. Cambia los bytes de
+toda ejecución con tartamudeo, porque el texto de la fuente va en la salida; por
+eso va aparte del multiplicador configurable de DT-009. No se ha corregido.
+
+---
+
+## DT-035. La puerta del paquete F5 acepta formas que el esquema rechaza en campos no tipados
+
+**Gravedad: baja.** El productor no escribe así, pero la puerta también juzga
+paquetes ya publicados. Hallado por la revisión adversarial de DT-033 y
+reproducido con la puerta arreglada y con la antigua.
+
+La puerta acepta cuatro manifiestos que `manifest-general-v5` rechaza, en campos
+que no lee con forma tipada: `attempt_summary` escrito como lista, `quota_ties`
+como texto, `limits` como lista en el manifiesto y en la configuración efectiva
+a la vez, y lo mismo con `profile`. Los campos `Value` solo se comparan entre
+las dos copias, de modo que dos copias igual de malformadas coinciden, y la
+puerta salta sin leer `attempt_summary`, `quota_ties` y `f_realized`.
+
+**Qué haría falta.** Validar la forma de esos campos contra el esquema o con
+comprobaciones propias. No se ha corregido.

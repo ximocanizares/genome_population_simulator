@@ -1206,6 +1206,206 @@ fn every_divergence_between_the_two_copies_is_rejected_by_its_own_term() {
     }
 }
 
+/// Sustituye el objeto de `pointer` por la lista de sus valores.
+///
+/// Es la forma que `serde` acepta por defecto para un `derive(Deserialize)`
+/// (DT-033). El orden de los valores es el alfabético de las claves, porque
+/// `serde_json` no conserva el de escritura: contra la puerta **sin arreglar**
+/// esa lista falla por tipo y no se acepta, de modo que lo que discrimina la
+/// prueba es el **texto** del rechazo nuevo, que solo el arreglo produce. La
+/// aceptación real de la lista en orden de campos se reprodujo aparte, con
+/// los bytes en orden de struct, contra `ed50bbf`.
+fn objects_to_lists(document: &Value, pointers: &[String]) -> Vec<(String, Value)> {
+    pointers
+        .iter()
+        .map(|pointer| {
+            let mut mutated = document.clone();
+            let target = if pointer.is_empty() {
+                &mut mutated
+            } else {
+                mutated.pointer_mut(pointer).expect("el objeto existe")
+            };
+            let values = target.as_object().expect("es un objeto").values().cloned();
+            *target = Value::Array(values.collect());
+            (pointer.clone(), mutated)
+        })
+        .collect()
+}
+
+const NOT_A_LIST: &str = "not a list of its values";
+
+/// DT-033: la puerta rechaza cada objeto que lee con una forma tipada si
+/// llega escrito como lista JSON, y el esquema coincide.
+///
+/// Cubre todos los objetos que `gate` deserializa: la raíz del manifiesto,
+/// `/f5`, la verdad, cada enlace de artefacto, cada resumen de inicialización
+/// y la raíz y el `/f5` del efectivo en el éxito; y en el fallo la raíz, `/f5`,
+/// `/f5/f5_failure`, su enlace y el diagnóstico `f5-failure.json`. El
+/// diagnóstico se reescribe con su enlace rehecho para que no muera por el
+/// SHA-256.
+#[test]
+fn the_gate_rejects_every_object_it_reads_when_written_as_a_json_list() {
+    let package = publish("lists-success", &wide_fixture());
+    let records = package.records();
+    let manifest = package.manifest();
+    let effective = package.effective();
+    let verify = |root: &Path, records: &[ArtifactRecord]| {
+        verify_published_f5_package(root, &root.join(F5_MANIFEST_PATH), records)
+    };
+    verify(&package.destination, &records).expect("el paquete íntegro pasa");
+
+    let mut manifest_pointers = vec![String::new(), "/f5".to_owned(), "/f5/truth".to_owned()];
+    for kind in ["artifacts", "initialization_summaries"] {
+        let count = manifest["f5"][kind].as_array().expect("lista").len();
+        assert!(count > 0, "{kind} vacío: el barrido no ejercitaría nada");
+        manifest_pointers.extend((0..count).map(|index| format!("/f5/{kind}/{index}")));
+    }
+    let effective_pointers = vec![String::new(), "/f5".to_owned()];
+
+    let mut schema_manifests = Vec::new();
+    let mut schema_effectives = Vec::new();
+    let mut rejected = 0;
+    let mut cases = objects_to_lists(&manifest, &manifest_pointers)
+        .into_iter()
+        .map(|(pointer, mutated)| ("manifiesto", pointer, mutated))
+        .chain(
+            objects_to_lists(&effective, &effective_pointers)
+                .into_iter()
+                .map(|(pointer, mutated)| ("efectivo", pointer, mutated)),
+        )
+        .collect::<Vec<_>>();
+    for (document, pointer, mutated) in cases.drain(..) {
+        let staged = temporary(&format!("lists-success-{document}"));
+        copy_tree(&package.destination, &staged);
+        let path = if document == "manifiesto" {
+            schema_manifests.push((mutated.clone(), false));
+            F5_MANIFEST_PATH
+        } else {
+            schema_effectives.push((mutated.clone(), false));
+            F5_EFFECTIVE_CONFIG_PATH
+        };
+        fs::write(
+            staged.join(path),
+            serde_json::to_vec(&mutated).expect("JSON"),
+        )
+        .expect("escribir");
+        let rejection = verify(&staged, &records)
+            .expect_err(&format!("{document} {pointer:?} como lista debe tumbar"));
+        let detail = rejection
+            .context()
+            .get("detail")
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            detail.contains(NOT_A_LIST),
+            "{document} {pointer:?}: el rechazo debe ser el de forma y dijo {detail:?}"
+        );
+        assert_eq!(rejection.code(), "GPS-FMT-006");
+        rejected += 1;
+        fs::remove_dir_all(&staged).expect("retirar");
+    }
+    assert_eq!(
+        rejected,
+        manifest_pointers.len() + effective_pointers.len(),
+        "cada caso del barrido se ejercitó"
+    );
+
+    // El esquema dice lo mismo, y los controles intactos pasan por los dos.
+    schema_manifests.push((manifest.clone(), true));
+    schema_effectives.push((effective.clone(), true));
+    assert_external_cases(
+        "manifest-general-v5.schema.json",
+        &[
+            "effective-config-v5.schema.json",
+            "f5-failure-v1.schema.json",
+        ],
+        schema_manifests,
+    );
+    assert_external_cases("effective-config-v5.schema.json", &[], schema_effectives);
+
+    // Fallo: manifiesto y diagnóstico.
+    let (chain, source) = publish_failure(
+        "lists-failure",
+        F5FailureStage::Founders,
+        Diagnostic::f5_controlled_quota_infeasible("scenario", "P1", "cuota inviable"),
+    );
+    let failure_records = failure_records(&source);
+    verify(&source, &failure_records).expect("el paquete de fallo íntegro pasa");
+    let failed: Value =
+        serde_json::from_slice(&fs::read(source.join(F5_MANIFEST_PATH)).expect("leer"))
+            .expect("JSON");
+    let pointers = vec![
+        String::new(),
+        "/f5".to_owned(),
+        "/f5/f5_failure".to_owned(),
+        "/f5/f5_failure/artifacts/0".to_owned(),
+    ];
+    let mut schema_failed = vec![(failed.clone(), true)];
+    for (pointer, mutated) in objects_to_lists(&failed, &pointers) {
+        let staged = temporary("lists-failure-manifest");
+        copy_tree(&source, &staged);
+        schema_failed.push((mutated.clone(), false));
+        fs::write(
+            staged.join(F5_MANIFEST_PATH),
+            serde_json::to_vec(&mutated).expect("JSON"),
+        )
+        .expect("escribir");
+        let rejection = verify(&staged, &failure_records)
+            .expect_err(&format!("fallo {pointer:?} como lista debe tumbar"));
+        let detail = rejection
+            .context()
+            .get("detail")
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            detail.contains(NOT_A_LIST),
+            "fallo {pointer:?}: el rechazo debe ser el de forma y dijo {detail:?}"
+        );
+        fs::remove_dir_all(&staged).expect("retirar");
+    }
+    assert_external_cases(
+        "manifest-general-v5.schema.json",
+        &[
+            "effective-config-v5.schema.json",
+            "f5-failure-v1.schema.json",
+        ],
+        schema_failed,
+    );
+
+    let diagnostic: Value =
+        serde_json::from_slice(&fs::read(source.join(F5_FAILURE_PATH)).expect("leer"))
+            .expect("JSON");
+    let mut schema_diagnostics = vec![(diagnostic.clone(), true)];
+    let (_, list) = objects_to_lists(&diagnostic, &[String::new()])
+        .pop()
+        .expect("un caso");
+    schema_diagnostics.push((list.clone(), false));
+    let staged = temporary("lists-failure-diagnostic");
+    copy_tree(&source, &staged);
+    let mutated = serde_json::to_vec_pretty(&list).expect("JSON");
+    fs::write(staged.join(F5_FAILURE_PATH), &mutated).expect("escribir");
+    let manifest_path = staged.join(F5_MANIFEST_PATH);
+    let mut relinked: Value =
+        serde_json::from_slice(&fs::read(&manifest_path).expect("leer")).expect("JSON");
+    relinked["f5"]["f5_failure"]["artifacts"][0]["size_bytes"] = json!(mutated.len() as u64);
+    relinked["f5"]["f5_failure"]["artifacts"][0]["sha256"] = json!(sha256(&mutated));
+    fs::write(&manifest_path, serde_json::to_vec(&relinked).expect("JSON")).expect("escribir");
+    let rejection = verify(&staged, &self::failure_records(&staged))
+        .expect_err("el diagnóstico como lista debe tumbar");
+    let detail = rejection
+        .context()
+        .get("detail")
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        detail.contains(NOT_A_LIST),
+        "el diagnóstico: el rechazo debe ser el de forma y dijo {detail:?}"
+    );
+    fs::remove_dir_all(&staged).expect("retirar");
+    assert_external_cases("f5-failure-v1.schema.json", &[], schema_diagnostics);
+    drop(chain);
+}
+
 /// Etiqueta, mutación de una de las dos copias y término que el rechazo debe
 /// citar.
 type DivergenceCase = (&'static str, fn(&mut Value, &mut Value), &'static str);

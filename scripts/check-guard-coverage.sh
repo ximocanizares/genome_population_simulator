@@ -47,7 +47,7 @@ judges=(
     "src/truth_schema.rs|rejected"
     "src/fastq_validation.rs|rejected|missing_canonical_eof"
     "src/population_snvs.rs|rejected|audit_error|missing|invalid"
-    "src/f5_publication.rs|document_error|manifest_error|failure_mismatch"
+    "src/f5_publication.rs|rejected|document_error|manifest_error|failure_mismatch"
     "src/reference_fasta.rs|rejected|empty_header|empty_fasta|invalid_symbol|configuration_mismatch|reference_error"
     "src/reference_reduction_io.rs|map_error|out_of_range"
     "src/integrity.rs|rejected"

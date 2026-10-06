@@ -1793,9 +1793,56 @@ pub fn publish_f5_failure(
 /// esquema no tenía dentro del productor: una clave de más en `/f5` o en un
 /// enlace se rechaza aquí y no solo en el validador externo.
 mod gate {
-    use serde::Deserialize;
-    use serde::de::IgnoredAny;
+    use crate::guard_trace::rejected;
+    use serde::de::value::MapAccessDeserializer;
+    use serde::de::{Error as _, IgnoredAny, MapAccess, Unexpected, Visitor};
+    use serde::{Deserialize, Deserializer};
     use serde_json::Value;
+    use std::ops::Deref;
+
+    /// Un objeto JSON que se lee como tal y **solo** como tal.
+    ///
+    /// `derive(Deserialize)` acepta también una lista con los valores en el
+    /// orden de los campos (`["gps_execution_manifest", ...]`), que el
+    /// esquema `manifest-general-v5` rechaza (DT-033). Este envoltorio pide
+    /// un mapa y delega en `T` con el mismo flujo, sin materializar nada:
+    /// `deny_unknown_fields` y los mensajes de `T` siguen intactos. Usa
+    /// `deserialize_any` y no `deserialize_map` porque este último rechaza la
+    /// lista por su cuenta, sin pasar por `rejected` y, por tanto, sin que la
+    /// puerta de cobertura vea el rechazo.
+    pub(super) struct Strict<T>(pub(super) T);
+
+    impl<T> Deref for Strict<T> {
+        type Target = T;
+        fn deref(&self) -> &T {
+            &self.0
+        }
+    }
+
+    impl<'de, T: Deserialize<'de>> Deserialize<'de> for Strict<T> {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct Object<T>(std::marker::PhantomData<T>);
+            impl<'de, T: Deserialize<'de>> Visitor<'de> for Object<T> {
+                type Value = Strict<T>;
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    formatter.write_str("a JSON object")
+                }
+                fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Strict<T>, A::Error> {
+                    T::deserialize(MapAccessDeserializer::new(map)).map(Strict)
+                }
+                fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                    self,
+                    _: A,
+                ) -> Result<Strict<T>, A::Error> {
+                    Err(rejected(A::Error::invalid_type(
+                        Unexpected::Seq,
+                        &"an object, not a list of its values",
+                    )))
+                }
+            }
+            deserializer.deserialize_any(Object(std::marker::PhantomData))
+        }
+    }
 
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -1850,7 +1897,7 @@ mod gate {
         execution_id: IgnoredAny,
         #[allow(dead_code)]
         state: IgnoredAny,
-        pub(super) f5: SuccessF5,
+        pub(super) f5: Strict<SuccessF5>,
     }
 
     /// Las veinticinco claves exactas del objeto `f5` de un éxito, más las
@@ -1897,9 +1944,9 @@ mod gate {
         quota_ties: IgnoredAny,
         #[allow(dead_code)]
         f_realized: IgnoredAny,
-        pub(super) initialization_summaries: Vec<Summary>,
-        pub(super) truth: TruthLink,
-        pub(super) artifacts: Vec<Link>,
+        pub(super) initialization_summaries: Vec<Strict<Summary>>,
+        pub(super) truth: Strict<TruthLink>,
+        pub(super) artifacts: Vec<Strict<Link>>,
     }
 
     #[derive(Deserialize)]
@@ -1913,14 +1960,14 @@ mod gate {
         execution_id: IgnoredAny,
         #[allow(dead_code)]
         state: IgnoredAny,
-        pub(super) f5: FailedF5,
+        pub(super) f5: Strict<FailedF5>,
     }
 
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     pub(super) struct FailedF5 {
         pub(super) schema_version: String,
-        pub(super) f5_failure: Failure,
+        pub(super) f5_failure: Strict<Failure>,
     }
 
     /// Los nueve términos comunes que `f5-failure.json` y el objeto
@@ -1937,7 +1984,7 @@ mod gate {
         pub(super) counters: Value,
         pub(super) best_layout: Value,
         pub(super) best_attempt: Value,
-        pub(super) artifacts: Vec<Link>,
+        pub(super) artifacts: Vec<Strict<Link>>,
     }
 
     /// `outputs/f5-failure.json`, con sus doce claves exactas.
@@ -1990,7 +2037,7 @@ mod gate {
         #[allow(dead_code)]
         source_path: String,
         pub(super) seed: String,
-        pub(super) f5: EffectiveF5,
+        pub(super) f5: Strict<EffectiveF5>,
     }
 }
 
@@ -2173,7 +2220,8 @@ pub fn verify_published_f5_package(
     manifest_path: &Path,
     artifacts: &[ArtifactRecord],
 ) -> Result<(), Diagnostic> {
-    let root: gate::Root = parse(manifest_path, manifest_path, "la raíz del manifiesto")?;
+    let root: gate::Strict<gate::Root> =
+        parse(manifest_path, manifest_path, "la raíz del manifiesto")?;
     if root.manifest_kind != "gps_execution_manifest"
         || root.schema_version != F5_DOCUMENT_SCHEMA_VERSION
     {
@@ -2226,8 +2274,10 @@ fn verify_success(
     manifest_path: &Path,
     catalog: &mut Vec<(String, String)>,
 ) -> Result<(), Diagnostic> {
-    let document: gate::SuccessDocument = parse(manifest_path, manifest_path, "/f5")?;
-    let f5 = document.f5;
+    // `Strict` aquí es defensa redundante, inalcanzable desde las pruebas: la raíz,
+    // que lee el mismo fichero envuelta, rechaza antes la lista.
+    let document: gate::Strict<gate::SuccessDocument> = parse(manifest_path, manifest_path, "/f5")?;
+    let f5 = document.0.f5.0;
     if f5.artifacts.len() != F5_TSV_CONTRACTS.len() {
         return Err(manifest_error(
             manifest_path,
@@ -2356,7 +2406,7 @@ fn verify_success(
     verify_payload_inventory(payload_root, manifest_path, &declared)?;
 
     let effective_path = payload_root.join(F5_EFFECTIVE_CONFIG_PATH);
-    let effective: gate::EffectiveDocument =
+    let effective: gate::Strict<gate::EffectiveDocument> =
         parse(&effective_path, manifest_path, F5_EFFECTIVE_CONFIG_PATH)?;
     verify_effective_equality(manifest_path, &f5, &effective)
 }
@@ -2513,8 +2563,10 @@ fn verify_failure(
     manifest_path: &Path,
     catalog: &mut Vec<(String, String)>,
 ) -> Result<(), Diagnostic> {
-    let document: gate::FailedDocument = parse(manifest_path, manifest_path, "/f5/f5_failure")?;
-    let f5 = document.f5;
+    // Igual que en el éxito: defensa redundante, inalcanzable desde las pruebas.
+    let document: gate::Strict<gate::FailedDocument> =
+        parse(manifest_path, manifest_path, "/f5/f5_failure")?;
+    let f5 = document.0.f5.0;
     if f5.schema_version != F5_OBJECT_SCHEMA_VERSION {
         return Err(manifest_error(
             manifest_path,
@@ -2524,7 +2576,7 @@ fn verify_failure(
             ),
         ));
     }
-    let failure = f5.f5_failure;
+    let failure = f5.f5_failure.0;
     // El catálogo público del esquema es cerrado: un código ajeno produciría
     // un manifiesto que su propio esquema rechaza.
     if F5FailureCode::parse(&failure.code).is_none() {
@@ -2594,7 +2646,8 @@ fn verify_failure_diagnostic(
     manifest: &gate::Failure,
 ) -> Result<(), Diagnostic> {
     let document_path = payload_root.join(F5_FAILURE_PATH);
-    let document: gate::FailureDiagnostic = parse(&document_path, manifest_path, F5_FAILURE_PATH)?;
+    let document: gate::Strict<gate::FailureDiagnostic> =
+        parse(&document_path, manifest_path, F5_FAILURE_PATH)?;
     if document.diagnostic_kind != F5_FAILURE_DIAGNOSTIC_KIND
         || document.schema_version != F5_FAILURE_SCHEMA_VERSION
     {
