@@ -316,6 +316,16 @@
 # `tests/clonal_homopolymer_fold.rs` sobre la efectiva. Las dos se verificaron
 # además mutándolas en una copia y viendo morir sus pruebas, que es lo que esta
 # puerta no mide.
+# **El 08/10/2026 bajan tres techos en la primera tanda de DT-001 (jueces
+# pequeños), sin tocar el número de comprobaciones:** `src/reference_fasta.rs`
+# de 30 a 7, `src/reference_reduction_io.rs` de 45 a 12 y
+# `src/technical_profile.rs` de 14 a 5. Lo cubren pruebas unitarias nuevas en
+# los propios módulos, que exigen el motivo exacto de cada rechazo y se
+# verificaron mutando cada guarda en una copia (DT-001 en el registro lo
+# detalla). Las 24 que quedan sin disparar (7 + 12 + 5) están documentadas en
+# el código como inalcanzables, cada una con su porqué junto a la guarda; no se
+# borró ninguna. Es lo medido por la puerta, un suelo y no una prueba de que
+# fallaría si estuviera mal escrita.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
@@ -327,7 +337,7 @@ src/truth_schema.rs	69	44
 src/fastq_validation.rs	84	36
 src/population_snvs.rs	143	123
 src/f5_publication.rs	53	36
-src/reference_fasta.rs	41	30
-src/reference_reduction_io.rs	55	45
+src/reference_fasta.rs	41	7
+src/reference_reduction_io.rs	55	12
 src/integrity.rs	1	0
-src/technical_profile.rs	15	14
+src/technical_profile.rs	15	5

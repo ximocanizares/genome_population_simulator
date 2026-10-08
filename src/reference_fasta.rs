@@ -282,6 +282,10 @@ pub(crate) fn stream_fasta_site_bases(
                 }
                 at_line_start = false;
                 let ordinal = current_ordinal.ok_or_else(|| empty_header(path, 0))?;
+                // Inalcanzable el rechazo de `current_id` sin ordinal: ordinal e identificador
+                // se asignan y se anulan siempre juntos (al cerrar y al abrir una cabecera), así
+                // que no existe un estado con ordinal y sin identificador. Lo comprueba
+                // `the_streamed_reader_never_sees_an_ordinal_without_an_identifier`.
                 let sequence_id = current_id.as_ref().ok_or_else(|| empty_header(path, 0))?;
                 current_length = current_length
                     .checked_add(1)
@@ -529,6 +533,10 @@ fn validate_supplied_fasta_inner(
         ));
     }
 
+    // Inalcanzable el rechazo de `Reference::new` que sigue: hay al menos un
+    // registro, los identificadores repetidos los rechazó `locations` en
+    // `finish_record` y la suma de longitudes no puede desbordar `u64` con un fichero
+    // que cabe en disco.
     let reference = Reference::new(
         ReferenceId::parse(reference_id, "execution")?,
         ReferenceOrigin::Supplied {
@@ -876,6 +884,9 @@ fn finish_summary(
             ),
         ));
     }
+    // Inalcanzable el rechazo de «ID no declarado»: el lector de resumen ya lo
+    // rechazó al ver la cabecera, con este mismo catálogo
+    // (`an_undeclared_id_in_the_summary_reader_is_rejected_at_its_header`).
     let expectation = expected.get(header.id_text()).ok_or_else(|| {
         configuration_mismatch(
             path,
@@ -1003,6 +1014,8 @@ fn finish_record(
     }
     // Se consume el búfer ya acumulado en lugar de copiarlo: `try_from_bytes`
     // duplicaría la secuencia entera y el pico pasaría al doble del genoma.
+    // Inalcanzable el rechazo de la conversión: cada símbolo se comprobó al
+    // acumularlo y el registro no está vacío (`finish_record` lo rechazó arriba).
     let sequence =
         DnaSequence::try_from_owned_bytes(bases).map_err(|error| reference_error(path, error))?;
     let (sequence_id, class) = if let Some(expected) = expected {
@@ -1035,6 +1048,8 @@ fn finish_record(
             SequenceClass::Chromosome,
         )
     };
+    // Inalcanzable el rechazo de `from_owned`: el identificador sale de la propia
+    // cabecera, o de la expectativa hallada con ese mismo texto.
     ReferenceSequence::from_owned(sequence_id, header, class, sequence)
         .map_err(|error| reference_error(path, error))
 }
@@ -1045,6 +1060,10 @@ pub(crate) fn parse_header_with_noodles(
     line_number: u64,
 ) -> Result<FastaHeader, Diagnostic> {
     let header = FastaHeader::parse(raw).map_err(|_| empty_header(path, line_number))?;
+    // Inalcanzable el rechazo de «sin primer carácter no blanco»: `FastaHeader::parse`
+    // ya rechazó arriba una cabecera en blanco. Tampoco puede fallar la lectura de la
+    // definición que sigue: es un `Cursor` canónico que empieza por `>` y acaba en
+    // salto de línea (`the_structurally_unreachable_guards_are_not_reached_by_strange_inputs`).
     let first = raw
         .iter()
         .position(|byte| !byte.is_ascii_whitespace())
@@ -1182,4 +1201,431 @@ fn internal_error(detail: impl Into<String>) -> Diagnostic {
     .with("component", "reference_fasta")
     .with("operation", "validate_supplied_fasta")
     .with("detail", detail.into())
+}
+
+#[cfg(test)]
+mod tests {
+    //! Pruebas de las guardas del lector de FASTA que ninguna entrada pública
+    //! alcanzaba: el recorrido por flujo de F5, el lector de resumen, el índice
+    //! de aceptación y la construcción de una referencia sin bases (DT-001).
+    //!
+    //! Cada caso exige el **código** del rechazo y, cuando lo hay, el contexto
+    //! que lo distingue del de otra guarda de la misma función, de modo que una
+    //! guarda rota no la tape otra anterior (DT-032).
+
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "gps-reference-fasta-unit-{}-{}",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&path).expect("scratch directory");
+            Self(path)
+        }
+
+        fn write(&self, name: &str, bytes: &[u8]) -> PathBuf {
+            let path = self.0.join(name);
+            fs::write(&path, bytes).expect("write fixture");
+            path
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn expectation(id: &str, length: u64) -> SequenceExpectation<'_> {
+        SequenceExpectation {
+            id,
+            class: SequenceClass::Chromosome,
+            length,
+        }
+    }
+
+    fn streamed(bytes: &[u8]) -> Result<StreamedFastaSiteBases, Diagnostic> {
+        let scratch = Scratch::new();
+        let path = scratch.write("reference.fa", bytes);
+        let sha = format!("{:x}", Sha256::digest(bytes));
+        stream_fasta_site_bases(&path, "ref-main", bytes.len() as u64, &sha, &[])
+    }
+
+    fn supplied(
+        bytes: &[u8],
+        expected: Option<&[SequenceExpectation<'_>]>,
+    ) -> Result<ValidatedSuppliedReference, Diagnostic> {
+        let scratch = Scratch::new();
+        let path = scratch.write("reference.fa", bytes);
+        match expected {
+            Some(expected) => validate_supplied_fasta(&path, "ref-main", expected),
+            None => validate_supplied_fasta_unconstrained(&path, "ref-main"),
+        }
+    }
+
+    fn summarized(
+        bytes: &[u8],
+        expected: &[SequenceExpectation<'_>],
+    ) -> Result<ValidatedFastaSummary, Diagnostic> {
+        let scratch = Scratch::new();
+        let path = scratch.write("reference.fa", bytes);
+        validate_supplied_fasta_summary(&path, "ref-main", expected)
+    }
+
+    #[track_caller]
+    fn assert_code<T: std::fmt::Debug>(result: Result<T, Diagnostic>, code: &str, label: &str) {
+        let error = result.expect_err(label);
+        assert_eq!(error.code(), code, "{label}: {}", error.render_human());
+    }
+
+    #[test]
+    fn the_streamed_reader_rejects_each_malformed_input_for_its_own_reason() {
+        // (caso, bytes, código esperado, `location` esperado si lo hay)
+        let cases: [(&str, &[u8], &str, Option<&str>); 9] = [
+            ("gzip", &[0x1f, 0x8b, 0x08, 0x00], "GPS-FMT-001", None),
+            // Cabecera cerrada con salto de línea cuyo identificador no es UTF-8.
+            (
+                "header with a non-UTF-8 id",
+                b">\xff\nAC\n",
+                "GPS-FMT-003",
+                Some("line 0"),
+            ),
+            // Cabecera cerrada con salto de línea sin identificador.
+            (
+                "header without an id",
+                b"> \nAC\n",
+                "GPS-FMT-003",
+                Some("line 0"),
+            ),
+            // Bases antes de la primera cabecera.
+            (
+                "bases before any header",
+                b"ACGT\n",
+                "GPS-FMT-003",
+                Some("line 0"),
+            ),
+            ("invalid symbol", b">c\nAXC\n", "GPS-FMT-005", None),
+            // Cabecera sin salto final: el recorrido la cierra al llegar al EOF.
+            (
+                "final header with a non-UTF-8 id",
+                b">c\nAC\n>\xff",
+                "GPS-FMT-003",
+                Some("line 0"),
+            ),
+            (
+                "final header without an id",
+                b">c\nAC\n> ",
+                "GPS-FMT-003",
+                Some("line 0"),
+            ),
+            (
+                "sequence without bases before the next header",
+                b">a\n>b\nAC\n",
+                "GPS-FMT-002",
+                None,
+            ),
+            (
+                "final sequence without bases",
+                b">a\nAC\n>b\n",
+                "GPS-FMT-002",
+                None,
+            ),
+        ];
+        for (label, bytes, code, location) in cases {
+            let error = streamed(bytes).expect_err(label);
+            assert_eq!(error.code(), code, "{label}: {}", error.render_human());
+            if let Some(location) = location {
+                assert_eq!(
+                    error.context().get("location").map(String::as_str),
+                    Some(location),
+                    "{label}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_streamed_reader_accepts_a_well_formed_input() {
+        let bases = streamed(b">a desc\nAC\nGT\n>b\nNN\n").expect("valid FASTA");
+        assert_eq!(bases.reference_bases_processed, 6);
+    }
+
+    /// Dos guardas del recorrido por flujo no se pueden alcanzar: `ordinal` e
+    /// `id` de la secuencia vigente se asignan y se anulan siempre **juntos**
+    /// (al cerrar y al abrir una cabecera), así que no existe un estado con
+    /// ordinal y sin identificador. Esta prueba comprueba lo observable: unas
+    /// bases antes de la cabecera chocan con la guarda del ordinal, y las que
+    /// siguen a una cabecera válida no chocan con ninguna de las dos.
+    #[test]
+    fn the_streamed_reader_never_sees_an_ordinal_without_an_identifier() {
+        assert_code(streamed(b"AC\n>a\nAC\n"), "GPS-FMT-003", "bases first");
+        assert!(streamed(b">a\nAC\n").is_ok());
+    }
+
+    #[test]
+    fn the_materializing_reader_rejects_bases_before_a_header_and_a_wrong_catalog() {
+        let two = [expectation("chr1", 2), expectation("chr2", 2)];
+        let swapped = supplied(b">chr2\nAC\n>chr1\nAC\n", Some(&two)).expect_err("order");
+        assert_eq!(swapped.code(), "GPS-CONF-008");
+        assert_eq!(
+            swapped.context().get("fields").map(String::as_str),
+            Some("reference.sequences")
+        );
+        let missing = supplied(b">chr1\nAC\n", Some(&two)).expect_err("count");
+        assert_eq!(missing.code(), "GPS-CONF-008");
+        assert_eq!(
+            missing.context().get("fields").map(String::as_str),
+            Some("reference.sequences")
+        );
+
+        let before = supplied(b"ACGT\n>chr1\nAC\n", Some(&two)).expect_err("bases first");
+        assert_eq!(before.code(), "GPS-FMT-003");
+        assert_eq!(
+            before.context().get("location").map(String::as_str),
+            Some("line 1")
+        );
+        let before = supplied(b"ACGT\n", None).expect_err("bases first, unconstrained");
+        assert_eq!(before.code(), "GPS-FMT-003");
+    }
+
+    type SummaryCase<'a> = (
+        &'a str,
+        &'a [u8],
+        &'a [SequenceExpectation<'a>],
+        &'a str,
+        Option<(&'a str, &'a str)>,
+    );
+
+    #[test]
+    fn the_summary_reader_rejects_each_malformed_input_for_its_own_reason() {
+        let one = [expectation("chr1", 2)];
+        let two = [expectation("chr1", 2), expectation("chr2", 2)];
+        // (caso, bytes, catálogo, código, `fields` o `location` esperado)
+        let cases: [SummaryCase<'_>; 8] = [
+            ("gzip", &[0x1f, 0x8b, 0x08, 0x00], &one, "GPS-FMT-001", None),
+            (
+                "undeclared id",
+                b">other\nAC\n",
+                &one,
+                "GPS-CONF-008",
+                Some(("fields", "reference.sequences.id")),
+            ),
+            (
+                "bases before a header",
+                b"AC\n>chr1\nAC\n",
+                &one,
+                "GPS-FMT-003",
+                Some(("location", "line 1")),
+            ),
+            ("empty file", b"", &one, "GPS-FMT-002", None),
+            (
+                "declared catalog longer than the file",
+                b">chr1\nAC\n",
+                &two,
+                "GPS-CONF-008",
+                Some(("fields", "reference.sequences")),
+            ),
+            (
+                "declared catalog in another order",
+                b">chr2\nAC\n>chr1\nAC\n",
+                &two,
+                "GPS-CONF-008",
+                Some(("fields", "reference.sequences")),
+            ),
+            (
+                "sequence without bases",
+                b">chr1\n>chr2\nAC\n",
+                &two,
+                "GPS-FMT-002",
+                Some(("sequence", "chr1")),
+            ),
+            (
+                "repeated id",
+                b">chr1\nAC\n>chr1\nAC\n",
+                &two,
+                "GPS-FMT-004",
+                None,
+            ),
+        ];
+        for (label, bytes, catalog, code, context) in cases {
+            let error = summarized(bytes, catalog).expect_err(label);
+            assert_eq!(error.code(), code, "{label}: {}", error.render_human());
+            if let Some((key, value)) = context {
+                assert_eq!(
+                    error.context().get(key).map(String::as_str),
+                    Some(value),
+                    "{label}"
+                );
+            }
+        }
+    }
+
+    /// `finish_summary` repite la comprobación de «ID no declarado» que el
+    /// lector ya hizo al ver la cabecera, con el mismo catálogo. No se puede
+    /// alcanzar: el rechazo del lector llega siempre antes. Los dos rechazos
+    /// son idénticos (`configuration_mismatch` no añade `location`), así que
+    /// esta prueba **no distingue** cuál de los dos saltó y no discrimina la
+    /// guarda de `finish_summary`.
+    #[test]
+    fn an_undeclared_id_in_the_summary_reader_is_rejected_at_its_header() {
+        let error = summarized(b">other\nAC\n", &[expectation("chr1", 2)]).expect_err("undeclared");
+        assert_eq!(error.code(), "GPS-CONF-008");
+        assert_eq!(
+            error.context().get("fields").map(String::as_str),
+            Some("reference.sequences.id")
+        );
+    }
+
+    #[test]
+    fn the_acceptance_index_rejects_an_unindexable_fasta_and_a_bad_region() {
+        let scratch = Scratch::new();
+        // Líneas de anchura desigual: noodles no puede indexarlo.
+        let ragged = scratch.write("ragged.fa", b">a\nACGT\nAC\nACGT\n");
+        let fai = scratch.0.join("ragged.fa.fai");
+        let error = create_fai_for_acceptance(&ragged, &fai).expect_err("ragged FASTA");
+        assert_eq!(error.code(), "GPS-FMT-005");
+        assert_eq!(
+            error.context().get("accepted").map(String::as_str),
+            Some("indexable FASTA validated before FAI creation")
+        );
+
+        let good = scratch.write("good.fa", b">chr1\nACGT\n");
+        let good_fai = scratch.0.join("good.fa.fai");
+        create_fai_for_acceptance(&good, &good_fai).expect("indexable FASTA");
+        let error = query_fai_for_acceptance(&good, &good_fai, "chr1:x-y").expect_err("region");
+        assert_eq!(error.code(), "GPS-FMT-005");
+        assert_eq!(
+            error.context().get("accepted").map(String::as_str),
+            Some("valid indexed region")
+        );
+        assert_eq!(
+            query_fai_for_acceptance(&good, &good_fai, "chr1:2-3").expect("valid region"),
+            b"CG"
+        );
+    }
+
+    fn summary_entry(id: &str, header: &[u8], length: u64) -> SequenceSummary {
+        SequenceSummary {
+            id: SequenceId::parse(id, "ref-main").expect("sequence id"),
+            class: SequenceClass::Chromosome,
+            header: FastaHeader::parse(header).expect("header"),
+            length,
+            unknown_base_count: 0,
+        }
+    }
+
+    fn summary_of(entries: Vec<SequenceSummary>) -> ValidatedFastaSummary {
+        let scratch = Scratch::new();
+        let path = scratch.write("source.fa", b">x\nA\n");
+        let identity = DigestingReader::new(File::open(&path).expect("open")).finish(&path);
+        ValidatedFastaSummary {
+            sequences: entries,
+            source_identity: identity,
+            content_sha256: "0".repeat(64),
+        }
+    }
+
+    /// Estas guardas solo se alcanzan con un resumen construido a mano: el
+    /// lector de resumen no produce nunca una ficha de longitud cero, ni un
+    /// identificador distinto de su cabecera, ni dos fichas con el mismo
+    /// identificador. Se prueba la función pública con tal resumen para que la
+    /// guarda no dependa de que el productor sea correcto.
+    #[test]
+    fn a_reference_cannot_be_built_from_an_inconsistent_summary() {
+        let origin = || ReferenceOrigin::Generated;
+        let error = reference_from_summary(
+            &summary_of(vec![summary_entry("chr1", b"chr1", 0)]),
+            "ref-main",
+            origin(),
+        )
+        .expect_err("zero length");
+        assert_eq!(error.code(), "GPS-FMT-002");
+
+        let error = reference_from_summary(
+            &summary_of(vec![summary_entry("chr1", b"chr2", 4)]),
+            "ref-main",
+            origin(),
+        )
+        .expect_err("id and header differ");
+        assert_eq!(error.code(), "GPS-INTERNAL-001");
+        assert!(
+            error.context()["detail"].contains("HeaderIdMismatch"),
+            "{}",
+            error.render_human()
+        );
+
+        let error = reference_from_summary(
+            &summary_of(vec![
+                summary_entry("chr1", b"chr1", 4),
+                summary_entry("chr1", b"chr1", 4),
+            ]),
+            "ref-main",
+            origin(),
+        )
+        .expect_err("duplicate ids");
+        assert_eq!(error.code(), "GPS-INTERNAL-001");
+        assert!(
+            error.context()["detail"].contains("DuplicateSequenceId"),
+            "{}",
+            error.render_human()
+        );
+
+        let reference = reference_from_summary(
+            &summary_of(vec![summary_entry("chr1", b"chr1", 4)]),
+            "ref-main",
+            origin(),
+        )
+        .expect("consistent summary");
+        // Y esa referencia sin bases no se puede escribir como FASTA.
+        let mut sink = Vec::new();
+        let error = write_generated_fasta(&reference, &mut sink).expect_err("no bases");
+        assert_eq!(error.code(), "GPS-INTERNAL-001");
+        assert!(
+            error.context()["detail"].contains("BasesNotMaterialized"),
+            "{}",
+            error.render_human()
+        );
+    }
+
+    /// Guardas que ningún FASTA puede alcanzar, con el motivo:
+    ///
+    /// - `finish_record`, conversión de las bases: ya se comprobó cada símbolo
+    ///   al acumularlo, así que `try_from_owned_bytes` no puede fallar;
+    /// - `finish_record`, `from_owned`, y `Reference::new` tras el bucle: el
+    ///   identificador sale de la propia cabecera (o de la expectativa hallada
+    ///   por ese mismo texto) y los duplicados los atrapa `locations` antes;
+    /// - `parse_header_with_noodles`, «primer carácter no blanco»: la llamada
+    ///   anterior a `FastaHeader::parse` ya rechazó una cabecera en blanco; y
+    ///   la lectura de la definición sobre un `Cursor` canónico no puede fallar.
+    ///
+    /// Esta prueba **no discrimina** esas guardas: solo exige que ninguna
+    /// entrada rara produzca `GPS-INTERNAL-001`, de modo que si se alcanzaran
+    /// las de `parse_header_with_noodles` (`GPS-FMT-003`) o la de la conversión
+    /// de bases (`GPS-FMT-005` o `GPS-FMT-002`) no se enteraría. Lo que
+    /// demuestra que no se disparan es la traza de la puerta de cobertura
+    /// (`scripts/check-guard-coverage.sh`) y los fuzzers del revisor.
+    #[test]
+    fn the_structurally_unreachable_guards_are_not_reached_by_strange_inputs() {
+        for bytes in [
+            &b">a\tdesc\nAC\n>b \nGT\n"[..],
+            b">a\r\nAC\r\n",
+            b">\xff\n",
+            b">  \xff\n",
+            b">a\n\n\nAC\n",
+        ] {
+            if let Err(error) = supplied(bytes, None) {
+                assert_ne!(error.code(), "GPS-INTERNAL-001", "{bytes:?}");
+            }
+        }
+    }
 }

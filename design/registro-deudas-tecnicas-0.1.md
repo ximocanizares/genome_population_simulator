@@ -34,7 +34,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026) |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | **Cerrada (06/10/2026)**, borradas; los dos huecos que dejaban, cubiertos con pruebas nuevas de la vía de parejas |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | **Cerrada (06/10/2026)** |
@@ -472,6 +472,94 @@ comprobaciones de brazos de `match` que el mutador automático no sabía aplicar
 Sigue sin medirse lo mismo que entonces: las fases 3 y 4 al completo, la
 admisión del productor, el contrato de la primera versión de la verdad, y
 `src/results.rs` y `src/event_manifest.rs`.
+
+### Cobertura por tandas (desde el 08/10/2026)
+
+Decisión del responsable (08/10/2026): reducir las sin disparar **por jueces,
+empezando por los pequeños**. Cada tanda cubre con pruebas que exigen el motivo
+exacto del rechazo, demuestra con razonamiento **y** un intento ejecutado lo
+que es inalcanzable (anotado junto a la guarda: «Inalcanzable porque…») y
+verifica la discriminación **mutando cada guarda en una copia**, con huella
+SHA antes, mutada y restaurada. Una línea por tanda:
+
+| Tanda | Fecha | Jueces | Antes (comprobaciones / sin disparar) | Después |
+|---|---|---|---|---|
+| 1 | 08/10/2026 | `src/technical_profile.rs` | 15 / 14 | 15 / **5** |
+| 1 | 08/10/2026 | `src/reference_fasta.rs` | 41 / 30 | 41 / **7** |
+| 1 | 08/10/2026 | `src/reference_reduction_io.rs` | 55 / 45 | 55 / **12** |
+
+**Tanda 1 (08/10/2026): 65 sin disparar menos (de 89 a 24; ninguna guarda
+borrada, el número de comprobaciones no cambia).** Las 24 que quedan (5 + 7 + 12) están todas anotadas en el código
+como inalcanzables, cada una con su porqué:
+
+- *Perfil técnico (5).* La huella y el JSON ilegible de las dos
+  `verify_*_profile_resource` comparan los bytes incrustados con una constante
+  (cuatro); `required` sigue siempre a `exact_fields` sobre el mismo objeto
+  (una). Las dos premisas las ejecutan pruebas, que no discriminan esas guardas.
+- *FASTA suministrado (7).* El ordinal sin identificador del recorrido por
+  flujo; `Reference::new` tras el bucle del lector que materializa; el «ID no
+  declarado» de `finish_summary` (el lector lo rechaza antes con el mismo
+  catálogo); la conversión de bases y `from_owned` de `finish_record`; y el
+  «primer carácter no blanco» y la lectura de la definición de
+  `parse_header_with_noodles`.
+- *Mapa de reducción (12).* Cinco conversiones entre `usize` y `u64` que no
+  fallan en 64 bits (cuatro `usize::try_from` y la de `segments.len()`); tres
+  sumas que no desbordan (el recuento de segmentos, el orden de
+  materialización y la coordenada derivada); la región ilegible del FAI; que
+  los órdenes de selección formen `1..=n`, que ya implican su unicidad y su
+  rango; la secuencia derivada ausente de `rebuilt`, que `rebuilt_order` ya
+  garantizó; y el objetivo exacto, que implican las longitudes ya comprobadas.
+
+Cómo se cubrieron: tres módulos de pruebas unitarias dentro de cada fichero
+(las guardas son privadas o `pub(crate)` y el recurso del perfil está
+incrustado), cada una **con el recurso o el documento real alterado en un solo
+punto** y el motivo exacto. En el mapa de reducción el documento se escribe a
+mano para un caso conocido y se compara `invariant` y `detail`; en el perfil
+técnico, el JSON incrustado con un puntero; en el FASTA, ficheros mínimos para
+el recorrido por flujo, el lector de resumen y el índice de aceptación, y un
+resumen construido a mano para la construcción de una referencia sin bases.
+
+**Verificación por mutación.** Sobre una copia fuera del repositorio se mutó
+cada guarda cubierta (condición anulada con `if false && (..)`, motivo o código
+cambiado, o constructora sustituida) y, además, cada mitad de las
+disyunciones que una prueba tabular comparte con otras. Resultado: **88
+ejecuciones y ninguna sobrevive en ese conjunto** (la ronda 2 amplió el
+conjunto). Dos supervivientes iniciales eran guardas
+que esta tanda no cubre (la longitud declarada de `finish_record` y la clase
+derivada del juez del mapa): la primera la mata la prueba existente de
+`tests/fasta_validation.rs`, que el filtro de la mutación no incluía; la
+segunda no tenía prueba que exigiera su motivo y se añadió. Una mutación
+(anular `selection_order == 0 || !insert`) dejó de insertar y mató también la
+prueba del mapa válido; se repitió mitad por mitad con la inserción intacta.
+
+**Ronda 2 tras la revisión adversarial (08/10/2026).** El revisor confirmó
+las cifras y que las 24 inalcanzables lo son (fuzzers de 120 000 FASTA,
+150 000 mapas y 100 000 perfiles: ninguna se disparó), pero encontró que «ninguna
+mutación sobrevive» no valía fuera del conjunto probado. Se añadieron casos y
+se mataron con mutación (19 ejecuciones más, una repetida): la contigüidad de
+la proyección derivada (inicio y longitud, con un caso «desplazada y
+compensada»), cinco guardas del juez del mapa que solo disparaba una prueba de
+aceptación con `.is_err()` (orden de materialización, etiqueta y longitud
+completo/residual, proyección, orden del catálogo derivado y campos ausentes o
+desconocidos), los cuatro campos de un segmento de calidad, y los literales de
+orientación y de ciclos máximos de PCR. Una mitad de condición,
+la cobertura derivada de `validate_reduction_map_document`, es **equivalente**
+(quitarla sobrevive porque lo impone la contigüidad) y queda anotada en el
+código sin quitarla.
+
+**Alcance de «0 pendientes».** Se refiere a las guardas que cuenta la puerta,
+no a cada llamante de un ayudante genérico. Los ayudantes `required_text` y
+`required_u64` del perfil técnico y `require_u64`, `require_exact_fields` y
+`require_interval` del mapa de reducción cuentan como **una** guarda para
+decenas de llamantes: la puerta las da por disparadas con un solo uso, y
+borrar la comprobación de un llamante concreto no lo detecta salvo que su
+literal tenga caso propio (se añadieron la orientación y los ciclos máximos de
+PCR; el resto de literales no tienen caso individual).
+
+**Lo que esta tanda no hace.** La puerta sigue midiendo el disparo, no la
+discriminación; las pruebas de esta tanda sí están mutadas, y las anteriores a
+ella no por ello lo están. Quedan los otros once jueces (la siguiente tanda son
+los medianos).
 
 ---
 

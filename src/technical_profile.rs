@@ -549,6 +549,11 @@ pub fn resolve_f4_technical_profile_for(
 /// use. Se mantiene separada de la configuración hasta la transición atómica
 /// de contratos de F4.1.3.
 pub fn verify_initial_profile_resource() -> Result<(), F4TechnicalProfileError> {
+    // Inalcanzable el rechazo de huella y el de JSON ilegible que siguen: se
+    // comparan los bytes incrustados en el binario con una constante y el JSON se
+    // lee de esos mismos bytes. La prueba `the_embedded_resource_digests_and_json_checks_cannot_fail`
+    // comprueba las dos premisas. Si alguien cambia el recurso sin cambiar la
+    // constante, esta guarda salta en toda ejecución, no solo ante una entrada.
     let observed = format!("{:x}", Sha256::digest(RESOURCE_BYTES));
     if observed != GPS_HISEQX_PCRFREE_PE150_SHA256 {
         return Err(rejected(F4TechnicalProfileError::ResourceDigestMismatch {
@@ -565,6 +570,8 @@ pub fn verify_initial_profile_resource() -> Result<(), F4TechnicalProfileError> 
 
 /// Comprueba el recurso hermano de la preparación amplificada.
 pub fn verify_pcr_profile_resource() -> Result<(), F4TechnicalProfileError> {
+    // Inalcanzable, igual que en `verify_initial_profile_resource`: bytes
+    // incrustados contra una constante (`the_embedded_resource_digests_and_json_checks_cannot_fail`).
     let observed = format!("{:x}", Sha256::digest(PCR_RESOURCE_BYTES));
     if observed != GPS_HISEQX_PCR_PE150_SHA256 {
         return Err(rejected(F4TechnicalProfileError::ResourceDigestMismatch {
@@ -879,6 +886,9 @@ fn required<'a>(
     object: &'a serde_json::Map<String, Value>,
     field: &'static str,
 ) -> Result<&'a Value, F4TechnicalProfileError> {
+    // Inalcanzable: todo campo que se pide con `required` figura en la lista de
+    // `exact_fields` del mismo objeto, y esa comprobación va siempre antes. Lo
+    // ejecuta `a_missing_required_field_is_always_caught_by_the_exact_fields_check_first`.
     object.get(field).ok_or_else(|| {
         rejected(F4TechnicalProfileError::InvalidResource {
             detail: "falta un campo requerido",
@@ -930,4 +940,298 @@ fn invalid(detail: &'static str) -> Result<(), F4TechnicalProfileError> {
     Err(rejected(F4TechnicalProfileError::InvalidResource {
         detail,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    //! Pruebas de las guardas del validador de los recursos incorporados.
+    //!
+    //! `verify_*_profile_resource` solo ve los bytes incrustados, así que desde
+    //! fuera no hay forma de presentarle un recurso alterado. Estas pruebas
+    //! llaman a los validadores privados con el recurso real **alterado en un
+    //! solo punto** y exigen el motivo exacto del rechazo, para que una guarda
+    //! rota no la tape otra anterior (DT-001, DT-032).
+
+    use super::*;
+    use serde_json::json;
+
+    const EXACT_FIELDS_ROOT: &str = "los campos de raíz no coinciden con el recurso normativo";
+    const EXACT_FIELDS_OBJECT: &str =
+        "los campos de un objeto no coinciden con el recurso normativo";
+    const TEXT_LITERAL: &str = "un literal de texto no coincide con DTPD-106";
+    const NUMBER_LITERAL: &str = "un literal numérico no coincide con DTPD-106";
+
+    #[derive(Clone, Copy, Debug)]
+    enum Which {
+        PcrFree,
+        Pcr,
+    }
+
+    fn resource(which: Which) -> Value {
+        let bytes = match which {
+            Which::PcrFree => RESOURCE_BYTES,
+            Which::Pcr => PCR_RESOURCE_BYTES,
+        };
+        serde_json::from_slice(bytes).expect("the embedded resource is JSON")
+    }
+
+    fn validate(which: Which, value: &Value) -> Result<(), F4TechnicalProfileError> {
+        match which {
+            Which::PcrFree => validate_resource(value),
+            Which::Pcr => validate_pcr_resource(value),
+        }
+    }
+
+    fn invalid_detail(detail: &'static str) -> Result<(), F4TechnicalProfileError> {
+        Err(F4TechnicalProfileError::InvalidResource { detail })
+    }
+
+    #[test]
+    fn the_unaltered_resources_pass_their_own_validators() {
+        for which in [Which::PcrFree, Which::Pcr] {
+            assert_eq!(validate(which, &resource(which)), Ok(()), "{which:?}");
+        }
+    }
+
+    #[test]
+    fn every_single_point_alteration_of_a_resource_is_rejected_for_its_own_reason() {
+        // Cada caso: recurso, puntero JSON, valor nuevo (`None` = quitar la
+        // clave) y motivo exacto. El puntero apunta a **un** sitio, de modo
+        // que el único rechazo posible es el de la guarda que lo vigila.
+        let cases: Vec<(&str, Which, &str, Option<Value>, &str)> = vec![
+            // Línea de `exact_fields`, con la raíz y con un objeto anidado.
+            (
+                "extra root field",
+                Which::PcrFree,
+                "/unexpected",
+                Some(json!(1)),
+                EXACT_FIELDS_ROOT,
+            ),
+            (
+                "missing root field",
+                Which::Pcr,
+                "/preparation",
+                None,
+                EXACT_FIELDS_ROOT,
+            ),
+            (
+                "extra nested field",
+                Which::PcrFree,
+                "/read/unexpected",
+                Some(json!(1)),
+                EXACT_FIELDS_OBJECT,
+            ),
+            (
+                "missing nested field",
+                Which::Pcr,
+                "/amplification/algorithm",
+                None,
+                EXACT_FIELDS_OBJECT,
+            ),
+            // Mismo número de campos, uno con otro nombre: solo lo caza la
+            // mitad de `exact_fields` que busca cada campo esperado.
+            (
+                "renamed nested field",
+                Which::PcrFree,
+                "/read",
+                Some(json!({
+                    "layoutx": "paired_end",
+                    "orientation": "FR",
+                    "common_length_bases": 150,
+                    "minimum_supported_length_bases": 1,
+                    "maximum_supported_length_bases": 150
+                })),
+                EXACT_FIELDS_OBJECT,
+            ),
+            // Línea de `object`: un objeto requerido que no lo es.
+            (
+                "section that is not an object",
+                Which::PcrFree,
+                "/read",
+                Some(json!(5)),
+                "un objeto requerido no es un objeto JSON",
+            ),
+            // Línea de `required_text`.
+            (
+                "wrong schema version",
+                Which::PcrFree,
+                "/schema_version",
+                Some(json!("2")),
+                TEXT_LITERAL,
+            ),
+            // Línea de `required_u64`.
+            (
+                "wrong common read length",
+                Which::PcrFree,
+                "/read/common_length_bases",
+                Some(json!(149)),
+                NUMBER_LITERAL,
+            ),
+            // Un campo cada vez de `validate_quality_segments`: `last_phred`
+            // lo cubre el caso de más abajo; aquí los otros tres.
+            (
+                "quality segment first cycle altered",
+                Which::PcrFree,
+                "/quality/r1/1/first_cycle",
+                Some(json!(12)),
+                "un segmento de calidad no coincide con DTPD-106",
+            ),
+            (
+                "quality segment last cycle altered",
+                Which::PcrFree,
+                "/quality/r1/1/last_cycle",
+                Some(json!(99)),
+                "un segmento de calidad no coincide con DTPD-106",
+            ),
+            (
+                "quality segment first phred altered",
+                Which::PcrFree,
+                "/quality/r1/1/first_phred",
+                Some(json!(37)),
+                "un segmento de calidad no coincide con DTPD-106",
+            ),
+            // Dos literales concretos que pasan por los ayudantes compartidos.
+            (
+                "wrong read orientation",
+                Which::PcrFree,
+                "/read/orientation",
+                Some(json!("RF")),
+                TEXT_LITERAL,
+            ),
+            (
+                "wrong maximum PCR cycles",
+                Which::Pcr,
+                "/amplification/maximum_cycles",
+                Some(json!(29)),
+                NUMBER_LITERAL,
+            ),
+            // Línea de `no_cached_normal_variate`.
+            (
+                "cached normal variate allowed",
+                Which::PcrFree,
+                "/insert/no_cached_normal_variate",
+                Some(json!(false)),
+                "insert.no_cached_normal_variate debe ser true",
+            ),
+            // Tres líneas de `validate_quality_segments`.
+            (
+                "quality segments not a list",
+                Which::PcrFree,
+                "/quality/r1",
+                Some(json!({})),
+                "los segmentos de calidad deben ser una lista",
+            ),
+            (
+                "quality segment missing",
+                Which::Pcr,
+                "/quality/r2/2",
+                None,
+                "el número de segmentos de calidad no coincide",
+            ),
+            (
+                "quality segment value altered",
+                Which::PcrFree,
+                "/quality/r1/1/last_phred",
+                Some(json!(31)),
+                "un segmento de calidad no coincide con DTPD-106",
+            ),
+            // Línea de M_MAX: es el único dominio que se compara como número.
+            (
+                "wrong maximum mean pairs per molecule",
+                Which::Pcr,
+                "/amplification/maximum_mean_pairs_per_molecule",
+                Some(json!(63.5)),
+                "amplification.maximum_mean_pairs_per_molecule no coincide con M_MAX",
+            ),
+        ];
+        for (name, which, pointer, replacement, detail) in cases {
+            let mut value = resource(which);
+            let (parent, key) = pointer.rsplit_once('/').expect("pointer has a parent");
+            let parent = value.pointer_mut(parent).expect("parent exists");
+            match (&replacement, parent) {
+                (Some(new), Value::Object(map)) => {
+                    map.insert(key.to_owned(), new.clone());
+                }
+                (None, Value::Object(map)) => {
+                    map.remove(key).expect("key exists");
+                }
+                (Some(new), Value::Array(items)) => {
+                    let index: usize = key.parse().expect("array index");
+                    items[index] = new.clone();
+                }
+                (None, Value::Array(items)) => {
+                    items.remove(key.parse::<usize>().expect("array index"));
+                }
+                _ => panic!("{name}: the pointer parent is a scalar"),
+            }
+            assert_eq!(validate(which, &value), invalid_detail(detail), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_resource_that_is_not_an_object_is_rejected_at_the_root() {
+        for which in [Which::PcrFree, Which::Pcr] {
+            assert_eq!(
+                validate(which, &json!([])),
+                invalid_detail("la raíz debe ser un objeto"),
+                "{which:?}"
+            );
+        }
+    }
+
+    /// `required` no puede disparar nunca su rechazo: todo campo que se pide
+    /// con `required(..)` está en la lista de `exact_fields` del mismo objeto
+    /// y esa comprobación va antes. Esta prueba lo **ejecuta** quitando cada
+    /// campo de la raíz y de `quality`: el rechazo es siempre el de
+    /// `exact_fields`, nunca «falta un campo requerido». No discrimina la
+    /// guarda de `required` (no se puede alcanzar); documenta por qué.
+    #[test]
+    fn a_missing_required_field_is_always_caught_by_the_exact_fields_check_first() {
+        for which in [Which::PcrFree, Which::Pcr] {
+            let original = resource(which);
+            for field in original.as_object().expect("root").keys() {
+                let mut value = original.clone();
+                value.as_object_mut().expect("root").remove(field);
+                assert_eq!(
+                    validate(which, &value),
+                    invalid_detail(EXACT_FIELDS_ROOT),
+                    "{which:?} without {field}"
+                );
+            }
+            for field in ["r1", "r2", "curve_kind"] {
+                let mut value = original.clone();
+                value["quality"]
+                    .as_object_mut()
+                    .expect("quality")
+                    .remove(field);
+                assert_eq!(
+                    validate(which, &value),
+                    invalid_detail(EXACT_FIELDS_OBJECT),
+                    "{which:?} quality without {field}"
+                );
+            }
+        }
+    }
+
+    /// Los rechazos por huella y por JSON ilegible de
+    /// `verify_*_profile_resource` son inalcanzables desde cualquier entrada:
+    /// comparan los bytes **incrustados en el binario** con una constante, y
+    /// el JSON se lee de esos mismos bytes. Esta prueba comprueba las dos
+    /// premisas (la huella coincide y el JSON se lee), que son las que hacen
+    /// imposible disparar esas cuatro guardas sin cambiar el recurso.
+    #[test]
+    fn the_embedded_resource_digests_and_json_checks_cannot_fail() {
+        assert_eq!(
+            format!("{:x}", Sha256::digest(RESOURCE_BYTES)),
+            GPS_HISEQX_PCRFREE_PE150_SHA256
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(PCR_RESOURCE_BYTES)),
+            GPS_HISEQX_PCR_PE150_SHA256
+        );
+        assert!(serde_json::from_slice::<Value>(RESOURCE_BYTES).is_ok());
+        assert!(serde_json::from_slice::<Value>(PCR_RESOURCE_BYTES).is_ok());
+        assert_eq!(verify_initial_profile_resource(), Ok(()));
+        assert_eq!(verify_pcr_profile_resource(), Ok(()));
+    }
 }
