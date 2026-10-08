@@ -218,6 +218,7 @@ def pcr_panel(
     pcr_gc_curve_editor,
     pcr_efficiency_classes_editor,
     pcr_per_cycle_slip_editor,
+    pcr_homopolymer_fold_control,
 ):
     """Render the amplified-preparation controls; Rust stays the authority.
 
@@ -307,6 +308,18 @@ def pcr_panel(
                 kind="warn",
             ),
             mo.md("### Tartamudeo clonal heredable"),
+            pcr_homopolymer_fold_control,
+            mo.callout(
+                "Multiplicador de la PCR en los homopolímeros: cuántas veces "
+                "multiplica la PCR la fracción de lecturas con tartamudeo en un "
+                "motivo de 1 pb. En blanco rige Gymrek (2016), 0,17 frente a "
+                "0,027; Fungtammasan y col. (2015) dan 2.5. Escribir 6.30 NO "
+                "equivale a dejarlo en blanco. Se aplica sobre la constante sin "
+                "PCR de la calibración, 0,027, no sobre la tasa de base de la "
+                "pestaña de tartamudeo. Entre 1 y 37, y no junto a una "
+                "sustitución de la longitud de motivo 1.",
+                kind="info",
+            ),
             pcr_per_cycle_slip_editor,
             mo.callout(
                 "Con PCR, el deslizamiento puede ocurrir en CUALQUIER ciclo, y "
@@ -334,9 +347,9 @@ def pcr_panel(
             ),
             mo.callout(
                 "Solo tiene efecto con loci de repetición declarados. Y con ellos, "
-                "la preparación amplificada EXIGE el tartamudeo de base: sin él la "
-                "biblioteca subestimaría el tartamudeo entre un 14 % y un 28 % "
-                "según la longitud del motivo.",
+                "la preparación amplificada EXIGE el tartamudeo de base: sin él, "
+                "con la calibración por omisión, la biblioteca subestimaría el "
+                "tartamudeo entre un 14 % y un 28 % según la longitud del motivo.",
                 kind="info",
             ),
         ]

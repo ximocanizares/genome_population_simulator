@@ -77,6 +77,7 @@ resultados ni errores pertenecen a DTP/DTPD en
 | DTF-060 | Sortear la longitud del inserto **sin rechazo**, por inversión u otro método de consumo fijo | DT-006 del registro de deudas técnicas; perfil `gps-hiseqx-pcrfree-pe150-v1` | Registrado el 25/09/2026 a instancia del responsable. Hoy la longitud se sortea de una normal truncada **descartando** los valores fuera de rango, y el muestreador recorta el techo a la copia más larga del individuo. Cuando esa copia se acerca al mínimo del perfil, el rango admitido queda en la cola de la campana y la aceptación se desploma: **medido, 1 sorteo con copias de 450 pb, 2 con 350, 4 000 con 280 y 13 millones con 250**. No da un resultado incorrecto: da el correcto tardando tanto que parece un cuelgue. **No se arregla ahora, y el motivo no es el coste de escribirlo:** el bucle de rechazo consume **dos números de la cinta de azar por intento fallido**, de modo que un método de consumo fijo desplazaría todos los sorteos posteriores y **cambiaría cada byte publicado**. Se romperían los vectores congelados del catálogo de azar técnico, las comparaciones byte a byte de 44 ficheros de prueba y toda la evidencia de congelación archivada. Mientras tanto queda la guarda de admisión, que rechaza antes de simular la combinación impracticable y **no toca la cinta** | Una fase que pueda permitirse reescribir la línea base de azar de la fase de realismo técnico, con su evidencia rehecha entera | Método de inversión para la normal truncada con su prueba de equivalencia en distribución; catálogo de azar técnico en versión nueva; repetición completa de la evidencia de congelación de F4 y F5; y decisión expresa del responsable de que la reproducibilidad anterior se da por superada |
 | DTF-061 | **Conseguir datos de calibración para los dos parámetros del tartamudeo que hoy no los tienen** — *actualizado el 27/09/2026: la parte (a) ha quedado resuelta por otra vía, ver abajo* | DT-006 no; pendientes P-1 y P-3 del plan de microsatélites; `calibracion-tartamudeo-0.1.md` §9 | Registrado el 25/09/2026 a instancia del responsable. Son **dos** parámetros y les falta lo mismo por motivos distintos. **(a) El coeficiente de la tirada**, que dice cuánto crece la probabilidad de resbalón con la longitud de la tirada ininterrumpida: arranca en **cero** y el manifiesto lo publica como **no calibrado**. La fuente natural —Fungtammasan y col. (2015), figura 1A— publica la curva, pero sus cifras son **de extremo a extremo** y el modelo necesita la pendiente **por ciclo**; el artículo **no dice cuántos ciclos de PCR** usó, y sin ese número la conversión no existe. Además, el historial de Galaxy donde el artículo publicaba los valores exactos **ha desaparecido**: comprobado el 25/09/2026 por tres vías —búsqueda en los 9426 historiales publicados, accesos directos y archivo de internet—, con el detalle en §9 de la calibración. **(b) Los cuatro pesos del paso**, obligatorios y **sin valor por omisión**: se buscó fuente y no hay ninguna adoptable, porque las cifras publicadas están repartidas entre trabajos distintos sobre marcadores humanos concretos y juntarlas sería síntesis propia disfrazada de fuente. Hay un ejemplo trabajado, marcado como ilustrativo, que el mensaje de rechazo ofrece desde el 24/09/2026 | Cuando aparezca una fuente utilizable, o cuando el proyecto decida medir lo suyo | **Qué haría utilizable una fuente**, para no volver a recorrer el mismo camino: para el coeficiente, que publique la probabilidad **por ciclo** o que declare el número de ciclos junto a la fracción observada; para los pesos, un reparto medido **en un solo trabajo** sobre el mismo material, no recompuesto de varios. En los dos casos, licencia que permita reproducir las cifras y una receta que permita rehacer el cálculo desde los datos publicados |
 | DTF-062 | Insertar un tracto en la referencia suministrada **junto a** cambios directos, una matriz de SNV suministrada o reutilizada, o una reducción de referencia | DTC-098; REQ-REF-37; paso F1.7.2 de [plan-implementacion-repeticiones-pcr-0.1.md](./plan-implementacion-repeticiones-pcr-0.1.md) | Registrado el 01/10/2026 al conectar la inserción, por decisión del responsable del mismo día. Hoy las cuatro combinaciones se **rechazan antes de simular**, nombrando el locus y la pieza que choca. Los motivos no son el mismo: las inserciones y deleciones directas se declaran en coordenadas **vigentes** de la copia, que no tienen traducción al genoma final sin un segundo modelo de coordenadas; los cambios de base sí la tienen —una suma—, y se rechazan solo por sencillez; la matriz suministrada o reutilizada está atada por huella al genoma de partida y habría que traducir sus filas y volver a ligarla; y la reducción se haría sobre la suministrada, sin el tracto. La matriz **generada** sí se admite, con sus regiones traducidas | Cuando un escenario real lo pida | Para los cambios de base, la traducción de la posición y su prueba de borde; para la matriz suministrada, decidir si se traduce y se publica una matriz nueva ligada a la final o se exige declararla ya en coordenadas finales; para la reducción, decidir si se reduce la suministrada o la final; para los indels directos, una definición de «vigente» sobre el genoma final |
+| DTF-063 | Multiplicador de la PCR configurable para motivos de dos a seis pares de base | REQ-CONF-141; DTC-099 | Registrado el 06/10/2026. Solo el homopolímero tiene dos fuentes que discrepan; en dinucleótidos coinciden (3,45 frente a ~3,6) y de tres a seis no hay segunda fuente | Cuando un escenario real lo pida | Una fila por longitud de motivo, sus topes derivados de cada constante sin PCR y el juez de REQ-VAL-61 extendido a esas filas |
 
 ## 3. Cobertura y mantenimiento
 
@@ -140,9 +141,9 @@ contratos F4—, ni DTF-058.
 La decisión **S-25**, tomada por el responsable y registrada en la sección 16.2
 del plan de la fase de realismo técnico, **divide** esta ampliación aplazada.
 
-**Salieron de DTF-056** y, salvo la última, **están implementadas** desde la
+**Salieron de DTF-056** y **están implementadas**: las cuatro primeras desde la
 entrega 3 del plan de microsatélites y amplificación (25 de septiembre de
-2026):
+2026), y la última desde la entrega 4 (26 de septiembre de 2026):
 
 - la **preparación de biblioteca amplificada** y su perfil hermano
   `gps-hiseqx-pcr-pe150-v1` — implementada;
@@ -151,15 +152,17 @@ entrega 3 del plan de microsatélites y amplificación (25 de septiembre de
   la molécula original y además en la media del tamaño de familia;
 - la **sobrerrepresentación estocástica** entre moléculas — implementada, por
   la desigualdad de los primeros ciclos y las clases de eficiencia;
-- el **tartamudeo heredable** de la amplificación — **sigue pendiente**, en la
-  entrega 4. Hasta que exista, la preparación amplificada **rechaza** los
-  escenarios que declaran loci de repetición, porque tartamudearían solo con la
-  parte de base y subestimarían lo medido entre un 14 % y un 28 % según la
-  longitud del motivo.
+- el **tartamudeo heredable** de la amplificación — implementado en la
+  entrega 4 (DTC-092, hoy vigente a través de DTC-093). Con loci de repetición
+  declarados, la preparación amplificada **exige el tartamudeo de base
+  activo**, porque sin él, con la calibración por omisión, subestimaría lo
+  medido entre un 14 % y un 28 % según la longitud del motivo. Desde el
+  06/10/2026 el multiplicador de la PCR en los homopolímeros es configurable
+  (DTC-099); el de las demás longitudes de motivo queda en DTF-063.
 
-Lo implementado queda fijado por **DTC-091** y por los requisitos
-REQ-CONF-134 a 137, REQ-DAT-81 y 83 a 85, REQ-MAN-45, 48, 60 y 94,
-REQ-VAL-58 y 59 y ACE-119. Lo pendiente, por REQ-CONF-138 y REQ-DAT-82.
+Lo implementado queda fijado por **DTC-091**, **DTC-092** y **DTC-093** y por
+los requisitos REQ-CONF-134 a 138 y 141, REQ-DAT-81 a 85, REQ-MAN-45, 48, 60,
+94 y 97, REQ-VAL-58, 59 y 61, ACE-119 y ACE-120.
 
 **Permanecen aplazados en DTF-056**, sin cambio:
 

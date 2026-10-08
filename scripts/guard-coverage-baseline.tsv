@@ -304,11 +304,23 @@
 # `scripts/check-guard-coverage.sh` con la constructora genérica `rejected`.
 # Es lo medido por la puerta, un suelo y no una prueba de que fallaría si
 # estuviera mal escrita.
+# **El 08/10/2026 `src/results.rs` pasa de 778 / 619 a 779 / 618** con el
+# multiplicador de la PCR en los homopolímeros (DTC-099, cierre de DT-009). La
+# comprobación nueva es la igualdad entre el bloque del tartamudeo clonal del
+# manifiesto de evento y el de la configuración efectiva (REQ-VAL-61), que
+# dispara `the_judge_rejects_an_event_manifest_whose_clonal_block_differs`. Y
+# baja el techo porque se dispara por primera vez la comparación de
+# `technical_event` con lo que resuelve el TOML copiado («technical_event
+# efectivo no coincide exactamente con el TOML resuelto»), que nadie
+# ejercitaba: la disparan las dos pruebas del juez de
+# `tests/clonal_homopolymer_fold.rs` sobre la efectiva. Las dos se verificaron
+# además mutándolas en una copia y viendo morir sus pruebas, que es lo que esta
+# puerta no mide.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
-src/results.rs	778	619
+src/results.rs	779	618
 src/event_manifest.rs	147	117
 src/truth_validation.rs	118	93
 src/truth_schema.rs	69	44

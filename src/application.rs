@@ -2968,9 +2968,10 @@ fn translate_generation_regions(
 /// `r_pcr = 1 − (1−r_con)/(1−r_sin)`, y lo compone con la parte de base para
 /// devolver `r_con`, la fracción medida. Sin la parte de base, una biblioteca
 /// amplificada se quedaría en el incremento despejado y quedaría **por debajo
-/// de lo medido**: entre un 14 % y un 28 % menos en motivos de uno a cinco
-/// pares de base. No es una preferencia de configuración: es que la aritmética
-/// no cierra.
+/// de lo medido**: con la calibración por omisión, entre un 14 % y un 28 % menos
+/// en motivos de uno a cinco pares de base (con el multiplicador de los
+/// homopolímeros de DTC-099, la cifra del homopolímero cambia). No es una
+/// preferencia de configuración: es que la aritmética no cierra.
 ///
 /// Reutiliza el código de diagnóstico de configuración que ya existe, en vez
 /// de abrir uno nuevo: el manifiesto del recorrido general valida sus
@@ -2998,8 +2999,9 @@ fn admit_amplified_preparation_against_loci(
             "la preparación amplificada por PCR con loci de repetición declarados ({} \
              declarados, el primero es {}) exige technical_event.stutter.enabled = true: el \
              tartamudeo clonal de la PCR solo despeja el incremento de la amplificación, y sin \
-             la parte de base la biblioteca subestimaría el tartamudeo entre un 14 % y un 28 % \
-             según la longitud del motivo. O se activa el tartamudeo de base, o se quitan los \
+             la parte de base la biblioteca subestimaría el tartamudeo (con la calibración por \
+             omisión, entre un 14 % y un 28 % según la longitud del motivo). O se activa el \
+             tartamudeo de base, o se quitan los \
              loci, o se usa library_preparation = \"{}\"",
             repeat_loci.len(),
             repeat_loci.first().map_or("", EffectiveRepeatLocus::id),
@@ -3019,6 +3021,13 @@ fn admit_amplified_preparation_against_loci(
 ///
 /// Sin loci no se conecta nada, y una biblioteca amplificada publica entonces
 /// los mismos bytes que antes de esta entrega.
+///
+/// # El multiplicador de los homopolímeros se admite antes que nada
+///
+/// Su dominio y su combinación con la sustitución directa del homopolímero
+/// (DTC-099) se comprueban **aunque no haya loci**: un valor imposible es un
+/// error del autor tenga o no efecto, y rechazarlo no cambia nada de lo que
+/// publica una configuración válida.
 fn attach_clonal_stutter(
     general: &DeclaredGeneralConfig,
     technical_event: Option<&mut EffectiveTechnicalEvent>,
@@ -3027,6 +3036,7 @@ fn attach_clonal_stutter(
     let Some(event) = technical_event else {
         return Ok(());
     };
+    let homopolymer_pcr_fold = declared_homopolymer_pcr_fold(general)?;
     if event.preparation != LibraryPreparation::Pcr || repeat_loci.is_empty() {
         return Ok(());
     }
@@ -3035,10 +3045,55 @@ fn attach_clonal_stutter(
         return Ok(());
     };
     let cycles = settings.cycles();
-    let clonal = crate::clonal_stutter::ClonalStutterSettings::new(cycles, &substitutions)
-        .map_err(|error| clonal_config_error(general, &error))?;
+    let clonal = crate::clonal_stutter::ClonalStutterSettings::new(
+        cycles,
+        &substitutions,
+        homopolymer_pcr_fold,
+    )
+    .map_err(|error| clonal_config_error(general, &error))?;
     event.pcr = Some(settings.with_clonal_stutter(clonal));
     Ok(())
+}
+
+/// Multiplicador de la PCR en los homopolímeros, ya leído y admitido.
+///
+/// Comprueba el dominio, `[1, 37]` y finito, y que no se declare junto a una
+/// sustitución directa de la probabilidad por ciclo de los homopolímeros.
+/// Para lo segundo mira solo la longitud de motivo de cada fila, sin leer su
+/// probabilidad: la combinación es incompatible valga lo que valga.
+fn declared_homopolymer_pcr_fold(
+    general: &DeclaredGeneralConfig,
+) -> Result<Option<f64>, Diagnostic> {
+    let Some(stutter) = general
+        .technical_event()
+        .and_then(|event| event.pcr.as_ref())
+        .and_then(|pcr| pcr.stutter.as_ref())
+    else {
+        return Ok(None);
+    };
+    let Some(declared) = stutter.homopolymer_pcr_fold.as_ref() else {
+        return Ok(None);
+    };
+    let value = declared.literal().parse::<f64>().map_err(|_| {
+        config_error(
+            general,
+            "technical_event.pcr.stutter.homopolymer_pcr_fold",
+            "debe ser un f64 válido",
+        )
+    })?;
+    let value = crate::clonal_stutter::validate_homopolymer_pcr_fold(value)
+        .map_err(|error| clonal_config_error(general, &error))?;
+    if stutter
+        .per_cycle_slip
+        .iter()
+        .any(|entry| *entry.motif_length_bases.value() == 1)
+    {
+        return Err(clonal_config_error(
+            general,
+            &crate::clonal_stutter::ClonalStutterError::HomopolymerFoldWithSubstitution { value },
+        ));
+    }
+    Ok(Some(value))
 }
 
 /// Sustituciones directas de la probabilidad por ciclo, ya leídas del TOML.
@@ -3107,6 +3162,25 @@ fn clonal_config_error(
                 "la probabilidad por ciclo {value} de la longitud de motivo {motif_length} debe \
                  ser finita y estar en [0, 1]; es la probabilidad de UN ciclo, no la fracción de \
                  extremo a extremo"
+            ),
+        ),
+        Error::InvalidHomopolymerFold { value } => (
+            "technical_event.pcr.stutter.homopolymer_pcr_fold",
+            format!(
+                "el multiplicador {value} de los homopolímeros debe ser finito y estar entre {} y \
+                 {}, ambos incluidos; por debajo de 1 diría que la PCR quita tartamudeo, y por \
+                 encima de 37 la fracción con PCR, multiplicador × {}, llegaría a 1",
+                crate::clonal_stutter::HOMOPOLYMER_PCR_FOLD_MINIMUM,
+                crate::clonal_stutter::HOMOPOLYMER_PCR_FOLD_MAXIMUM,
+                crate::stutter::STUTTER_DEFAULT_MOTIF_LENGTH_RATES[0]
+            ),
+        ),
+        Error::HomopolymerFoldWithSubstitution { value } => (
+            "technical_event.pcr.stutter.homopolymer_pcr_fold,technical_event.pcr.stutter.per_cycle_slip.motif_length_bases",
+            format!(
+                "el multiplicador {value} de los homopolímeros no puede declararse junto a una \
+                 sustitución directa de la probabilidad por ciclo de la longitud de motivo 1: \
+                 serían dos valores para la misma probabilidad. O uno, o el otro"
             ),
         ),
     };

@@ -131,9 +131,9 @@ admite además, por elección expresa, una preparación WGS **amplificada por
 PCR** con sus duplicados, su sobrerrepresentación estocástica y su sesgo de
 composición configurable. El perfil de sesgo GC calibrado con datos reales, los
 duplicados ópticos y de agrupación y el marcado de duplicados quedan aplazados
-en DTF-056 y DTF-055; el tartamudeo heredable por linaje está pendiente y, hasta
-que exista, la preparación amplificada se rechaza sobre escenarios que declaran
-loci de repetición. PacBio HiFi, Oxford Nanopore y PacBio CLR quedan para
+en DTF-056 y DTF-055. Sobre escenarios que declaran loci de repetición, la
+preparación amplificada añade el tartamudeo heredable por linaje de la PCR y
+exige el tartamudeo de base activo (REQ-CONF-138, REQ-DAT-82). PacBio HiFi, Oxford Nanopore y PacBio CLR quedan para
 futuras ampliaciones con el fin de reducir el alcance inicial y aplazar perfiles
 de error más complejos. Esta
 decisión de alcance no presupone que una tecnología moderna sea incapaz de
@@ -919,12 +919,13 @@ su asignación por fase está en la matriz de trazabilidad.
   eficiencia, por la curva de composición y por la desigualdad de los primeros
   ciclos, que actúa ya por omisión. Cuando se declaran clases de eficiencia, la
   eficiencia escalar deja de intervenir en el modelo y solo se publica.
-- **REQ-CONF-138 (pendiente).** Con `pcr` y loci de repetición declarados, las
-  tasas de resbalón por ciclo se derivarán por longitud de motivo de las
-  fracciones con y sin PCR de la calibración y del número de ciclos. **Mientras
-  ese modelo no exista, la combinación se rechaza**: una biblioteca amplificada
-  tartamudearía solo con la parte de base y subestimaría lo medido entre un 14 %
-  y un 28 % según la longitud del motivo.
+- **REQ-CONF-138.** Con `pcr` y loci de repetición declarados, las tasas de
+  resbalón por ciclo se derivan por longitud de motivo de las fracciones con y
+  sin PCR de la calibración y del número de ciclos (DTC-092, DTC-093), con el
+  multiplicador de los homopolímeros de REQ-CONF-141 y con sustitución directa
+  admitida. La configuración **exige el tartamudeo de base activo**: sin él, con
+  la calibración por omisión, una biblioteca amplificada subestimaría lo medido
+  entre un 14 % y un 28 % según la longitud del motivo.
 - **REQ-CONF-139.** La configuración debe permitir que los alelos de un locus de
   repetición, en vez de escribirse a mano, los **genere el simulador por
   deslizamiento biológico** partiendo del alelo que el genoma de referencia lleva
@@ -944,6 +945,30 @@ su asignación por fase está en la matriz de trazabilidad.
   locus de **varios motivos**, porque sin fronteras de bloque declaradas no hay
   forma de partir el tramo de la referencia, y un escenario **sin copias
   haplotípicas**, porque no habría ningún linaje que simular.
+- **REQ-CONF-141.** Con `pcr` y loci de repetición declarados, la configuración
+  debe permitir declarar **cuántas veces multiplica la PCR la fracción de
+  lecturas con tartamudeo en los homopolímeros** (motivo de un par de base),
+  con `technical_event.pcr.stutter.homopolymer_pcr_fold`. Existe porque las dos
+  fuentes publicadas discrepan: Gymrek (2016) mide 0,17 con PCR frente a 0,027
+  sin ella, unas 6,3 veces, y Fungtammasan y col. (2015) escriben unas 2,5 veces
+  (DT-009). El multiplicador se aplica sobre la fracción **sin PCR** de la
+  calibración, que no cambia: la fracción con PCR de los homopolímeros pasa a
+  ser el multiplicador por 0,027, y de ella se despeja la probabilidad por ciclo
+  como siempre (DTC-092, DTC-093, DTC-099). Actúa sobre esa constante de la
+  calibración, **no** sobre la tasa de base que el escenario declare. **Ausente,
+  rige la calibración por omisión, la de Gymrek, y todos los artefactos
+  publicados son byte a byte los de antes de existir el campo.** Escribir 6,30
+  no equivale a omitirlo: daría 0,1701 y no 0,17. El multiplicador debe ser un
+  número finito **entre 1 y 37, ambos incluidos**: 1 significa que la PCR no
+  añade tartamudeo a los homopolímeros y su probabilidad por ciclo vale cero;
+  por debajo de 1 diría que la PCR lo quita, que el modelo no representa; y 37
+  es el mayor entero que deja la fracción con PCR por debajo de 1. Un valor
+  fuera de ese tramo, o declarado junto a una sustitución directa de la
+  probabilidad por ciclo de los homopolímeros, debe rechazarse antes de simular
+  nombrando el parámetro y el valor, aunque no haya loci declarados; no se
+  pinza. Las demás longitudes de motivo no admiten multiplicador (DTF-063).
+  Igual que la sustitución directa, el campo solo tiene efecto con loci de
+  repetición declarados.
 - **REQ-IND-66.** El abanico de alelos generado debe simular **tantos linajes
   independientes como copias haplotípicas** tenga la población: una copia, un
   linaje. Cada linaje parte del alelo de la referencia y recibe un número de
@@ -973,11 +998,27 @@ su asignación por fase está en la matriz de trazabilidad.
   contabilidad de la generación: linajes, pasos sorteados, pasos aplicados y
   **pasos no aplicados al detenerse en un borde**. Los aplicados más los no
   aplicados deben sumar exactamente los sorteados.
+- **REQ-MAN-97.** Cuando se declare el multiplicador de REQ-CONF-141, la
+  configuración efectiva y el manifiesto de evento deben publicarlo junto a la
+  tabla de probabilidades por ciclo del tartamudeo clonal, y la fila de los
+  homopolímeros debe llevar como fracción con PCR la que resulta de él. Sin
+  multiplicador declarado **no se publica ningún campo nuevo**.
 - **REQ-VAL-60.** Un juez independiente debe **rehacer el abanico publicado** —
   desde la referencia publicada, los parámetros publicados y la semilla
   publicada— y contrastarlo con el escrito, alelo a alelo. No basta con
   reconstruir la configuración llamando al productor: eso compara el abanico
   consigo mismo y no puede fallar.
+- **REQ-VAL-61.** Al publicar, el juez de los recursos publicados debe atar a la
+  calibración y a lo declarado las fracciones de entrada del tartamudeo clonal,
+  en los **dos** documentos que las publican. En la configuración efectiva, el
+  bloque entero —fracciones, multiplicador y probabilidades— debe coincidir
+  exactamente con el que resuelve el TOML copiado en el paquete, que fija la
+  fracción sin PCR de las seis longitudes de motivo y la con PCR de las de dos
+  a seis a la calibración, y la con PCR de los homopolímeros a la calibración o,
+  si se declaró, al multiplicador. En el manifiesto de evento, el bloque debe
+  ser **idéntico** al de la configuración efectiva. No basta con comprobar que
+  la probabilidad publicada sale de las fracciones publicadas: eso deja pasar
+  unas fracciones cambiadas junto con su probabilidad.
 - **REQ-UI-16.** La interfaz debe ofrecer un **control para elegir** entre
   declarar los alelos de un locus y generarlos, y **enseñar solo la tabla que
   corresponda**: con «declarar», las de alelos e interrupciones; con «generar»,
@@ -3699,9 +3740,13 @@ a una probabilidad mayor de error.
   máximo de intentos; agotado el tope, se acepta el último intento y **se
   cuenta**. El muestreador conserva su contrato externo: sigue produciendo
   exactamente `N` parejas con ordinales `0..N-1`.
-- **REQ-DAT-82 (pendiente).** El tartamudeo heredable por linaje, en el que cada
-  pareja hereda de un progenitor de su familia los resbalones anteriores a su
-  ciclo de divergencia, **no está implementado**. Ver REQ-CONF-138.
+- **REQ-DAT-82.** Con `pcr` y loci de repetición declarados, el tartamudeo es
+  además **heredable por linaje**: cada pareja de una familia de amplificación
+  hereda de un progenitor de su familia los resbalones anteriores a su ciclo de
+  divergencia y sortea los posteriores, según la genealogía mínima que DTC-092
+  declara como aproximación y que rige a través de DTC-093. Vive solo en las
+  moléculas que se secuencian: no cambia la verdad del individuo. Ver
+  REQ-CONF-138.
 - **REQ-DAT-83.** Ningún parámetro de amplificación altera el estado genotípico,
   la verdad publicada ni el VCF de verdad. Dos ejecuciones idénticas salvo en la
   preparación o en sus parámetros publican verdad, VCF y manifiestos de verdad
@@ -3918,10 +3963,10 @@ a una probabilidad mayor de error.
   la que el evento declare. El deslizamiento que este requisito describe ocurre
   en la amplificación en puente sobre la celda de flujo y en la secuenciación
   por síntesis, que existen en los dos perfiles. La preparación amplificada
-  existe desde F4.9 y se declara aparte (REQ-CONF-88 y REQ-CONF-134); lo que
-  sigue pendiente es su **tasa de tartamudeo heredable por linaje**, y hasta que
-  exista la combinación de preparación amplificada con loci de repetición
-  declarados se rechaza (REQ-CONF-138).
+  existe desde F4.9 y se declara aparte (REQ-CONF-88 y REQ-CONF-134); su
+  **tartamudeo heredable por linaje** existe desde el 26/09/2026 (REQ-DAT-82), y
+  la combinación de preparación amplificada con loci de repetición declarados
+  exige el tartamudeo de base activo (REQ-CONF-138).
 
 - **REQ-WGS-01.** En F4, el evento debe declarar exactamente una cobertura media
   objetivo común. Un objetivo por número de lecturas o parejas, la ausencia de
@@ -5775,7 +5820,8 @@ pendientes.
 | **ACE-86. Linaje detallado de individuos muestreados** | Solo los individuos incluidos en muestreos o materializaciones adicionales solicitados exportan puntos de recombinación y origen de cada segmento. Cada segmento alcanza al individuo y copia haplotípica fundadores y las mutaciones de novo forman capas separadas. La ejecución conserva internamente lo necesario aunque no exporte antepasados intermedios; los resúmenes no enumeran ese detalle | Evolución muestreada/no muestreada y reconstrucción a través de un antepasado no materializado |
 | **ACE-87. Trazabilidad y límites estructurales** | Las coordenadas actuales se relacionan con las fundadoras cuando existe correspondencia, conservando orientación. Cada copia duplicada y cada inserción nueva tiene identificador estable; las deleciones conservan el intervalo fundador ausente. En una copia haplotípica se permiten eventos estructurales no solapados, incluso adyacentes, pero se rechaza solapamiento, anidamiento o modificación de una estructura previa. La única excepción entre fuente y destino de un mismo evento es la duplicación cuya fuente abarca la secuencia completa. Haplotipos distintos pueden solaparse. SNP e indels se permiten en segmentos modificados, salvo si solapan o atraviesan un punto de ruptura; la adyacencia se permite. Historias distintas pueden producir el mismo estado estructural canónico sin perder su trazabilidad | Formato de relaciones y equivalencia canónica; casos de historias distintas |
 | **ACE-88. Modelos de población inicial** | Cada locus o bloque y subpoblación usa modo probabilístico predeterminado o controlado explícito sin mezclarlos dentro de la unidad. Admite Hardy-Weinberg en ploidías 1–10: binomial por dosis en loci bialélicos y multinomial por composición en multialélicos. También admite frecuencias explícitas de genotipo o dosis y genotipos multilocus faseados. En Hardy-Weinberg controlado se fijan recuentos alélicos, pero los genotipos se distribuyen aleatoriamente condicionados al modelo, sin exigir recuentos genotípicos exactos salvo configuración explícita. Frecuencias y recuentos suman, respectivamente, 1 y el total aplicable; los datos incompatibles se rechazan | Casos HWE haploide, diploide y poliploide, bialélico y multialélico, por modo |
-| **ACE-119. Preparación amplificada por PCR** | Con `pcr`, las parejas de una biblioteca se organizan en familias de amplificación; los duplicados nacen antes de los errores y de las calidades; la composición actúa al elegir la molécula original y además en la media del tamaño de familia; la verdad del individuo, su VCF y el manifiesto de verdad quedan intactos; con todos los parámetros neutros los FASTQ son byte a byte los de `pcr_free`; y el manifiesto publica la cota de operaciones y memoria como valor calculado sin ejecutar. El tartamudeo heredable por linaje está pendiente, y hasta que exista la combinación con loci de repetición declarados se rechaza | Huella congelada del FASTQ sin PCR, oráculo de duplicados sobre los bytes, par de ejecuciones que aísla la desigualdad de los primeros ciclos y validador independiente que rederiva desde la semilla |
+| **ACE-119. Preparación amplificada por PCR** | Con `pcr`, las parejas de una biblioteca se organizan en familias de amplificación; los duplicados nacen antes de los errores y de las calidades; la composición actúa al elegir la molécula original y además en la media del tamaño de familia; la verdad del individuo, su VCF y el manifiesto de verdad quedan intactos; con todos los parámetros neutros los FASTQ son byte a byte los de `pcr_free`; y el manifiesto publica la cota de operaciones y memoria como valor calculado sin ejecutar. Con loci de repetición declarados, la combinación exige el tartamudeo de base activo y añade el tartamudeo heredable por linaje (REQ-CONF-138, REQ-DAT-82) | Huella congelada del FASTQ sin PCR, oráculo de duplicados sobre los bytes, par de ejecuciones que aísla la desigualdad de los primeros ciclos y validador independiente que rederiva desde la semilla |
+| **ACE-120. Multiplicador de la PCR en homopolímeros** | Sin multiplicador, una ejecución amplificada con microsatélites publica los mismos bytes que antes de existir el campo. Con 2,5, la fracción de lecturas con tartamudeo que un oráculo cuenta sobre los FASTQ en un homopolímero a su longitud de referencia reproduce 0,0675 en vez de 0,17, y la de un dinucleótido sigue en 0,038; la probabilidad por ciclo se modula con la longitud del tracto igual que la derivada; un valor fuera de [1, 37] o junto a una sustitución directa del homopolímero se rechaza antes de simular | Huella congelada de un escenario amplificado con microsatélites medida antes del cambio; prueba de composición sobre los FASTQ con tamaño muestral calculado; vectores calculados a mano a la longitud de referencia y en un tracto corto; rechazos de admisión; manipulaciones rechazadas por el juez |
 | **ACE-89. LD y fase iniciales** | F5 genera por bloque×subpoblación una distribución haplotípica SNP-only desde marginales y un perfil de media `r²(d)`, sin panel ni haplotipos aportados. La tabla H×S y q son la fuente de verdad; desde ellas se reconstruyen marginales, D, `r²`, signos y frecuencias. El probabilístico muestrea q y el controlado usa únicamente cuotas enteras factibles que suman C. Los bloques conservan fase e identidad y permanecen intactos hasta la primera meiosis de F7.1 | Oráculo H×S/q/D/`r²`, fijos, bins, signos, cuotas y ausencia de panel/recombinación |
 | **ACE-90. Endogamia inicial** | F automático se configura para la población completa o se sustituye por subpoblación exclusivamente diploide, siempre entre 0 y 1 y nunca por locus, región o bloque. Usa las fórmulas bialélica o multialélica de REQ-EVO-47/48: F=0 coincide con Hardy-Weinberg, un valor intermedio modifica las probabilidades según esas fórmulas y F=1 produce homocigosis completa. F en ploidía 1 o mayor que 2 se rechaza antes de simular con ámbito y ploidía. En poliploides se usa HWE sin F o una distribución explícita local, que prevalece. F realizado se calcula solo en diploides, puede ser negativo sin constituir error y figura como «no aplicable» en las demás ploidías | Casos F=0, intermedio y 1; rechazo P=1 y P>2; distribución explícita poliploide; F realizado no aplicable |
 | **ACE-91. Fundadores trazables** | Todos los individuos de la población inicial son fundadores con identificadores estables propios. Cada copia haplotípica también tiene identificador propio aunque su secuencia coincida con otra, y toda traza posterior alcanza una copia fundadora concreta | Formato de identificadores y casos de reconstrucción |

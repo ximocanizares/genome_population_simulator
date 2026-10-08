@@ -28,6 +28,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ui"))
 
 from config_editor import (  # noqa: E402
+    HOMOPOLYMER_PCR_FOLD_MAXIMUM,
+    HOMOPOLYMER_PCR_FOLD_MINIMUM,
     LIBRARY_PREPARATIONS,
     PCR_MAXIMUM_CYCLES,
     PCR_MAXIMUM_EARLY_CYCLES,
@@ -579,6 +581,151 @@ class ClonalStutterEditorTest(unittest.TestCase):
         self.assertIn("pcr_per_cycle_slip_editor = mo.ui.data_editor", notebook)
         self.assertIn("pcr_per_cycle_slip_editor,", panels)
         self.assertIn("pcr_per_cycle_slip_editor.value", notebook)
+
+
+
+class HomopolymerFoldEditorTest(unittest.TestCase):
+    """DTC-099: el multiplicador de la PCR en los homopolímeros en la interfaz.
+
+    Antes de esta entrega el editor **rechazaba** un documento con la clave,
+    porque la tabla del tartamudeo clonal solo admitía `per_cycle_slip`. La
+    autoridad del dominio sigue siendo Rust; lo que la interfaz tiene que hacer
+    es conservar el literal en la ida y la vuelta y no escribirlo si no se
+    declaró.
+    """
+
+    def _scenario_with_fold(self, literal: str = "2.5") -> str:
+        return SCENARIO.replace(
+            "[[technical_event.libraries]]",
+            "[technical_event.pcr.stutter]\n"
+            f"homopolymer_pcr_fold = {literal}\n"
+            "\n"
+            "[[technical_event.libraries]]",
+            1,
+        )
+
+    def test_round_trip_keeps_the_declared_fold(self) -> None:
+        form = parse_general_toml(self._scenario_with_fold())
+        self.assertEqual(form.technical_event.pcr.homopolymer_pcr_fold, "2.5")
+        rendered = render_general_toml(form)
+        self.assertIn("homopolymer_pcr_fold = 2.5", rendered)
+        self.assertEqual(parse_general_toml(rendered), form)
+
+    def test_an_undeclared_fold_is_not_written(self) -> None:
+        """Sin declarar, la clave **no se escribe**: 6.30 no equivale a omitirla."""
+
+        form = parse_general_toml(SCENARIO)
+        self.assertIsNone(form.technical_event.pcr.homopolymer_pcr_fold)
+        self.assertNotIn("homopolymer_pcr_fold", render_general_toml(form))
+        self.assertNotIn("[technical_event.pcr.stutter]", render_general_toml(form))
+        # Control positivo: declarado, sí se escribe, y sin sustituciones.
+        form.technical_event.pcr.homopolymer_pcr_fold = "1"
+        rendered = render_general_toml(form)
+        self.assertIn("homopolymer_pcr_fold = 1", rendered)
+        self.assertNotIn("per_cycle_slip", rendered)
+
+    def test_the_fold_outside_its_domain_is_rejected(self) -> None:
+        self.assertEqual(
+            (HOMOPOLYMER_PCR_FOLD_MINIMUM, HOMOPOLYMER_PCR_FOLD_MAXIMUM), (1.0, 37.0)
+        )
+        for literal in ("0.99", "37.01", "nan", "inf"):
+            with self.subTest(literal=literal):
+                with self.assertRaises(EditorError) as raised:
+                    parse_general_toml(self._scenario_with_fold(literal))
+                self.assertIn("homopolymer_pcr_fold", str(raised.exception))
+        # Control positivo: los dos extremos se admiten.
+        for literal in ("1", "37"):
+            with self.subTest(literal=literal):
+                parse_general_toml(self._scenario_with_fold(literal))
+
+    def test_the_editor_rows_carry_the_fold_and_a_blank_is_absent(self) -> None:
+        form = parse_general_toml(self._scenario_with_fold())
+        pcr = form.technical_event.pcr
+        arguments = (
+            "pcr",
+            pcr.duplicate_fraction,
+            pcr.cycles,
+            pcr.efficiency,
+            pcr.early_cycles,
+            pcr.max_family_size,
+            pcr.gc_max_attempts,
+            gc_curve_editor_rows(pcr),
+            efficiency_class_editor_rows(pcr),
+            per_cycle_slip_editor_rows(pcr),
+        )
+        self.assertEqual(pcr_from_editor_rows(*arguments, " 2.5 "), pcr)
+        self.assertIsNone(pcr_from_editor_rows(*arguments, "  ").homopolymer_pcr_fold)
+
+    def test_the_panel_shows_the_control(self) -> None:
+        panels = PANELS.read_text(encoding="utf-8")
+        self.assertIn("pcr_homopolymer_fold_control,", panels)
+
+    def test_the_control_value_reaches_the_form(self) -> None:
+        """**El valor del control es lo que llega al formulario.**
+
+        Lo honesto sería ejecutar la celda del cuaderno que construye el
+        formulario y ver el campo en el TOML. **No se puede**: con un evento
+        técnico activo esa celda falla con `NameError` sobre
+        `TechnicalEventForm`, que el cuaderno nunca importa (DT-042), de modo
+        que hoy ningún control del panel de PCR llega al TOML desde el cuaderno
+        en ejecución. Mientras eso siga así, la prueba es **estructural**: sobre
+        el árbol sintáctico exige que la única llamada a `pcr_from_editor_rows`
+        reciba como argumento del multiplicador exactamente
+        `str(pcr_homopolymer_fold_control.value)`, y que el control arranque
+        con el literal del formulario importado. Caza un cableado que pase `""`
+        o cualquier otra cosa en su lugar; no caza nada que solo se vea al
+        ejecutar. Después comprueba, ya sin el cuaderno, que ese argumento llega
+        al formulario y al TOML.
+        """
+
+        tree = ast.parse(NOTEBOOK.read_text(encoding="utf-8"))
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "pcr_from_editor_rows"
+        ]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls[0].args), 11)
+        self.assertEqual(
+            ast.dump(calls[0].args[10]),
+            ast.dump(
+                ast.parse("str(pcr_homopolymer_fold_control.value)", mode="eval").body
+            ),
+        )
+        defined = [
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "pcr_homopolymer_fold_control"
+        ]
+        self.assertEqual(len(defined), 1)
+        initial = [
+            keyword.value for keyword in defined[0].keywords if keyword.arg == "value"
+        ]
+        self.assertEqual(len(initial), 1)
+        self.assertIn("_selected_pcr.homopolymer_pcr_fold", ast.unparse(initial[0]))
+        # Y lo que ese argumento lleva llega al formulario y al TOML.
+        pcr = parse_general_toml(SCENARIO).technical_event.pcr
+        rebuilt = pcr_from_editor_rows(
+            "pcr",
+            pcr.duplicate_fraction,
+            pcr.cycles,
+            pcr.efficiency,
+            pcr.early_cycles,
+            pcr.max_family_size,
+            pcr.gc_max_attempts,
+            gc_curve_editor_rows(pcr),
+            efficiency_class_editor_rows(pcr),
+            per_cycle_slip_editor_rows(pcr),
+            "2.82",
+        )
+        self.assertEqual(rebuilt.homopolymer_pcr_fold, "2.82")
+        form = parse_general_toml(SCENARIO)
+        form.technical_event.pcr = rebuilt
+        self.assertIn("homopolymer_pcr_fold = 2.82", render_general_toml(form))
 
 
 if __name__ == "__main__":

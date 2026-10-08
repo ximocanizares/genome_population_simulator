@@ -1,0 +1,24 @@
+config_kind = "general"
+schema_version = "4"
+seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+
+[population_snvs]
+mode = "supplied"
+input_path = "population-snvs.tsv"
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 300
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 2
+ploidy = 2
+genotype_model = "hwe"
+individual_ids = ["sample-A", "sample-B"]

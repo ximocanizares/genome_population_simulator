@@ -3239,6 +3239,26 @@ fn validate_physical_technical_event(
         .and_then(Value::as_object)
         .and_then(|artifacts| artifacts.get("chimera"));
     validate_f4_coverage_against_effective(&event, technical_event, reference, effective_path)?;
+    // **El bloque del tartamudeo clonal del manifiesto de evento es el de la
+    // configuración efectiva, byte a byte** (REQ-VAL-61). Los dos salen de la
+    // misma función del productor. La efectiva ya está atada a lo que el TOML
+    // copiado resuelve —calibración, multiplicador de los homopolímeros y
+    // sustituciones—; sin esta igualdad, el bloque del manifiesto de evento
+    // solo lo juzgaba su esquema, y unas fracciones cambiadas junto con su
+    // probabilidad pasaban. Se reprodujo el 08/10/2026 antes de escribirla.
+    // Cubre el bloque entero, no el resto de la sección de amplificación del
+    // manifiesto de evento, que sigue sin atarse a la efectiva (DT-043).
+    fn pcr_stutter(artifacts: Option<&Value>) -> Option<&Value> {
+        artifacts
+            .and_then(|artifacts| artifacts.get("pcr"))
+            .and_then(|pcr| pcr.get("stutter"))
+    }
+    if pcr_stutter(event.get("artifacts")) != pcr_stutter(technical_event.get("artifacts")) {
+        return Err(effective_error(
+            effective_path,
+            "el tartamudeo clonal del manifiesto técnico no es el de la configuración efectiva",
+        ));
+    }
     validate_physical_biological_contamination_summary(
         &event,
         technical_event,
@@ -8489,17 +8509,26 @@ fn validate_effective_clonal_stutter(
     stutter: &serde_json::Map<String, Value>,
     path: &Path,
 ) -> Result<(), Diagnostic> {
+    // El multiplicador de los homopolímeros (DTC-099) solo aparece si el
+    // escenario lo declaró. Qué valor tiene y qué fracción con PCR resulta de
+    // él no se juzga aquí, sino donde se juzga todo el evento técnico: contra
+    // lo que el TOML copiado resuelve, que lo ata a la calibración y a lo
+    // declarado (REQ-VAL-61).
+    let mut fields = vec![
+        "algorithm",
+        "cycles",
+        "formula",
+        "coarse",
+        "coarse_reason",
+        "calibration",
+        "per_cycle_slip",
+    ];
+    if stutter.contains_key("homopolymer_pcr_fold") {
+        fields.push("homopolymer_pcr_fold");
+    }
     validate_effective_closed_object(
         stutter,
-        &[
-            "algorithm",
-            "cycles",
-            "formula",
-            "coarse",
-            "coarse_reason",
-            "calibration",
-            "per_cycle_slip",
-        ],
+        &fields,
         "technical_event.artifacts.pcr.stutter",
         path,
     )?;

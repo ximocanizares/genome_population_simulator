@@ -504,3 +504,71 @@ fn the_amplified_manifest_publishes_the_derivation_and_the_lineage_counts() {
         );
     }
 }
+
+/// **DTC-099. Con el multiplicador de los homopolímeros en 2,5, la fracción
+/// observada en el homopolímero baja a 0,0675 y la del dinucleótido no se
+/// mueve de 0,038.**
+///
+/// Mismo montaje que la prueba hermana: 6000 moléculas, los dos tractos en sus
+/// longitudes de referencia, donde el factor de longitud vale 1. Es
+/// **tautológica respecto del modelo y discriminante respecto de la
+/// implementación**, igual que su hermana: lo que comprueba es que el sorteo
+/// usa el multiplicador como el diseño dice.
+///
+/// # Contra qué falla, con su tamaño muestral
+///
+/// La tolerancia para `p₀ = 0,0675` con `n = 6000` y α = 0,05 a dos colas es
+/// **0,0063**. Las entregas defectuosas que tiene que separar, calculadas a
+/// mano:
+///
+/// - el sorteo **ignora** el campo: 0,17;
+/// - el multiplicador por 0,027 se toma como **el incremento** de la PCR en
+///   vez de como el total con PCR: `1 − 0,973 × 0,9325 ≈ 0,0927`;
+/// - el multiplicador se aplica a la **probabilidad por ciclo** derivada por
+///   omisión, escalándola por `k / 6,30`: `p = 0,01577 × 2,5 / 6,2963 ≈
+///   0,006262`, que acumulada en diez ciclos y compuesta con la parte de base
+///   da ≈ 0,0862;
+/// - falta la parte de base: el incremento despejado solo, ≈ 0,0416.
+///
+/// La más cercana es 0,0862, a 0,0187: casi tres veces la tolerancia. Con
+/// `p₁ = 0,0862` la potencia del 90 % pide `n ≈ 2100`, por debajo de las 6000
+/// del fixture.
+#[test]
+fn the_homopolymer_fold_moves_only_the_homopolymer_fraction_on_the_fastq() {
+    let preparation = format!(
+        "{}\n[technical_event.pcr.stutter]\nhomopolymer_pcr_fold = 2.5\n",
+        amplified()
+    );
+    let published = run(&preparation);
+    let reads = published.first_reads();
+    assert_eq!(reads.len() as u64, MOLECULES);
+    let (homopolymer, covered) = stuttered_fraction(&reads, b"A", TRUE_HOMOPOLYMER_UNITS);
+    assert_eq!(covered, MOLECULES);
+    let observed_homopolymer = (homopolymer as f64) / (covered as f64);
+    assert_within(
+        observed_homopolymer,
+        0.0675,
+        MOLECULES,
+        "homopolímero con PCR y multiplicador 2,5",
+    );
+    let (dinucleotide, covered) = stuttered_fraction(&reads, b"CA", TRUE_DINUCLEOTIDE_UNITS);
+    assert_eq!(covered, MOLECULES);
+    assert_within(
+        (dinucleotide as f64) / (covered as f64),
+        0.038,
+        MOLECULES,
+        "dinucleótido con PCR, que el multiplicador no toca",
+    );
+    // La discriminación, escrita como aserción: las cuatro variantes quedan
+    // fuera del intervalo.
+    for variant in [0.17_f64, 0.0927, 0.0862, 0.0416] {
+        assert!(
+            (variant - 0.0675).abs() > tolerance(0.0675, MOLECULES),
+            "la variante {variant} tiene que quedar fuera del intervalo"
+        );
+    }
+    // Y el manifiesto publica lo que el sorteo usó.
+    let clonal = &published.event()["artifacts"]["pcr"]["stutter"];
+    assert_eq!(clonal["homopolymer_pcr_fold"], 2.5);
+    assert_eq!(clonal["per_cycle_slip"][0]["with_pcr_fraction"], 0.0675);
+}

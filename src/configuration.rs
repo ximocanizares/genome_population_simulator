@@ -431,6 +431,12 @@ pub struct DeclaredPcr {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeclaredPcrStutter {
     pub per_cycle_slip: Vec<DeclaredPerCycleSlip>,
+    /// Cuántas veces multiplica la PCR la fracción de lecturas con tartamudeo
+    /// en los homopolímeros (DTC-099). Se aplica sobre la **constante** sin
+    /// PCR de la calibración, no sobre la tasa de base que declare el
+    /// escenario. Ausente rige la calibración por omisión, la de Gymrek
+    /// (2016), y lo publicado es byte a byte lo de antes de existir el campo.
+    pub homopolymer_pcr_fold: Option<DeclaredNumber>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

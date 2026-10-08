@@ -1,0 +1,93 @@
+config_kind = "general"
+schema_version = "4"
+seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+
+[population_snvs]
+mode = "supplied"
+input_path = "population-snvs.tsv"
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 300
+
+[[reference.repeat_loci]]
+id = "STR-HOMO"
+sequence = "chr1"
+start = 61
+end = 75
+motif = "A"
+
+[[reference.repeat_loci.alleles]]
+sequence = "AAAAAAAAAAAAAAA"
+frequency = 0.5
+
+[[reference.repeat_loci.alleles]]
+sequence = "AAAAAAAAAAAAAA"
+frequency = 0.5
+
+[[reference.repeat_loci]]
+id = "STR-DI"
+sequence = "chr1"
+start = 80
+end = 113
+motif = "CA"
+
+[[reference.repeat_loci.alleles]]
+sequence = "CACACACACACACACACACACACACACACACACA"
+frequency = 1.0
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 2
+ploidy = 2
+genotype_model = "hwe"
+individual_ids = ["sample-A", "sample-B"]
+
+[technical_event]
+event_id = "reads-main"
+individual_ids = ["sample-A", "sample-B"]
+target_coverage_wgs = 300
+library_preparation = "pcr"
+
+[technical_event.pcr]
+duplicate_fraction = 0.3
+cycles = 10
+efficiency = 0.9
+
+[technical_event.pcr.stutter]
+homopolymer_pcr_fold = 2.5
+
+[technical_event.stutter]
+enabled = true
+
+[[technical_event.stutter.steps]]
+units = -3
+weight = 0.05
+
+[[technical_event.stutter.steps]]
+units = -2
+weight = 0.15
+
+[[technical_event.stutter.steps]]
+units = -1
+weight = 0.6
+
+[[technical_event.stutter.steps]]
+units = 1
+weight = 0.2
+
+[[technical_event.libraries]]
+individual_id = "sample-A"
+i7 = "ACGTACGT"
+i5 = "TGCATGCA"
+
+[[technical_event.libraries]]
+individual_id = "sample-B"
+i7 = "TTGGCCAA"
+i5 = "GGAATTCC"

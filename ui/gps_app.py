@@ -455,6 +455,14 @@ def _(
         ),
         pagination=False,
     )
+    pcr_homopolymer_fold_control = mo.ui.text(
+        value=(_selected_pcr.homopolymer_pcr_fold if _selected_pcr else None) or "",
+        label=(
+            "Multiplicador de la PCR en homopolímeros, de 1 a 37 (opcional; en"
+            " blanco, la calibración por omisión)"
+        ),
+        full_width=True,
+    )
     population_snvs_mode_control = mo.ui.dropdown(
         options=["none", "supplied", "reuse", "generate"],
         value=(selected_population_snvs.mode if selected_population_snvs else "none"),
@@ -1093,6 +1101,7 @@ def _(
                     pcr_gc_curve_editor.value,
                     pcr_efficiency_classes_editor.value,
                     pcr_per_cycle_slip_editor.value,
+                    str(pcr_homopolymer_fold_control.value),
                 ),
             )
         )
@@ -2472,6 +2481,7 @@ def _(
                 pcr_gc_curve_editor,
                 pcr_efficiency_classes_editor,
                 pcr_per_cycle_slip_editor,
+                pcr_homopolymer_fold_control,
             ),
             "Poblaciones": populations_panel,
             "Evolución": unavailable("F7"),

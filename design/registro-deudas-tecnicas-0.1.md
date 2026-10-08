@@ -42,7 +42,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-006 | El sorteo del inserto por rechazo es inutilizable cuando la copia más larga acerca el máximo al mínimo del perfil | Media | 24/09/2026 | **Aceptada (06/10/2026)**, con guarda de admisión (25/09/2026) |
 | DT-007 | Ningún diagnóstico público nuevo puede publicarse en un manifiesto del recorrido general | Baja | 25/09/2026 | Abierta |
 | DT-008 | El orden entre el paso de linaje y la decisión de base no lo separaba ninguna prueba | Baja | 26/09/2026 | **Cerrada (26/09/2026)** |
-| DT-009 | Las dos fuentes de la calibración discrepan en cuánto multiplica la PCR el tartamudeo de los homopolímeros | Media | 27/09/2026 | Abierta |
+| DT-009 | Las dos fuentes de la calibración discrepan en cuánto multiplica la PCR el tartamudeo de los homopolímeros | Media | 27/09/2026 | **Cerrada por decisión (06/10/2026)**; implementada el 08/10/2026 (DTC-099) |
 | DT-010 | El recuento de Poisson devolvía error donde el método pide repetir | Media | 27/09/2026 | **Cerrada (27/09/2026; el oráculo, el 30/09/2026)** |
 | DT-011 | Dos rechazos del generador de alelos no se alcanzan desde una configuración | Baja | 27/09/2026 | Abierta |
 | DT-012 | El barrido de opciones comprueba que el control existe, no que atienda a la opción | Baja | 27/09/2026 | Abierta |
@@ -73,6 +73,11 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-037 | `tests/test_population_snvs_editor.py` está fuera de la puerta de Python y falla 1 de 7 | Baja | 06/10/2026 | Abierta |
 | DT-038 | Ante un fallo posterior al evento, el VCF ya publicado y validado se descarta del paquete fallido aunque es independiente | Media | 06/10/2026 | Abierta |
 | DT-039 | Con evento, si se altera el FASTA de la referencia suministrada antes del cierre, la rama de fallo controlado no consigue publicar y se pierde la causa original | Media | 06/10/2026 | Abierta |
+| DT-040 | Con tartamudeo clonal, la configuración efectiva publica `technical_event.rng_catalog = "f4-technical-v5"` y su esquema v6 exige `f4-technical-v6`: el validador externo la rechaza | Media | 08/10/2026 | Abierta; decidido el 08/10/2026 que manda el esquema, en un cambio aparte junto con DT-041 |
+| DT-041 | Toda ejecución amplificada, con microsatélites o sin ellos, publica un manifiesto general que no pasa su propio esquema: el perfil está fijado al de sin PCR y los catálogos a v3 y v4 | Media | 08/10/2026 | Abierta; decidido que manda el contrato, ampliándolo; junto con DT-040 |
+| DT-042 | En el cuaderno, con un evento técnico activo, la celda que reconstruye el formulario falla con `NameError` sobre `TechnicalEventForm`: ningún control del panel de PCR llega al TOML | Media | 08/10/2026 | Abierta |
+| DT-043 | El juez acepta en el manifiesto de evento los ciclos de la amplificación fuera del bloque del tartamudeo y los recuentos de linaje alterados, con las huellas rehechas | Media | 08/10/2026 | Abierta |
+| DT-044 | REQ-CONF-134 a 138, REQ-DAT-81 a 85 y REQ-MAN-94 no tienen fila en la matriz de trazabilidad | Baja | 08/10/2026 | Abierta |
 
 ---
 
@@ -954,6 +959,29 @@ o declarar que la discrepancia entra dentro de la tosquedad ya declarada de las
 tasas por ciclo. Si se decidiera por Fungtammasan, habría que rehacer la
 columna sin PCR de los mononucleótidos o la de con PCR, y con ella las seis
 probabilidades por ciclo publicadas.
+
+### Cómo se cerró (06/10/2026)
+
+El responsable decidió que **manda Gymrek por omisión y el multiplicador de los
+homopolímeros es configurable** (DTC-099, REQ-CONF-141). Se ajusta sobre la
+columna sin PCR, que no cambia, de modo que ninguna ejecución sin PCR se mueve
+y una amplificada sin el campo publica los mismos bytes. Quien quiera la cifra
+de Fungtammasan escribe `homopolymer_pcr_fold = 2.5`; su propia figura da 2,82
+a 15 pb, el ancla, y el usuario elige.
+
+**Implementado el 08/10/2026.** La igualdad byte a byte sin el campo se
+comprobó de dos maneras: cinco escenarios ejecutados con el binario del commit
+de partida y con el nuevo dan los mismos 55 ficheros
+(`evidence/dt-009-multiplicador-congelacion/`), y una huella congelada medida
+en el commit de partida antes de tocar el código vive ahora en
+`tests/clonal_homopolymer_fold.rs`. Al implementarlo se encontró además que el
+juez no comparaba el bloque del tartamudeo clonal del manifiesto de evento con
+el de la configuración efectiva; se añadió esa igualdad (REQ-VAL-61). Con ella
+y con la comparación con el TOML copiado que ya existía, el responsable aprobó
+el 08/10/2026 que el juez **no** lleve las guardas campo a campo que proponía
+el estudio previo (DTC-099). La igualdad cubre el bloque del tartamudeo clonal
+entero; el resto de la sección de amplificación del manifiesto de evento sigue
+sin juez propio (DT-043).
 
 ---
 
@@ -2900,3 +2928,110 @@ el catálogo físico general», **no queda ningún destino y se pierde la causa
 original**. Reproducido por el revisor del cierre de DT-002 con el gancho previo
 al manifiesto. Un fallo controlado debería publicar siempre un paquete fallido
 coherente o, al menos, conservar y devolver la causa original. **Sin arreglar.**
+
+---
+
+## DT-040. Con tartamudeo clonal, la configuración efectiva contradice su esquema en el catálogo de azar
+
+**Gravedad: media.** Encontrada el 08/10/2026 al pasar por primera vez por el
+validador externo de esquemas la configuración efectiva de una ejecución
+**amplificada con loci de repetición**. Ninguna prueba lo hacía: las que
+validan la efectiva por fuera usan escenarios amplificados sin loci.
+
+**Qué pasa.** Con tartamudeo clonal, la efectiva publica
+`technical_event.rng_catalog = "f4-technical-v5"` y, dentro,
+`technical_event.artifacts.pcr.rng_catalog = "f4-technical-v6"`. El esquema
+`effective-config-v6` exige `f4-technical-v6` en el primero cuando existe el
+bloque `pcr.stutter` (su `allOf` con el comentario «El tartamudeo clonal
+estrena el v6»), y el validador externo rechaza el documento. El productor
+(`technical_event_json` en `src/results.rs`), el juez de la efectiva
+(`validate_effective_technical_event`) y el del manifiesto general (que solo
+admite v3, v4 y v5 en el inventario técnico) coinciden entre sí en el v5; el
+manifiesto de evento publica v6. El código y el esquema se contradicen desde el
+commit del tartamudeo clonal, `a40ce85` (26/09/2026); se reprodujo con el
+binario del commit `fc2b205`.
+
+**Decisión del responsable (08/10/2026): manda el contrato, es decir, el
+esquema.** Se corregirá en un cambio **aparte**, junto con DT-041: el productor
+publicará `f4-technical-v6` en `technical_event.rng_catalog` de la efectiva
+cuando haya tartamudeo clonal —DTC-091: una ejecución publica el catálogo más
+alto cuya etapa abre; DTC-092: solo la amplificada **sin** loci sigue en v5—,
+el juez de la efectiva (`validate_effective_technical_event`) y el del
+manifiesto general aceptarán el v6, y se ampliará el esquema del manifiesto
+general. Mueve los bytes de toda ejecución amplificada con microsatélites, de
+modo que hará falta una huella nueva decidida por escrito.
+
+**Sin arreglar todavía**: el multiplicador de DT-009 no podía tocarlo sin romper
+la igualdad byte a byte que exigía. `tests/clonal_homopolymer_fold.rs` comprueba
+que este es el único motivo por el que la efectiva no pasa su esquema, y fallará
+cuando se corrija para que se quite el rodeo.
+
+---
+
+## DT-041. El manifiesto general de toda ejecución amplificada incumple su propio esquema
+
+**Gravedad: media.** Hallada el 08/10/2026 por la revisión adversarial de
+DT-009 y comprobada después contra el binario de esa entrega: el manifiesto
+general de los escenarios `amplificado-loci` y `amplificado-sin-loci` de
+`evidence/dt-009-multiplicador-congelacion/` lo rechaza el validador externo con
+`'gps-hiseqx-pcrfree-pe150-v1' was expected`.
+
+**Qué pasa.** Los esquemas del manifiesto general v4 y v6 fijan, en
+`technical_events[].profile.id`, el perfil sin PCR
+(`gps-hiseqx-pcrfree-pe150-v1`), y en `rng_catalog` solo admiten `f4-technical-v3`
+y `f4-technical-v4` (el v4 del esquema, solo el v3). Una ejecución amplificada
+publica el perfil `gps-hiseqx-pcr-pe150-v1` y el catálogo v5 o v6, de modo que
+**toda** ejecución amplificada, con microsatélites o sin ellos, publica un
+manifiesto general que no pasa su esquema. El juez de Rust lo acepta (admite v3,
+v4 y v5 y los dos perfiles). Ninguna prueba valida por fuera el manifiesto
+general de una ejecución amplificada.
+
+**Decisión del responsable (08/10/2026): manda el contrato, ampliándolo** para
+admitir el perfil con PCR y los catálogos que la amplificación abre. Se resuelve
+**junto con DT-040**, en el mismo cambio aparte. **Sin arreglar.**
+
+---
+
+## DT-042. En el cuaderno, la celda que reconstruye el formulario falla con un evento técnico activo
+
+**Gravedad: media.** Hallada el 08/10/2026 por la revisión adversarial de
+DT-009, que la reprodujo ejecutando el cuaderno. Con un evento técnico activo,
+la celda que reconstruye el formulario (`ui/gps_app.py`, hacia la línea 1046)
+falla con `NameError: name 'TechnicalEventForm' is not defined`: la celda lo
+declara como parámetro, pero **ninguna celda lo define**, porque la de
+importación no lo importa de `config_editor` (comprobado leyendo el fichero).
+Viene de F4.1, commit `e341b57` (29/08/2026). Consecuencia: **ningún control
+del panel de PCR llega al TOML desde el cuaderno en ejecución**, y tampoco los
+del resto del evento técnico. `marimo check --strict` no lo detecta.
+
+**No explica los dos fallos conocidos de `tests_ui`**, como se sospechaba: se
+comprobó el 08/10/2026 que los dos fallan por un diagnóstico de Rust
+(`GPS-CONF-008`, «la matriz SNV falta después de la validación efectiva» y
+«truth.jsonl no contiene copias ni genotipos cuando initial_populations está
+vacío»), no por este `NameError`. Por la misma razón, la prueba de la interfaz
+del multiplicador (`test_the_control_value_reaches_the_form`) es estructural y
+lo dice en su docstring. **Sin arreglar.**
+
+---
+
+## DT-043. El juez no ata la sección de amplificación del manifiesto de evento fuera del bloque del tartamudeo
+
+**Gravedad: media.** Hallada el 08/10/2026 por la revisión adversarial de
+DT-009, que la reprodujo con las huellas rehechas en el manifiesto general: el
+juez de los recursos publicados **acepta** un manifiesto de evento con
+`artifacts.pcr.cycles` cambiado a 12 —incoherente con los `cycles` del bloque
+del tartamudeo clonal, que siguen en 10— y con `lineage_applied_steps_by_locus`
+aumentado en uno. Desde DT-009 el **bloque** del tartamudeo clonal tiene que
+ser idéntico al de la configuración efectiva (REQ-VAL-61); el resto de la
+sección de amplificación sigue sin atarse a la efectiva ni a las lecturas, y
+solo lo comprueban su esquema y las relaciones internas que
+`validate_pcr_manifest` mira. **Sin arreglar.**
+
+---
+
+## DT-044. Once requisitos de la amplificación no tienen fila en la matriz de trazabilidad
+
+**Gravedad: baja.** Hallada el 08/10/2026 por la revisión adversarial de
+DT-009 y comprobada con `grep`: REQ-CONF-134 a 138, REQ-DAT-81 a 85 y REQ-MAN-94
+no tienen fila en `design/trazabilidad-requisitos-0.1.md`, aunque la
+especificación ya los presenta como implementados. **Sin arreglar.**

@@ -2175,6 +2175,12 @@
                         }
                       }
                     },
+                    "homopolymer_pcr_fold": {
+                      "type": "number",
+                      "minimum": 1,
+                      "maximum": 37,
+                      "description": "Multiplicador de la PCR en los homopolímeros declarado por el escenario (DTC-099). Solo aparece si se declaró; la fila de longitud de motivo 1 lleva entonces como fracción con PCR multiplicador × fracción sin PCR. Sin él rige la calibración por omisión."
+                    },
                     "per_cycle_slip": {
                       "type": "array",
                       "minItems": 6,

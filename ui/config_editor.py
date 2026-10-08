@@ -324,6 +324,10 @@ PCR_MAXIMUM_FAMILY_SIZE = 256
 PCR_MAXIMUM_GC_ATTEMPTS = 16
 PCR_MAXIMUM_EFFICIENCY_CLASSES = 4
 PCR_MAXIMUM_MEAN_PAIRS_PER_MOLECULE = 64.0
+# Tramo del multiplicador de la PCR en los homopolímeros (DTC-099), ambos
+# incluidos. Las mismas cifras que Rust; la autoridad sigue siendo Rust.
+HOMOPOLYMER_PCR_FOLD_MINIMUM = 1.0
+HOMOPOLYMER_PCR_FOLD_MAXIMUM = 37.0
 # Las dos preparaciones admitidas, en orden canónico. Ausente significa la
 # primera, que es la única que existía.
 LIBRARY_PREPARATIONS = ("pcr_free", "pcr")
@@ -414,6 +418,10 @@ class PcrForm:
     # Vacía significa que las probabilidades por ciclo se **derivan** de las dos
     # columnas de la calibración y del número de ciclos, que es lo normal.
     per_cycle_slip: list[PerCycleSlipRow] = field(default_factory=list)
+    # Multiplicador de la PCR en los homopolímeros (DTC-099), como literal.
+    # `None` significa la calibración por omisión, la de Gymrek (2016), y
+    # entonces **no se escribe**: escribir 6.30 no equivale a omitirlo.
+    homopolymer_pcr_fold: str | None = None
 
 
 @dataclass(eq=True)
@@ -707,6 +715,7 @@ def pcr_from_editor_rows(
     gc_curve_rows: Sequence[Mapping[str, Any]],
     efficiency_class_rows: Sequence[Mapping[str, Any]],
     per_cycle_slip_rows: Sequence[Mapping[str, Any]] = (),
+    homopolymer_pcr_fold: str = "",
 ) -> PcrForm | None:
     """Reconstruye la amplificación desde las tablas del cuaderno.
 
@@ -761,6 +770,7 @@ def pcr_from_editor_rows(
         gc_relative_efficiency=knots,
         efficiency_classes=classes,
         per_cycle_slip=slips,
+        homopolymer_pcr_fold=str(homopolymer_pcr_fold).strip() or None,
     )
 
 
@@ -1620,9 +1630,19 @@ def _parse_pcr(table: Mapping[str, Any]) -> PcrForm:
         path=path,
     )
     slips: list[PerCycleSlipRow] = []
+    fold: str | None = None
     if "stutter" in table:
         clonal = _mapping(table["stutter"], f"{path}.stutter")
-        _keys(clonal, allowed={"per_cycle_slip"}, required=set(), path=f"{path}.stutter")
+        _keys(
+            clonal,
+            allowed={"per_cycle_slip", "homopolymer_pcr_fold"},
+            required=set(),
+            path=f"{path}.stutter",
+        )
+        if "homopolymer_pcr_fold" in clonal:
+            fold = _homopolymer_fold_literal(
+                clonal["homopolymer_pcr_fold"], f"{path}.stutter.homopolymer_pcr_fold"
+            )
         for index, value in enumerate(
             _sequence(clonal.get("per_cycle_slip", []), f"{path}.stutter.per_cycle_slip")
         ):
@@ -1732,7 +1752,21 @@ def _parse_pcr(table: Mapping[str, Any]) -> PcrForm:
         gc_relative_efficiency=knots,
         efficiency_classes=classes,
         per_cycle_slip=slips,
+        homopolymer_pcr_fold=fold,
     )
+
+
+def _homopolymer_fold_literal(value: Any, path: str) -> str:
+    """El multiplicador de los homopolímeros: finito y en `[1, 37]`."""
+
+    literal = _non_negative_number_literal(value, path)
+    if not HOMOPOLYMER_PCR_FOLD_MINIMUM <= float(literal) <= HOMOPOLYMER_PCR_FOLD_MAXIMUM:
+        raise EditorError(
+            path,
+            f"debe estar entre {HOMOPOLYMER_PCR_FOLD_MINIMUM:g} y "
+            f"{HOMOPOLYMER_PCR_FOLD_MAXIMUM:g}, ambos incluidos",
+        )
+    return literal
 
 
 def _bounded_count(value: Any, path: str, minimum: int, maximum: int) -> int:
@@ -2832,30 +2866,37 @@ def _render_pcr(pcr: PcrForm) -> Any:
             classes.append(entry)
         table.add("efficiency_classes", classes)
     # La tabla del tartamudeo clonal solo se escribe si el usuario sustituyó
-    # alguna probabilidad: sin sustituciones, las seis se **derivan** y
+    # alguna probabilidad o declaró el multiplicador de los homopolímeros: sin
+    # nada de eso, las seis se **derivan** de la calibración por omisión y
     # escribirlas cambiaría los bytes del documento sin cambiar el resultado, y
     # además las publicaría marcadas como suyas.
-    if pcr.per_cycle_slip:
-        slips = tomlkit.aot()
-        for index, row in enumerate(pcr.per_cycle_slip):
-            row_path = f"{path}.stutter.per_cycle_slip[{index}]"
-            entry = tomlkit.table()
-            entry.add(
-                "motif_length_bases",
-                _checked_count(
-                    row.motif_length_bases,
-                    f"{row_path}.motif_length_bases",
-                    min(STUTTER_MOTIF_LENGTHS),
-                    max(STUTTER_MOTIF_LENGTHS),
-                ),
-            )
-            entry.add(
-                "probability",
-                _fraction_literal_item(row.probability, f"{row_path}.probability"),
-            )
-            slips.append(entry)
+    if pcr.per_cycle_slip or pcr.homopolymer_pcr_fold is not None:
         clonal = tomlkit.table()
-        clonal.add("per_cycle_slip", slips)
+        if pcr.homopolymer_pcr_fold is not None:
+            fold_path = f"{path}.stutter.homopolymer_pcr_fold"
+            fold = _literal_item(pcr.homopolymer_pcr_fold, fold_path)
+            _homopolymer_fold_literal(fold, fold_path)
+            clonal.add("homopolymer_pcr_fold", fold)
+        if pcr.per_cycle_slip:
+            slips = tomlkit.aot()
+            for index, row in enumerate(pcr.per_cycle_slip):
+                row_path = f"{path}.stutter.per_cycle_slip[{index}]"
+                entry = tomlkit.table()
+                entry.add(
+                    "motif_length_bases",
+                    _checked_count(
+                        row.motif_length_bases,
+                        f"{row_path}.motif_length_bases",
+                        min(STUTTER_MOTIF_LENGTHS),
+                        max(STUTTER_MOTIF_LENGTHS),
+                    ),
+                )
+                entry.add(
+                    "probability",
+                    _fraction_literal_item(row.probability, f"{row_path}.probability"),
+                )
+                slips.append(entry)
+            clonal.add("per_cycle_slip", slips)
         table.add("stutter", clonal)
     return table
 

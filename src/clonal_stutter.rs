@@ -22,8 +22,10 @@
 //! la parte de base, de modo que `1 − (1−r_sin)(1−r_pcr) = r_con`, exactamente
 //! la fracción medida. Una preparación amplificada entregada **sin** la parte
 //! de base se quedaría en el incremento despejado y subestimaría el tartamudeo
-//! entre un 14 % y un 28 % en motivos de uno a cinco pares de base. La
-//! admisión de la configuración lo impide.
+//! —con la calibración por omisión, entre un 14 % y un 28 % en motivos de uno a
+//! cinco pares de base; con el multiplicador de los homopolímeros de DTC-099
+//! la cifra del homopolímero cambia—. La admisión de la configuración lo
+//! impide.
 //!
 //! # Honestidad sobre lo que la resta puede y no puede afirmar
 //!
@@ -73,13 +75,50 @@ pub const CLONAL_STUTTER_COARSE_REASON: &str = "the two calibration columns come
      at different coverages, so the subtraction may carry individual and batch effects besides \
      the amplification: these per-cycle rates are coarse and are published as such";
 
-/// Fallo estable de la sustitución directa de las tasas por ciclo.
+/// Menor multiplicador de la PCR admitido en los homopolímeros (DTC-099).
+///
+/// Con 1 la fracción con PCR iguala a la sin PCR: la amplificación no añade
+/// tartamudeo, la probabilidad por ciclo vale cero y no se consume
+/// aleatoriedad. Por debajo diría que la PCR **quita** tartamudeo, que la
+/// derivación no representa: solo despeja un incremento no negativo.
+pub const HOMOPOLYMER_PCR_FOLD_MINIMUM: f64 = 1.0;
+
+/// Mayor multiplicador de la PCR admitido en los homopolímeros (DTC-099).
+///
+/// Es el mayor entero que deja la fracción con PCR por debajo de 1:
+/// `37 × 0,027 = 0,999`. **Se deriva de la constante sin PCR del
+/// homopolímero**, `STUTTER_DEFAULT_MOTIF_LENGTH_RATES[0]`: si esa constante
+/// cambiara, este tope hay que recalcularlo. Una prueba lo comprueba.
+pub const HOMOPOLYMER_PCR_FOLD_MAXIMUM: f64 = 37.0;
+
+/// Fallo estable de los parámetros del tartamudeo clonal que declara el
+/// escenario.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClonalStutterError {
     /// Longitud de motivo fuera del tramo calibrado.
     UnknownMotifLength { motif_length: u64 },
     /// Probabilidad fuera de `[0, 1]` o no finita.
     InvalidProbability { motif_length: u64, value: f64 },
+    /// Multiplicador de los homopolímeros no finito o fuera de
+    /// `[HOMOPOLYMER_PCR_FOLD_MINIMUM, HOMOPOLYMER_PCR_FOLD_MAXIMUM]`.
+    InvalidHomopolymerFold { value: f64 },
+    /// Multiplicador declarado a la vez que una sustitución directa de la
+    /// probabilidad por ciclo de los homopolímeros: dos valores para lo mismo.
+    HomopolymerFoldWithSubstitution { value: f64 },
+}
+
+/// Comprueba el dominio del multiplicador de los homopolímeros.
+///
+/// Rechaza en vez de pinzar: un valor por debajo de 1 llegaría a
+/// [`per_cycle_slip_probability`] como una fracción con PCR menor que la sin
+/// PCR, y esa función devolvería cero sin avisar. El tramo cerrado rechaza
+/// también `NaN` y los infinitos: ninguno de los tres está contenido en él.
+pub fn validate_homopolymer_pcr_fold(value: f64) -> Result<f64, ClonalStutterError> {
+    if (HOMOPOLYMER_PCR_FOLD_MINIMUM..=HOMOPOLYMER_PCR_FOLD_MAXIMUM).contains(&value) {
+        Ok(value)
+    } else {
+        Err(ClonalStutterError::InvalidHomopolymerFold { value })
+    }
 }
 
 /// Probabilidad de resbalón **por ciclo** despejada de las dos columnas.
@@ -152,6 +191,12 @@ impl PerCycleSlipSource {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClonalStutterSettings {
     cycles: u32,
+    /// La columna **con PCR efectiva**: la de la calibración, salvo el
+    /// homopolímero cuando el escenario declara su multiplicador. La leen los
+    /// tres sitios que la necesitan —la derivación publicada, la del sorteo y
+    /// el documento publicado— para que no puedan discrepar.
+    with_pcr: [f64; STUTTER_MOTIF_LENGTH_MAX],
+    homopolymer_pcr_fold: Option<f64>,
     per_cycle: [f64; STUTTER_MOTIF_LENGTH_MAX],
     source: [PerCycleSlipSource; STUTTER_MOTIF_LENGTH_MAX],
 }
@@ -166,15 +211,32 @@ impl ClonalStutterSettings {
     /// tartamudea menos en la agrupación y la síntesis. Quien baje la tasa de
     /// base verá bajar la fracción de extremo a extremo, que es lo que ha
     /// pedido; quien quiera mover la parte de PCR tiene la sustitución directa.
+    ///
+    /// # El multiplicador de los homopolímeros (DTC-099)
+    ///
+    /// Con `homopolymer_pcr_fold = Some(k)`, la fracción con PCR del
+    /// homopolímero pasa a ser `k × 0,027`, **la constante** sin PCR, y de ahí
+    /// se despeja como siempre. Sin él se usa la constante con PCR, 0,17,
+    /// **tal cual**: no se calcula `6,30 × 0,027`, que daría 0,1701 y movería
+    /// los bytes publicados. Las longitudes de dos a seis no cambian nunca.
     pub fn new(
         cycles: u32,
         substitutions: &BTreeMap<u64, f64>,
+        homopolymer_pcr_fold: Option<f64>,
     ) -> Result<Self, ClonalStutterError> {
+        let mut with_pcr = STUTTER_WITH_PCR_MOTIF_LENGTH_RATES;
+        if let Some(fold) = homopolymer_pcr_fold {
+            let fold = validate_homopolymer_pcr_fold(fold)?;
+            if substitutions.contains_key(&1) {
+                return Err(ClonalStutterError::HomopolymerFoldWithSubstitution { value: fold });
+            }
+            with_pcr[0] = fold * STUTTER_DEFAULT_MOTIF_LENGTH_RATES[0];
+        }
         let mut per_cycle = [0.0_f64; STUTTER_MOTIF_LENGTH_MAX];
         let mut source = [PerCycleSlipSource::Derived; STUTTER_MOTIF_LENGTH_MAX];
         for (index, slot) in per_cycle.iter_mut().enumerate() {
             *slot = per_cycle_slip_probability(
-                STUTTER_WITH_PCR_MOTIF_LENGTH_RATES[index],
+                with_pcr[index],
                 STUTTER_DEFAULT_MOTIF_LENGTH_RATES[index],
                 cycles,
             );
@@ -198,6 +260,8 @@ impl ClonalStutterSettings {
         }
         Ok(Self {
             cycles,
+            with_pcr,
+            homopolymer_pcr_fold,
             per_cycle,
             source,
         })
@@ -255,7 +319,7 @@ impl ClonalStutterSettings {
         }
         let factor = crate::stutter::tract_length_factor(motif_length, run_units);
         Some(per_cycle_slip_probability(
-            STUTTER_WITH_PCR_MOTIF_LENGTH_RATES[index] * factor,
+            self.with_pcr[index] * factor,
             STUTTER_DEFAULT_MOTIF_LENGTH_RATES[index] * factor,
             self.cycles,
         ))
@@ -269,6 +333,10 @@ impl ClonalStutterSettings {
 /// entrada, el número de ciclos, la fórmula y la marca de tosquedad**: unos
 /// números sin su procedencia no se distinguen de unos inventados, y una tasa
 /// tosca sin su marca se leería como una medida.
+///
+/// El multiplicador de los homopolímeros se publica **solo si se declaró**
+/// (REQ-MAN-97): publicarlo siempre movería los bytes de toda ejecución
+/// amplificada con microsatélites.
 #[must_use]
 pub fn effective_settings_document(settings: &ClonalStutterSettings) -> serde_json::Value {
     let per_cycle_slip = (1..=STUTTER_MOTIF_LENGTH_MAX)
@@ -276,14 +344,14 @@ pub fn effective_settings_document(settings: &ClonalStutterSettings) -> serde_js
             let index = motif_length - 1;
             serde_json::json!({
                 "motif_length_bases": motif_length,
-                "with_pcr_fraction": STUTTER_WITH_PCR_MOTIF_LENGTH_RATES[index],
+                "with_pcr_fraction": settings.with_pcr[index],
                 "without_pcr_fraction": STUTTER_DEFAULT_MOTIF_LENGTH_RATES[index],
                 "probability": settings.per_cycle[index],
                 "source": settings.source[index].as_str(),
             })
         })
         .collect::<Vec<_>>();
-    serde_json::json!({
+    let mut document = serde_json::json!({
         "algorithm": CLONAL_STUTTER_ALGORITHM,
         "cycles": settings.cycles(),
         "formula": CLONAL_STUTTER_FORMULA,
@@ -295,7 +363,11 @@ pub fn effective_settings_document(settings: &ClonalStutterSettings) -> serde_js
             "technology": STUTTER_CALIBRATION_TECHNOLOGY,
         },
         "per_cycle_slip": per_cycle_slip,
-    })
+    });
+    if let (Some(fold), Some(object)) = (settings.homopolymer_pcr_fold, document.as_object_mut()) {
+        object.insert("homopolymer_pcr_fold".to_owned(), serde_json::json!(fold));
+    }
+    document
 }
 
 // ---------------------------------------------------------------------------
@@ -716,11 +788,222 @@ fn draw_cycle_step(
 #[cfg(test)]
 mod tests {
     use super::{
-        ClonalStutterSettings, STUTTER_DEFAULT_MOTIF_LENGTH_RATES,
+        ClonalStutterError, ClonalStutterSettings, HOMOPOLYMER_PCR_FOLD_MAXIMUM,
+        HOMOPOLYMER_PCR_FOLD_MINIMUM, STUTTER_DEFAULT_MOTIF_LENGTH_RATES,
         STUTTER_WITH_PCR_MOTIF_LENGTH_RATES, divergence_weights, effective_settings_document,
-        per_cycle_slip_probability,
+        per_cycle_slip_probability, validate_homopolymer_pcr_fold,
     };
     use std::collections::BTreeMap;
+
+    /// **DTC-099. El multiplicador de los homopolímeros llega a los DOS
+    /// cálculos —el publicado y el del sorteo—, modulado, y no toca nada más.**
+    ///
+    /// Las cifras esperadas están escritas a mano desde las dos fracciones
+    /// literales, no pedidas a otra llamada del módulo:
+    ///
+    /// - en el ancla (15 unidades), `r_pcr = 1 − 0,9325/0,973` y
+    ///   `p = 1 − (1 − r_pcr)^(1/10) ≈ 0,0042425`;
+    /// - en un tracto de 11 unidades, las dos fracciones multiplicadas por
+    ///   `m(11) = 0,11885022274370183` dan `p ≈ 0,00048395`.
+    ///
+    /// **Debe fallar contra** (a) una entrega que trate el multiplicador como
+    /// una sustitución sin modular: en el tracto corto daría 0,0042425, nueve
+    /// veces más; (b) una que actualice la derivación publicada y olvide la del
+    /// sorteo: en el tracto corto daría 0,00171825, la de 0,17; (c) una que
+    /// aplique el multiplicador a todas las longitudes: las filas de 2 a 6 ya
+    /// no serían bit a bit las de sin multiplicador.
+    ///
+    /// **En el ancla el factor de longitud vale 1** y la variante (a) no se
+    /// distingue de la buena; por eso hace falta el tracto corto, y por eso se
+    /// comprueba que `m(11)` es de verdad el literal y no 1.
+    #[test]
+    fn a_homopolymer_fold_reaches_both_derivations_modulated_and_nothing_else() {
+        let none =
+            ClonalStutterSettings::new(10, &BTreeMap::new(), None).expect("sin multiplicador");
+        let fold = ClonalStutterSettings::new(10, &BTreeMap::new(), Some(2.5)).expect("con 2,5");
+        assert_eq!(
+            0.027_f64 * 2.5,
+            0.0675,
+            "la fracción con PCR resultante es exacta"
+        );
+        let anchor = fold.probability_for_motif_length(1).expect("homopolímero");
+        assert!(
+            (anchor - 0.004_242_5).abs() < 1e-7,
+            "probabilidad publicada del homopolímero con 2,5: {anchor}"
+        );
+        assert_eq!(
+            fold.probability_for(1, 15),
+            Some(anchor),
+            "en el ancla el sorteo usa la publicada"
+        );
+        let factor = crate::stutter::tract_length_factor(1, 11);
+        assert_eq!(
+            factor, 0.118_850_222_743_701_83,
+            "el fixture del tracto corto"
+        );
+        let short = fold.probability_for(1, 11).expect("tracto corto");
+        assert!(
+            (short - 0.000_483_95).abs() < 1e-8,
+            "probabilidad del sorteo en 11 unidades con 2,5: {short}"
+        );
+        for motif_length in 2..=6_u64 {
+            assert_eq!(
+                fold.probability_for_motif_length(motif_length)
+                    .map(f64::to_bits),
+                none.probability_for_motif_length(motif_length)
+                    .map(f64::to_bits),
+                "la longitud de motivo {motif_length} no puede moverse"
+            );
+            for units in [3_u64, 8, 17] {
+                assert_eq!(
+                    fold.probability_for(motif_length, units).map(f64::to_bits),
+                    none.probability_for(motif_length, units).map(f64::to_bits),
+                    "la longitud de motivo {motif_length} con {units} unidades no puede moverse"
+                );
+            }
+        }
+        // Control positivo: el homopolímero sí se mueve, en los dos caminos.
+        assert!(anchor < none.probability_for_motif_length(1).expect("0,0158") / 3.0);
+        assert!(short < none.probability_for(1, 11).expect("sin multiplicador") / 3.0);
+    }
+
+    /// **Con un multiplicador cuyo producto tiene muchos decimales, la
+    /// fracción publicada es el producto en coma flotante, bit a bit.**
+    ///
+    /// `k = 2,82` es la separación que la figura de Fungtammasan y col. da a
+    /// 15 pb, el ancla. `2,82 × 0,027 = 0,07614`, con cinco decimales: **debe
+    /// fallar contra** una entrega que redondee la fracción con PCR —a cuatro
+    /// decimales daría 0,0761—, que con 2,5, 1 o 37 no se distingue porque sus
+    /// productos son exactos con pocos decimales. La probabilidad esperada está
+    /// calculada a mano: `r_pcr = 1 − (1 − 0,07614)/0,973 ≈ 0,0505036` y
+    /// `p = 1 − (1 − r_pcr)^(1/10) ≈ 0,00516895`.
+    #[test]
+    fn a_fold_with_a_long_product_publishes_the_exact_product() {
+        let settings =
+            ClonalStutterSettings::new(10, &BTreeMap::new(), Some(2.82)).expect("con 2,82");
+        let document = effective_settings_document(&settings);
+        let published = document["per_cycle_slip"][0]["with_pcr_fraction"]
+            .as_f64()
+            .expect("fracción");
+        assert_eq!(published.to_bits(), (2.82_f64 * 0.027).to_bits());
+        assert_ne!(published, 0.0761, "la variante redondeada es distinguible");
+        let probability = settings
+            .probability_for_motif_length(1)
+            .expect("homopolímero");
+        assert!(
+            (probability - 0.005_168_95).abs() < 1e-8,
+            "probabilidad publicada con 2,82: {probability}"
+        );
+        assert_eq!(document["per_cycle_slip"][0]["probability"], probability);
+        assert_eq!(document["homopolymer_pcr_fold"], 2.82);
+    }
+
+    /// **Sin multiplicador se usa la constante 0,17 tal cual, no 6,30 × 0,027.**
+    ///
+    /// Debe fallar contra una entrega que implemente la ausencia como el
+    /// multiplicador de Gymrek redondeado: `6,30 × 0,027 = 0,1701`, que mueve la
+    /// probabilidad publicada y con ella los bytes.
+    #[test]
+    fn without_a_fold_the_with_pcr_constant_is_used_verbatim() {
+        let none =
+            ClonalStutterSettings::new(10, &BTreeMap::new(), None).expect("sin multiplicador");
+        let document = effective_settings_document(&none);
+        assert_eq!(document["per_cycle_slip"][0]["with_pcr_fraction"], 0.17);
+        assert_ne!(
+            6.30_f64 * 0.027,
+            0.17,
+            "la variante defectuosa es distinguible"
+        );
+        assert_eq!(
+            none.probability_for_motif_length(1).map(f64::to_bits),
+            Some(per_cycle_slip_probability(0.17, 0.027, 10).to_bits())
+        );
+        assert!(
+            document.get("homopolymer_pcr_fold").is_none(),
+            "sin declarar, el campo no se publica"
+        );
+        // Control positivo: declarado, sí se publica.
+        let fold = ClonalStutterSettings::new(10, &BTreeMap::new(), Some(2.5)).expect("con 2,5");
+        let document = effective_settings_document(&fold);
+        assert_eq!(document["homopolymer_pcr_fold"], 2.5);
+        assert_eq!(document["per_cycle_slip"][0]["with_pcr_fraction"], 0.0675);
+        assert_eq!(document["per_cycle_slip"][0]["without_pcr_fraction"], 0.027);
+        assert_eq!(document["per_cycle_slip"][0]["source"], "derived");
+        assert_eq!(document["per_cycle_slip"][1]["with_pcr_fraction"], 0.038);
+    }
+
+    /// **El dominio es `[1, 37]`, cerrado por los dos lados, y finito.**
+    ///
+    /// Debe fallar contra una cota inferior estricta (rechazaría 1), contra
+    /// una superior ausente (admitiría 37,01) y contra una comprobación escrita
+    /// con comparaciones negadas, `!(k < 1 || k > 37)`, que admitiría `NaN`.
+    #[test]
+    fn the_fold_domain_is_closed_between_one_and_thirty_seven() {
+        for admitted in [1.0, 2.5, 37.0] {
+            assert_eq!(validate_homopolymer_pcr_fold(admitted), Ok(admitted));
+        }
+        for rejected in [0.99, 0.0, -2.5, 37.01, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                validate_homopolymer_pcr_fold(rejected),
+                Err(ClonalStutterError::InvalidHomopolymerFold { value: rejected }),
+                "{rejected} tiene que rechazarse"
+            );
+        }
+        assert!(matches!(
+            validate_homopolymer_pcr_fold(f64::NAN),
+            Err(ClonalStutterError::InvalidHomopolymerFold { .. })
+        ));
+        // Y el constructor lo aplica: no se puede saltar la guarda.
+        assert!(ClonalStutterSettings::new(10, &BTreeMap::new(), Some(37.5)).is_err());
+    }
+
+    /// **El tope 37 se deriva de la constante sin PCR del homopolímero.**
+    ///
+    /// Es el mayor entero `k` con `k × 0,027 < 1`. Si la constante cambiara,
+    /// esta prueba obliga a recalcular el tope en vez de dejarlo desfasado.
+    #[test]
+    fn the_fold_maximum_is_the_largest_integer_keeping_the_fraction_below_one() {
+        let without = STUTTER_DEFAULT_MOTIF_LENGTH_RATES[0];
+        assert!(HOMOPOLYMER_PCR_FOLD_MAXIMUM * without < 1.0);
+        assert!((HOMOPOLYMER_PCR_FOLD_MAXIMUM + 1.0) * without >= 1.0);
+        assert_eq!(HOMOPOLYMER_PCR_FOLD_MAXIMUM.fract(), 0.0);
+        assert_eq!(HOMOPOLYMER_PCR_FOLD_MINIMUM, 1.0);
+    }
+
+    /// **Con multiplicador 1 la PCR no añade tartamudeo al homopolímero.**
+    ///
+    /// La probabilidad vale exactamente cero en los dos caminos, y por tanto el
+    /// sorteo no consume (`bernoulli-v1` con cero no lee el generador).
+    #[test]
+    fn a_unit_fold_gives_a_zero_homopolymer_probability() {
+        let unit = ClonalStutterSettings::new(10, &BTreeMap::new(), Some(1.0)).expect("con 1");
+        assert_eq!(unit.probability_for_motif_length(1), Some(0.0));
+        assert_eq!(unit.probability_for(1, 11), Some(0.0));
+        // Control positivo: el dinucleótido sigue tartamudeando.
+        assert!(unit.probability_for_motif_length(2).expect("dinucleótido") > 0.0);
+    }
+
+    /// **El multiplicador y la sustitución directa del homopolímero se
+    /// excluyen; con la de otra longitud conviven.**
+    ///
+    /// Debe fallar contra una comprobación que mire cualquier sustitución y no
+    /// solo la de longitud 1.
+    #[test]
+    fn the_fold_excludes_only_a_homopolymer_substitution() {
+        let mut homopolymer = BTreeMap::new();
+        homopolymer.insert(1_u64, 0.01);
+        assert_eq!(
+            ClonalStutterSettings::new(10, &homopolymer, Some(2.5)),
+            Err(ClonalStutterError::HomopolymerFoldWithSubstitution { value: 2.5 })
+        );
+        let mut dinucleotide = BTreeMap::new();
+        dinucleotide.insert(2_u64, 0.01);
+        let settings = ClonalStutterSettings::new(10, &dinucleotide, Some(2.5)).expect("conviven");
+        assert_eq!(settings.probability_for_motif_length(2), Some(0.01));
+        let document = effective_settings_document(&settings);
+        assert_eq!(document["per_cycle_slip"][1]["source"], "declared");
+        assert_eq!(document["per_cycle_slip"][0]["with_pcr_fraction"], 0.0675);
+    }
 
     /// **La composición sigue cerrando EXACTAMENTE a cualquier longitud de
     /// tracto, no solo en la de referencia.**
@@ -747,7 +1030,8 @@ mod tests {
     #[test]
     fn the_composition_closes_at_every_tract_length_not_only_at_the_reference() {
         let cycles = 10_u32;
-        let settings = ClonalStutterSettings::new(cycles, &BTreeMap::new()).expect("parámetros");
+        let settings =
+            ClonalStutterSettings::new(cycles, &BTreeMap::new(), None).expect("parámetros");
         let mut checked = 0_u32;
         let mut moved = 0_u32;
         let mut worst = 0.0_f64;
@@ -818,7 +1102,7 @@ mod tests {
     fn a_declared_per_cycle_probability_prevails_and_is_not_modulated() {
         let mut declared = BTreeMap::new();
         declared.insert(2_u64, 0.5);
-        let settings = ClonalStutterSettings::new(10, &declared).expect("parámetros");
+        let settings = ClonalStutterSettings::new(10, &declared, None).expect("parámetros");
         for units in [1_u64, 5, 13, 17, 40] {
             assert_eq!(
                 settings.probability_for(2, units).expect("probabilidad"),
@@ -923,14 +1207,14 @@ mod tests {
     fn a_declared_substitution_wins_and_is_published_as_the_users() {
         let mut substitutions = BTreeMap::new();
         substitutions.insert(1_u64, 0.5_f64);
-        let settings = ClonalStutterSettings::new(10, &substitutions).expect("parámetros");
+        let settings = ClonalStutterSettings::new(10, &substitutions, None).expect("parámetros");
         assert_eq!(settings.probability_for_motif_length(1), Some(0.5));
         let document = effective_settings_document(&settings);
         let entries = document["per_cycle_slip"].as_array().expect("tabla");
         assert_eq!(entries[0]["source"], "declared");
         assert_eq!(entries[1]["source"], "derived");
         // Y la derivada no se ha movido: sustituir una no toca las demás.
-        let derived = ClonalStutterSettings::new(10, &BTreeMap::new()).expect("parámetros");
+        let derived = ClonalStutterSettings::new(10, &BTreeMap::new(), None).expect("parámetros");
         assert_eq!(
             settings.probability_for_motif_length(2),
             derived.probability_for_motif_length(2)

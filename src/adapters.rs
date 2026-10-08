@@ -1196,7 +1196,7 @@ fn parse_pcr_stutter(
     let Some(table) = optional_table(admitted, pcr, "stutter")? else {
         return Ok(None);
     };
-    check_unknown(admitted, table, &["per_cycle_slip"])?;
+    check_unknown(admitted, table, &["per_cycle_slip", "homopolymer_pcr_fold"])?;
     let per_cycle_slip = optional_array(admitted, table, "per_cycle_slip")?
         .unwrap_or_default()
         .iter()
@@ -1216,7 +1216,10 @@ fn parse_pcr_stutter(
             })
         })
         .collect::<Result<Vec<_>, Diagnostic>>()?;
-    Ok(Some(DeclaredPcrStutter { per_cycle_slip }))
+    Ok(Some(DeclaredPcrStutter {
+        per_cycle_slip,
+        homopolymer_pcr_fold: optional_number(admitted, table, "homopolymer_pcr_fold")?,
+    }))
 }
 
 /// Lee `[technical_event.stutter]`.

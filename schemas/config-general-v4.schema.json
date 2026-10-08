@@ -1366,15 +1366,21 @@
             "stutter": {
               "type": "object",
               "additionalProperties": false,
-              "description": "Tartamudeo clonal heredable por linaje. Solo tiene efecto con loci de repetición declarados. La tabla es OPCIONAL: sin ella las probabilidades por ciclo se despejan de las dos columnas de la calibración y del número de ciclos, que es lo normal.",
+              "description": "Tartamudeo clonal heredable por linaje. Solo tiene efecto con loci de repetición declarados. La tabla es OPCIONAL: sin ella las probabilidades por ciclo se despejan de las dos columnas de la calibración y del número de ciclos, que es lo normal. Admite el multiplicador de la PCR en los homopolímeros y la sustitución directa de la probabilidad por ciclo.",
               "properties": {
+                "homopolymer_pcr_fold": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 37,
+                  "description": "Cuántas veces multiplica la PCR la fracción de lecturas con tartamudeo en los homopolímeros (motivo de 1 pb), DTC-099. Se aplica sobre la fracción SIN PCR de la calibración, la constante 0,027, que no cambia: la fracción con PCR de los homopolímeros pasa a ser multiplicador × 0,027 y de ella se despeja la probabilidad por ciclo como siempre. Actúa sobre esa constante, NO sobre la tasa de base que declare technical_event.stutter.motif_length_rates: con una tasa de base de 0,05 y multiplicador 2,5 la fracción con PCR no es 0,125, sino 1 − (1 − 0,05)(1 − 0,0416) ≈ 0,0895. Ausente rige la calibración por omisión, Gymrek (2016), con 0,17 tal cual y lo publicado idéntico byte a byte; escribir 6.30 NO equivale a omitirlo (daría 0,1701). Fungtammasan y col. (2015): 2.5. Entre 1 y 37, ambos incluidos: 1 significa que la PCR no añade tartamudeo a los homopolímeros; 37 es el mayor entero que deja la fracción con PCR por debajo de 1. No se admite junto a una sustitución directa de la longitud de motivo 1 en per_cycle_slip. Solo tiene efecto con loci de repetición declarados."
+                },
                 "per_cycle_slip": {
                   "type": "array",
                   "minItems": 1,
                   "maxItems": 6,
                   "uniqueItems": true,
                   "x-gps-control": "table",
-                  "description": "Sustitución directa de la probabilidad de resbalón de UN ciclo, no de la fracción de extremo a extremo: son dos magnitudes distintas y confundirlas cambia el resultado en un orden de magnitud. Con diez ciclos, la derivada del homopolímero vale 0,0158 y su fracción de extremo a extremo 0,17.",
+                  "description": "Sustitución directa de la probabilidad de resbalón de UN ciclo, no de la fracción de extremo a extremo: son dos magnitudes distintas y confundirlas cambia el resultado en un orden de magnitud. Con diez ciclos y la calibración por omisión, la derivada del homopolímero vale 0,0158 y su fracción de extremo a extremo 0,17.",
                   "items": {
                     "type": "object",
                     "additionalProperties": false,

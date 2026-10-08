@@ -761,3 +761,100 @@ fn more_efficiency_classes_than_the_contract_allows_are_rejected() {
         accepted.result
     );
 }
+
+/// **DTC-099. El multiplicador de los homopolímeros se rechaza fuera de
+/// `[1, 37]` y si no es finito, con `GPS-CONF-008` y el campo nombrado; los
+/// dos extremos se admiten.**
+///
+/// **Debe fallar contra** una comprobación sin cota superior (admitiría
+/// 37,01), con la inferior estricta (rechazaría 1), sin mirar los no finitos
+/// (`nan` e `inf` son literales TOML legítimos), o que solo compruebe el
+/// dominio cuando hay loci: los rechazos se piden **también sin loci**.
+#[test]
+fn a_homopolymer_fold_outside_its_domain_is_rejected_naming_it() {
+    for literal in ["0.99", "37.01", "nan", "inf", "-inf", "0"] {
+        for locus in ["STR-1", ""] {
+            let attempt = validate(
+                &amplified(&format!(
+                    "{}\n[technical_event.pcr.stutter]\nhomopolymer_pcr_fold = {literal}\n",
+                    stutter_block()
+                )),
+                locus,
+            );
+            assert_rejects(
+                &attempt,
+                "technical_event.pcr.stutter.homopolymer_pcr_fold",
+                "debe ser finito y estar entre 1 y 37",
+            );
+        }
+    }
+    // Control positivo: los dos extremos y un valor intermedio se admiten.
+    for literal in ["1", "1.0", "2.5", "37"] {
+        let attempt = validate(
+            &amplified(&format!(
+                "{}\n[technical_event.pcr.stutter]\nhomopolymer_pcr_fold = {literal}\n",
+                stutter_block()
+            )),
+            "STR-1",
+        );
+        assert!(
+            attempt.accepted(),
+            "el multiplicador {literal} está en el dominio: {:?}",
+            attempt.result
+        );
+    }
+}
+
+/// **El multiplicador no se admite junto a una sustitución directa del
+/// homopolímero, y sí junto a la de otra longitud de motivo.**
+///
+/// Debe fallar contra una comprobación que compare con cualquier fila de la
+/// tabla de sustituciones, que rechazaría también la de longitud 2.
+#[test]
+fn a_homopolymer_fold_with_a_homopolymer_substitution_is_rejected() {
+    for locus in ["STR-1", ""] {
+        let attempt = validate(
+            &amplified(&format!(
+                "{}\n[technical_event.pcr.stutter]\nhomopolymer_pcr_fold = 2.5\n\
+                 \n[[technical_event.pcr.stutter.per_cycle_slip]]\nmotif_length_bases = 1\nprobability = 0.01\n",
+                stutter_block()
+            )),
+            locus,
+        );
+        assert_rejects(
+            &attempt,
+            "technical_event.pcr.stutter.homopolymer_pcr_fold,technical_event.pcr.stutter.per_cycle_slip.motif_length_bases",
+            "serían dos valores para la misma probabilidad",
+        );
+    }
+    // Control positivo: con la sustitución de otra longitud conviven.
+    let accepted = validate(
+        &amplified(&format!(
+            "{}\n[technical_event.pcr.stutter]\nhomopolymer_pcr_fold = 2.5\n\
+             \n[[technical_event.pcr.stutter.per_cycle_slip]]\nmotif_length_bases = 2\nprobability = 0.01\n",
+            stutter_block()
+        )),
+        "STR-1",
+    );
+    assert!(
+        accepted.accepted(),
+        "el multiplicador y la sustitución del dinucleótido conviven: {:?}",
+        accepted.result
+    );
+}
+
+/// **Una preparación sin PCR no puede declarar el multiplicador**, de modo que
+/// ninguna ejecución sin PCR puede verse afectada por él: la tabla de
+/// amplificación entera se rechaza con `pcr_free` (REQ-CONF-136).
+#[test]
+fn a_pcr_free_preparation_cannot_declare_the_homopolymer_fold() {
+    let attempt = validate(
+        &format!(
+            "{}\n[technical_event.pcr]\nduplicate_fraction = 0.05\ncycles = 10\nefficiency = 0.9\n\
+             \n[technical_event.pcr.stutter]\nhomopolymer_pcr_fold = 2.5\n",
+            stutter_block()
+        ),
+        "STR-1",
+    );
+    assert_rejects(&attempt, "technical_event.pcr", "solo se admite con");
+}

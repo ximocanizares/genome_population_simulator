@@ -148,6 +148,11 @@ que esa diferencia «probablemente se debe a ruido derivado de la escasa cantida
 de loci analizados». La probabilidad sin PCR de 0,0010 se propone igualmente,
 pero marcada como la menos fiable de la tabla.
 
+**Configurable desde el 06/10/2026 (DTC-099).** El cociente del homopolímero,
+6,30×, puede sustituirse por el del escenario sobre la misma columna sin PCR.
+La tabla de arriba es la calibración por omisión, y los porcentajes de
+subestimación valen para ella.
+
 ---
 
 ## 4. Tamaño y dirección del error
