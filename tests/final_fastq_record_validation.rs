@@ -820,6 +820,18 @@ fn pair_and_library_ids_must_have_the_derived_shape() {
             R1_HEADER.replace(PAIR_A, "TP_abcdefghijklmnopqrstuvwxyz"),
             "FASTQ final pair ID is not TP_ followed by 26 canonical Base32 symbols",
         ),
+        // Veintiséis símbolos, pero uno fuera del alfabeto Base32 (que no tiene
+        // `0`, `1`, `8` ni `9`). Es un identificador genérico válido: sin la
+        // comprobación del alfabeto, solo la longitud lo rechazaría, y esta
+        // tiene el tamaño exacto.
+        (
+            R1_HEADER.replace(LIBRARY, "LIB_ABCDEFGHIJKLMNOPQRSTUVWXY1"),
+            "FASTQ final library ID is not LIB_ followed by 26 Base32 symbols",
+        ),
+        (
+            R1_HEADER.replace(LIBRARY, "LIB_ABCDEFGHIJKLMNOPQRSTUVWXY8"),
+            "FASTQ final library ID is not LIB_ followed by 26 Base32 symbols",
+        ),
         (
             R1_HEADER.replace(LIBRARY, "XXX_ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
             "FASTQ final library ID is not LIB_ followed by 26 Base32 symbols",
@@ -1120,4 +1132,214 @@ fn the_guard_walks_every_block_and_a_valid_multi_block_mate_is_accepted() {
     let corrupt = declare_block_isize(&valid, 2, 70_000);
     assert_mate_rejected_for_its_block(&corrupt, "tercer bloque");
     fs::remove_file(&valid).ok();
+}
+
+/// DT-001, tanda 2. Un mate más corto que el marcador de fin BGZF (28 bytes)
+/// se rechaza como «sin marcador» antes de intentar buscarlo por el final. El
+/// límite está **exacto**: 27 bytes (el marcador sin su último byte) se
+/// rechaza, y 28 bytes —el marcador solo, un BGZF vacío— se acepta con cero
+/// registros. Sin el segundo caso, cambiar `<` por `<=` pasaría la batería.
+#[test]
+fn a_mate_shorter_than_the_eof_marker_is_missing_it_and_the_limit_is_exact() {
+    let empty = bgzf_file(b"");
+    let marker = fs::read(&empty).expect("BGZF vacío");
+    assert_eq!(marker.len(), 28, "el BGZF vacío es exactamente el marcador");
+    for (name, bytes) in [
+        ("empty file", Vec::new()),
+        ("short file", b"short".to_vec()),
+        ("marker minus one byte", marker[..27].to_vec()),
+    ] {
+        let path = temporary("short.gz");
+        fs::write(&path, &bytes).expect("fixture");
+        let result = validate_final_fastq_mate(&path, TechnicalMate::R1, &identity());
+        fs::remove_file(&path).ok();
+        match result {
+            Err(FastqValidationError::Structural { detail, .. }) => assert_eq!(
+                detail, "FASTQ BGZF stream is missing its canonical EOF marker",
+                "{name}"
+            ),
+            other => panic!("{name}: expected the missing-marker rejection, got {other:?}"),
+        }
+    }
+    let tally =
+        validate_final_fastq_mate(&empty, TechnicalMate::R1, &identity()).expect("empty BGZF");
+    fs::remove_file(&empty).ok();
+    assert_eq!((tally.records, tally.bases, tally.n_bases), (0, 0, 0));
+}
+
+/// DT-001, tanda 2: intento ejecutado de alcanzar el lector de cabeceras del
+/// juez de la pareja (`read_final_header`) con un mate corrupto. **Esta prueba
+/// no discrimina** esas cuatro comprobaciones (registro truncado, cabecera no
+/// UTF-8, sin salto de línea y sin `@`): sus textos son idénticos a los del
+/// juez de cada mate, de modo que el motivo no dice quién rechazó. Lo que sí
+/// demuestra, junto con el barrido de cobertura, es que ninguna corrupción de
+/// un mate llega a ese lector: la rechaza antes `validate_final_fastq_mate`,
+/// y por eso las cuatro quedan anotadas como inalcanzables en el código.
+#[test]
+fn the_pair_judge_never_reaches_its_own_header_reader_with_a_corrupt_mate() {
+    let mut truncated = valid_record();
+    truncated.extend_from_slice(R1_HEADER.as_bytes());
+    truncated.extend_from_slice(b"ACGT\n");
+    let mut not_utf8 = b"@GPS:reads-\xff".to_vec();
+    not_utf8.extend_from_slice(&valid_record()[12..]);
+    let without_at = record(&R1_HEADER[1..], b"ACGT", b"+", b"IIII");
+    for (name, content, detail) in [
+        (
+            "truncated record",
+            truncated,
+            "FASTQ final has a truncated record",
+        ),
+        (
+            "header not UTF-8",
+            not_utf8,
+            "FASTQ final header is not UTF-8",
+        ),
+        ("header without @", without_at, "FASTQ final header lacks @"),
+    ] {
+        let pair = Pair::new(&content, &record(R2_HEADER, b"ACNT", b"+", b"II!~"));
+        match pair.judge() {
+            Err(FastqValidationError::Structural { detail: found, .. }) => {
+                assert_eq!(found, detail, "{name}");
+            }
+            other => panic!("{name}: expected a structural rejection, got {other:?}"),
+        }
+    }
+}
+
+/// DT-001, tanda 2. Cada componente del UDI mide exactamente ocho bases: uno de
+/// siete, uno de nueve y uno vacío se rechazan, en el primer y en el segundo
+/// componente. Sin la comprobación exacta de la longitud (`==` y no `>=`), uno
+/// de nueve bases pasaría.
+#[test]
+fn every_udi_component_must_have_exactly_eight_bases() {
+    const DETAIL: &str = "FASTQ final UDI is invalid";
+    for udi in [
+        "ACGTACG+TGCATGCA",
+        "ACGTACGTA+TGCATGCA",
+        "+TGCATGCA",
+        "ACGTACGT+TGCATGC",
+        "ACGTACGT+TGCATGCAT",
+        "ACGTACGT+",
+    ] {
+        let header = R1_HEADER.replace("ACGTACGT+TGCATGCA", udi);
+        assert_rejected(&record(&header, b"ACGT", b"+", b"IIII"), DETAIL);
+    }
+}
+
+/// DT-001, tanda 2. La unicidad de las parejas se exige solo en R1: un mate R2
+/// con una pareja repetida lo acepta el juez de un mate (su comparación con R1
+/// corresponde al de la pareja), y el de la pareja lo rechaza porque sus
+/// cabeceras ya no coinciden con las de R1. Fija esa asimetría: si el juez de
+/// un mate también exigiera la unicidad en R2, esta prueba fallaría.
+#[test]
+fn pair_uniqueness_is_required_in_r1_only_and_the_pair_judge_still_catches_r2() {
+    let mut repeated = record(R2_HEADER, b"ACGT", b"+", b"IIII");
+    repeated.extend_from_slice(&record(R2_HEADER, b"TTGC", b"+", b"IIII"));
+    let path = bgzf_file(&repeated);
+    let tally = validate_final_fastq_mate(&path, TechnicalMate::R2, &identity())
+        .expect("R2 with a repeated pair is not judged by the single-mate judge");
+    fs::remove_file(&path).ok();
+    assert_eq!(tally.records, 2);
+
+    let mut r1 = record(R1_HEADER, b"ACGT", b"+", b"IIII");
+    r1.extend_from_slice(&record(
+        &R1_HEADER.replace(PAIR_A, PAIR_B),
+        b"ACGT",
+        b"+",
+        b"IIII",
+    ));
+    let r1_path = bgzf_file(&r1);
+    let r2_path = bgzf_file(&repeated);
+    let counts = FinalFastqCounts {
+        pair_count: 2,
+        base_count: 16,
+        n_base_count: 0,
+    };
+    let result = validate_final_paired_fastq(
+        &r1_path,
+        &artifact_of(&r1_path, "outputs/fastq/reads-main/sample-A_R1.fastq.gz"),
+        &r2_path,
+        &artifact_of(&r2_path, "outputs/fastq/reads-main/sample-A_R2.fastq.gz"),
+        &identity(),
+        &counts,
+    );
+    fs::remove_file(&r1_path).ok();
+    fs::remove_file(&r2_path).ok();
+    match result {
+        Err(FastqValidationError::Structural { detail, .. }) => assert_eq!(
+            detail,
+            "FASTQ final mates are orphaned or have different pair IDs"
+        ),
+        other => panic!("expected the pair-ID rejection, got {other:?}"),
+    }
+}
+
+/// El ordinal que informa el rechazo de una pareja repetida es el número de
+/// registros del fichero (tras ordenar, la posición del repetido se pierde y
+/// así queda dicho). Sin esta aserción, informar siempre 0 pasaba la batería.
+#[test]
+fn the_repeated_pair_rejection_reports_the_record_count_as_its_ordinal() {
+    let mut content = valid_record();
+    content.extend_from_slice(&record(
+        &R1_HEADER.replace(PAIR_A, PAIR_B),
+        b"ACGT",
+        b"+",
+        b"IIII",
+    ));
+    content.extend_from_slice(&valid_record());
+    let path = bgzf_file(&content);
+    let result = validate_final_fastq_mate(&path, TechnicalMate::R1, &identity());
+    fs::remove_file(&path).ok();
+    match result {
+        Err(FastqValidationError::Structural {
+            record_ordinal,
+            detail,
+            ..
+        }) => {
+            assert_eq!(
+                detail,
+                "FASTQ final repeats a technical pair ID within the file"
+            );
+            assert_eq!(record_ordinal, 3);
+        }
+        other => panic!("expected the repeated-pair rejection, got {other:?}"),
+    }
+}
+
+/// DT-001, tanda 2. El juez de la pareja comprueba el artefacto de **cada**
+/// mate: el de R1 también, no solo el de R2. Un mismo ayudante sirve a los dos
+/// y la puerta de cobertura lo cuenta como una sola guarda; sin este caso,
+/// borrar la llamada de R1 pasaba la batería. El rechazo cita el fichero del
+/// mate cuyo artefacto no coincide.
+#[test]
+fn the_artifact_of_each_mate_is_judged_and_the_rejection_names_that_mate() {
+    for (mate, field) in [("R1", "sha256"), ("R1", "size_bytes"), ("R2", "sha256")] {
+        let mut pair = canonical_pair();
+        let artifact = if mate == "R1" {
+            &mut pair.r1_artifact
+        } else {
+            &mut pair.r2_artifact
+        };
+        match field {
+            "size_bytes" => artifact.size_bytes += 1,
+            _ => artifact.digest.replace_range(
+                ..1,
+                if artifact.digest.starts_with('0') {
+                    "1"
+                } else {
+                    "0"
+                },
+            ),
+        }
+        let expected_path = if mate == "R1" { &pair.r1 } else { &pair.r2 };
+        match pair.judge() {
+            Err(FastqValidationError::Artifact {
+                path, field: found, ..
+            }) => {
+                assert_eq!(found, field, "{mate}");
+                assert_eq!(path, expected_path.display().to_string(), "{mate}");
+            }
+            other => panic!("{mate} {field}: expected an artifact rejection, got {other:?}"),
+        }
+    }
 }

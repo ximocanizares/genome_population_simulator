@@ -34,7 +34,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026) |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | **Cerrada (06/10/2026)**, borradas; los dos huecos que dejaban, cubiertos con pruebas nuevas de la vía de parejas |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | **Cerrada (06/10/2026)** |
@@ -487,6 +487,8 @@ SHA antes, mutada y restaurada. Una línea por tanda:
 | 1 | 08/10/2026 | `src/technical_profile.rs` | 15 / 14 | 15 / **5** |
 | 1 | 08/10/2026 | `src/reference_fasta.rs` | 41 / 30 | 41 / **7** |
 | 1 | 08/10/2026 | `src/reference_reduction_io.rs` | 55 / 45 | 55 / **12** |
+| 2 | 08/10/2026 | `src/fastq_validation.rs` | 84 / 36 | 84 / **26** |
+| 2 | 08/10/2026 | `src/f5_publication.rs` | 53 / 36 | 53 / **10** |
 
 **Tanda 1 (08/10/2026): 65 sin disparar menos (de 89 a 24; ninguna guarda
 borrada, el número de comprobaciones no cambia).** Las 24 que quedan (5 + 7 + 12) están todas anotadas en el código
@@ -560,6 +562,84 @@ PCR; el resto de literales no tienen caso individual).
 discriminación; las pruebas de esta tanda sí están mutadas, y las anteriores a
 ella no por ello lo están. Quedan los otros once jueces (la siguiente tanda son
 los medianos).
+
+**Tanda 2 (08/10/2026): 36 sin disparar menos (de 72 a 36; ninguna guarda
+borrada, el número de comprobaciones no cambia).** Las 36 que quedan (26 + 10)
+están todas anotadas en el código como inalcanzables, cada una con su porqué:
+
+- *Juez del FASTQ final (36 → 26).* Cubiertas con prueba y motivo exacto: el
+  resumen de cobertura (objetivo no finito o negativo, denominador cero, más `N`
+  que bases y desbordamiento de la suma, cada mitad con su caso), el fichero
+  más corto que el marcador de fin BGZF con su límite exacto (27 bytes se
+  rechaza, 28 se acepta), y las seis negativas del replay cuando las entradas no
+  son coherentes entre sí (plan de otra referencia, individuo de otra
+  referencia, secuencias ausentes, individuo sin biblioteca, ninguna secuencia
+  de la longitud de una lectura y media de Poisson no finita). Las 26 que quedan:
+  dieciséis desbordamientos de contadores, sumas y conversiones que no fallan en
+  64 bits (registros, ordinal, longitud de línea, cabecera, bases, `N`, tamaño
+  acumulado, marcador de fin, longitudes de las secuencias y de las copias, y
+  las sumas parciales y el inicio de la reproducción); las cuatro comprobaciones
+  del lector de cabeceras del juez de la pareja (registro truncado, no UTF-8,
+  sin salto de línea y sin `@`), que ya rechazó antes el juez de cada mate sobre
+  el mismo fichero; «la cabecera no termina en salto de línea» y «la cabecera no
+  tiene identidad»; la base ajena a `ACGTN` del replay, que la igualdad con la
+  secuencia reproducida rechaza antes; la identidad del fichero que el juez de la
+  pareja acaba de abrir; el candidato ausente de la reproducción, que implica la
+  suma de longitudes; y la biblioteca ausente de `validate_declared_artifact`,
+  que ya rechazó `ReplayedWgsPlan::new`.
+- *Verificación del paquete F5 (36 → 10).* Cubiertas con prueba y motivo exacto
+  (en el propio módulo, con un paquete de éxito y otro de fallo sintéticos
+  alterados en un solo término, y una prueba de integración): cada término de la
+  raíz, de la lista de enlaces, de la verdad, de los resúmenes del recuento, de las
+  claves del recuento haplotípico, de la cota de bases elegibles, del efectivo, de
+  las subpoblaciones, del fallo y de su diagnóstico; las rutas publicables; el
+  fichero con nombre no UTF-8 y el directorio ilegible del inventario; el
+  manifiesto inexistente; y que los límites sellados coincidan con los
+  del escenario. Las 10 que quedan: `general_path` sin padre ni nombre (dos), la
+  identidad del metadata del perfil, las cuatro auditorías de normalización
+  (número y orden), el índice de bloque fuera de `u32`, el recuento desigual
+  que el oráculo nunca devuelve, y tres fallos de E/S del recorrido del
+  inventario (entrada del iterador, tipo del fichero y prefijo de la ruta).
+
+**Pendientes: ninguno.** Ninguna guarda exigía cambiar código de producción.
+
+**Defectos encontrados: ninguno.** Ninguna prueba reveló una guarda mal escrita.
+
+**Verificación por mutación.** Sobre una copia fuera del repositorio se mutó
+cada guarda cubierta, **cada mitad de sus disyunciones y cada motivo** (la
+lección de la revisión de la tanda 1), con huella SHA antes, mutada y
+restaurada: 117 ejecuciones en el paquete F5 y 113 en el FASTQ (una no compiló
+y se rehízo). Además se mutó una muestra de guardas que ya estaban cubiertas por
+pruebas que solo pedían error o que nadie ejercitaba como llamante. En la primera
+ronda sobrevivieron 12 mutaciones reales del paquete F5 —la mitad del enlace por el
+SHA-256, el tipo del fichero del inventario, las cinco comprobaciones de
+identidad de la verdad y las tres de cada enlace por posición, el tamaño de la
+verdad, un motivo y el motivo de la discrepancia entre diagnóstico y
+manifiesto— y 5 del FASTQ —el alfabeto Base32 y la longitud exacta del UDI, la
+unicidad solo en R1, el ordinal de la pareja repetida y el artefacto del mate
+R1—: se añadieron casos y todas murieron. **Un ayudante que cuenta como una sola
+guarda para varios llamantes** —`validate_final_artifact`, que sirve a R1 y a
+R2— tenía el de R1 sin cubrir; se añadió su caso. Sobreviven cuatro, todas
+**equivalentes o redundantes** y anotadas en el código: la mitad `!text.is_empty()`
+de `publishable_relative` (un texto vacío ya lo rechaza el componente vacío); las
+dos primeras mitades de `left.is_none() || right.is_none() || left != right` del
+juez de la pareja (`left != right` ya es cierto con un solo `None`); `line.is_empty()`
+de `read_line` (la última byte de una línea vacía ya no es un salto de línea); y
+el rebobinado explícito del juez de un mate tras comprobar el marcador de fin,
+redundante porque `reject_oversized_blocks` deja el fichero al principio (no es
+una guarda de la puerta). La revisión adversarial encontró que la biblioteca
+ausente del plan **no** era equivalente: con objetivo de cobertura, sin esa guarda
+rechaza `derive_library_count_subseed` con otro error; se añadió su caso. Tampoco
+se distingue `> 256` de `>= 256` en `read_final_line`: ninguna cabecera válida
+llega a 256 bytes (máximo 155).
+
+**Alcance de «0 pendientes» en esta tanda.** Igual que en la anterior se refiere
+a las guardas que cuenta la puerta. En el paquete F5, `verify_link`,
+`failure_mismatch` y `gate::Strict` cuentan como **una** guarda para varios
+llamantes; se probó cada enlace del manifiesto, de la verdad y del fallo, cada
+término del diagnóstico y las listas ya cubiertas por la prueba de la tanda
+anterior. En el FASTQ, `validate_final_artifact` y `read_final_line` sirven a
+varios llamantes; se probaron R1 y R2 del primero.
 
 ---
 

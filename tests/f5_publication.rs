@@ -3567,3 +3567,81 @@ fn the_budget_derived_from_h_max_still_dominates_what_the_package_publishes() {
         sealed.output_bytes()
     );
 }
+
+/// DT-001, tanda 2. Los límites que se publican salen de la autoría **y** de la
+/// admisión sellada, y las dos tienen que coincidir: una admisión sellada con
+/// un máximo de intentos de layout distinto del que declara el escenario no
+/// puede publicarse. Es la única forma de llegar a esa guarda: con una
+/// configuración y una admisión que salgan de la misma carga siempre
+/// coinciden, y por eso aquí se cruzan a propósito dos cargas distintas.
+///
+/// Control: la misma publicación con la admisión de su propia configuración
+/// sí se publica, de modo que lo que rechaza es la discrepancia y no la
+/// publicación de un fallo.
+#[test]
+fn limits_from_a_sealed_admission_that_the_scenario_does_not_declare_are_not_published() {
+    let first_root = temporary("limits-mismatch-sealed");
+    fs::create_dir_all(&first_root).expect("raíz");
+    let first = build_chain(&first_root, &Fixture::default());
+    let second_root = temporary("limits-mismatch-declared");
+    fs::create_dir_all(&second_root).expect("raíz");
+    let second = build_chain(&second_root, &Fixture::default());
+    let scenario = second_root.join("authoring/scenarios/scenario.toml");
+    let text = fs::read_to_string(&scenario).expect("escenario");
+    assert!(text.contains("max_layout_attempts = 8"));
+    fs::write(
+        &scenario,
+        text.replace("max_layout_attempts = 8", "max_layout_attempts = 9"),
+    )
+    .expect("escenario alterado");
+    let declares_nine = load_and_validate_f5_config(&second_root.join("authoring/general.toml"))
+        .expect("configuración con otro máximo");
+
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("ejecución");
+    let diagnostic =
+        || Diagnostic::f5_controlled_quota_infeasible("scenario", "P1", "cuota inviable");
+    let publish_with = |label: &str, config: &EffectiveF5Config, sealed: &SealedF5Admission| {
+        let destination = first_root.join(format!("published-{label}"));
+        let workspace = ExecutionWorkspace::create(&destination).expect("provisional");
+        let report =
+            F5FailureReport::from_diagnostic(config, None, F5FailureStage::Founders, diagnostic());
+        publish_f5_failure(workspace, config, sealed, &execution, &report)
+    };
+    publish_with("control", &first.config, &first.sealed)
+        .expect("una configuración y su propia admisión se publican");
+    let rejection = publish_with("crossed", &declares_nine, &first.sealed)
+        .expect_err("el escenario declara 9 y la admisión selló 8");
+    assert_eq!(rejection.code(), "GPS-FMT-006");
+    let detail = rejection.context().get("detail").expect("detalle");
+    assert!(
+        detail.contains("limits.max_layout_attempts: el escenario declara 9 y la admisión selló 8"),
+        "{detail}"
+    );
+    drop(second);
+    drop(first);
+}
+
+/// DT-001, tanda 2: intento ejecutado de llegar a las dos guardas de
+/// `src/f5_publication.rs` que suponen que el general admitido tiene directorio
+/// padre y nombre de fichero. **Esta prueba no discrimina** esas guardas
+/// (anotadas como inalcanzables en el código): demuestra que la admisión se
+/// niega a cargar una ruta sin nombre de fichero publicable, y que la de una
+/// carga real sí tiene directorio y nombre.
+#[test]
+fn an_admitted_general_always_has_a_directory_and_a_publishable_name() {
+    for path in ["/", "/.."] {
+        assert!(
+            load_and_validate_f5_config(Path::new(path)).is_err(),
+            "{path} no es un general admisible"
+        );
+    }
+    let root = temporary("general-path");
+    fs::create_dir_all(&root).expect("raíz");
+    let chain = build_chain(&root, &Fixture::default());
+    let general = chain.config.general_path();
+    assert!(general.parent().is_some());
+    assert_eq!(
+        general.file_name().and_then(|name| name.to_str()),
+        Some("general.toml")
+    );
+}

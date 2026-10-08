@@ -7,7 +7,9 @@ use genome_population_simulator::application::EffectiveTechnicalEventTarget;
 use genome_population_simulator::coordinates::BasePosition;
 use genome_population_simulator::fastq_output::write_wgs_fastq;
 use genome_population_simulator::fastq_output::{FASTQ_ARTIFACT_KIND, fastq_relative_path};
-use genome_population_simulator::fastq_validation::{FastqValidationError, validate_wgs_fastq};
+use genome_population_simulator::fastq_validation::{
+    F4CoverageReport, FastqReplayError, FastqValidationError, validate_wgs_fastq,
+};
 use genome_population_simulator::haplotype::{HaplotypePhase, Individual, Ploidy};
 use genome_population_simulator::identity::{EventId, IndividualId, ReferenceId, SequenceId};
 use genome_population_simulator::integrity::identify_file;
@@ -668,5 +670,332 @@ fn validation_binds_exact_artifact_record_and_opening_errors() {
             ..
         }
     ));
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+// ---------------------------------------------------------------------------
+// DT-001, tanda 2: guardas del juez del FASTQ de F3 y del resumen de cobertura
+// que ninguna prueba disparaba. Cada caso altera UN solo punto y exige la
+// variante exacta del rechazo, no solo que lo haya.
+// ---------------------------------------------------------------------------
+
+/// Misma secuencia que `reference()` pero con otro identificador de
+/// referencia: lo único que cambia es el identificador, de modo que, sin la
+/// guarda de identidad, el replay seguiría adelante sin ningún otro fallo.
+fn reference_with_id(id: &str) -> Reference {
+    let source = reference();
+    let sequence = &source.sequences()[0];
+    let rebuilt = ReferenceSequence::new(
+        sequence.id().clone(),
+        FastaHeader::parse(b"chr-synthetic").expect("header"),
+        SequenceClass::Chromosome,
+        &DnaSequence::try_from_bytes(sequence.sequence().as_bytes().expect("bases"))
+            .expect("synthetic DNA"),
+    )
+    .expect("sequence");
+    Reference::new(
+        ReferenceId::parse(id, "test").expect("reference ID"),
+        ReferenceOrigin::Generated,
+        vec![rebuilt],
+    )
+    .expect("reference")
+}
+
+/// Una referencia con el identificador de `reference()` pero otra secuencia.
+fn reference_with_another_sequence() -> Reference {
+    let bases = vec![b'A'; 200];
+    let sequence = ReferenceSequence::new(
+        SequenceId::parse("chr-other", "test").expect("sequence ID"),
+        FastaHeader::parse(b"chr-other").expect("header"),
+        SequenceClass::Chromosome,
+        &DnaSequence::try_from_bytes(&bases).expect("synthetic DNA"),
+    )
+    .expect("sequence");
+    Reference::new(
+        ReferenceId::parse("reference-synthetic", "test").expect("reference ID"),
+        ReferenceOrigin::Generated,
+        vec![sequence],
+    )
+    .expect("reference")
+}
+
+fn short_reference() -> Reference {
+    let bases = vec![b'A'; 100];
+    let sequence = ReferenceSequence::new(
+        SequenceId::parse("chr-short", "test").expect("sequence ID"),
+        FastaHeader::parse(b"chr-short").expect("header"),
+        SequenceClass::Chromosome,
+        &DnaSequence::try_from_bytes(&bases).expect("synthetic DNA"),
+    )
+    .expect("sequence");
+    Reference::new(
+        ReferenceId::parse("reference-short", "test").expect("reference ID"),
+        ReferenceOrigin::Generated,
+        vec![sequence],
+    )
+    .expect("reference")
+}
+
+/// Las cinco negativas con las que el replay se niega a empezar cuando las
+/// entradas no son coherentes entre sí. Cada caso es un paquete válido con una
+/// sola entrada sustituida. Dos de ellas producen la misma variante
+/// (`IndividualReferenceMismatch`), por eso el caso de la identidad de la
+/// referencia usa una referencia idéntica salvo el identificador: si se borrara
+/// esa guarda, el replay no fallaría con otra comprobación que la sustituyera.
+#[test]
+fn the_replay_refuses_inputs_that_do_not_belong_together() {
+    let root = temporary("replay-mismatches");
+    let reference = reference();
+    let individual = truth_state(&reference);
+    let identities_ok = identities(&reference, &individual);
+    let (fastq_path, artifact) = write_fastq(
+        &root,
+        &reference,
+        &individual,
+        &identities_ok,
+        EffectiveTechnicalEventTarget::ReadCount(1),
+    );
+    let run =
+        |reference: &Reference,
+         individual: &Individual,
+         identities: &genome_population_simulator::technical_identity::TechnicalIdentityPlan,
+         target| {
+            validate_wgs_fastq(
+                &fastq_path,
+                &artifact,
+                reference,
+                individual,
+                identities,
+                target,
+            )
+        };
+    let one = EffectiveTechnicalEventTarget::ReadCount(1);
+    // Control: las entradas coherentes se aceptan.
+    run(&reference, &individual, &identities_ok, one).expect("coherent inputs");
+
+    // El plan de identidades es de otra referencia.
+    let renamed = reference_with_id("reference-renamed");
+    let identities_other = identities(&renamed, &individual);
+    match run(&reference, &individual, &identities_other, one) {
+        Err(FastqValidationError::Replay(FastqReplayError::TechnicalPlanReferenceMismatch)) => {}
+        other => panic!("expected TechnicalPlanReferenceMismatch, got {other:?}"),
+    }
+
+    // El individuo es de otra referencia (mismas secuencias, otro identificador).
+    let renamed_individual = truth_state(&renamed);
+    match run(&reference, &renamed_individual, &identities_ok, one) {
+        Err(FastqValidationError::Replay(FastqReplayError::IndividualReferenceMismatch)) => {}
+        other => panic!("expected IndividualReferenceMismatch, got {other:?}"),
+    }
+
+    // El individuo es de la misma referencia (mismo identificador) pero sus
+    // secuencias no existen en ella.
+    let foreign = reference_with_another_sequence();
+    let foreign_individual = truth_state(&foreign);
+    match run(&reference, &foreign_individual, &identities_ok, one) {
+        Err(FastqValidationError::Replay(FastqReplayError::IndividualReferenceMismatch)) => {}
+        other => panic!("expected IndividualReferenceMismatch (sequence), got {other:?}"),
+    }
+
+    // El plan no tiene biblioteca para este individuo.
+    let stranger = Individual::from_reference(
+        IndividualId::parse("sample-stranger", "test").expect("individual ID"),
+        &reference,
+        Ploidy::new(1).expect("ploidy"),
+    );
+    match run(&reference, &stranger, &identities_ok, one) {
+        Err(FastqValidationError::Replay(FastqReplayError::MissingTechnicalLibrary)) => {}
+        other => panic!("expected MissingTechnicalLibrary, got {other:?}"),
+    }
+    // Lo mismo con objetivo de **cobertura**: sin la guarda del plan, quien
+    // rechazaría es `derive_library_count_subseed`, con otro error. Este caso es
+    // el que discrimina esa guarda (con `ReadCount` la repite otra comprobación).
+    match run(
+        &reference,
+        &stranger,
+        &identities_ok,
+        EffectiveTechnicalEventTarget::CoverageWgs(1.0),
+    ) {
+        Err(FastqValidationError::Replay(FastqReplayError::MissingTechnicalLibrary)) => {}
+        other => panic!("expected MissingTechnicalLibrary with coverage, got {other:?}"),
+    }
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// Sin una sola secuencia de al menos una lectura (150) no hay origen posible.
+#[test]
+fn a_reference_without_a_sequence_as_long_as_a_read_has_no_eligible_origin() {
+    let reference = short_reference();
+    let individual = truth_state(&reference);
+    let identities = identities(&reference, &individual);
+    let root = temporary("no-eligible-sequence");
+    let (fastq_path, artifact) = {
+        // El FASTQ y su artefacto son los de otra referencia: el replay se
+        // niega antes de abrirlos.
+        let other = self::reference();
+        let other_individual = truth_state(&other);
+        let other_identities = self::identities(&other, &other_individual);
+        write_fastq(
+            &root,
+            &other,
+            &other_individual,
+            &other_identities,
+            EffectiveTechnicalEventTarget::ReadCount(1),
+        )
+    };
+    match validate_wgs_fastq(
+        &fastq_path,
+        &artifact,
+        &reference,
+        &individual,
+        &identities,
+        EffectiveTechnicalEventTarget::ReadCount(1),
+    ) {
+        Err(FastqValidationError::Replay(FastqReplayError::NoEligibleSequence {
+            read_length: 150,
+        })) => {}
+        other => panic!("expected NoEligibleSequence, got {other:?}"),
+    }
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// Una cobertura que no da una media de Poisson finita (infinita, NaN o tan
+/// grande que desborda al multiplicar) no puede reproducirse.
+#[test]
+fn a_coverage_whose_poisson_mean_is_not_finite_cannot_be_replayed() {
+    let root = temporary("invalid-coverage-mean");
+    let reference = reference();
+    let individual = truth_state(&reference);
+    let identities = identities(&reference, &individual);
+    let (fastq_path, artifact) = write_fastq(
+        &root,
+        &reference,
+        &individual,
+        &identities,
+        EffectiveTechnicalEventTarget::ReadCount(1),
+    );
+    for coverage in [f64::INFINITY, f64::NAN, f64::MAX] {
+        match validate_wgs_fastq(
+            &fastq_path,
+            &artifact,
+            &reference,
+            &individual,
+            &identities,
+            EffectiveTechnicalEventTarget::CoverageWgs(coverage),
+        ) {
+            Err(FastqValidationError::Replay(FastqReplayError::InvalidCoverageMean)) => {}
+            other => panic!("coverage {coverage}: expected InvalidCoverageMean, got {other:?}"),
+        }
+    }
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// Un fichero más corto que el marcador de fin BGZF (28 bytes) se rechaza como
+/// «sin marcador» **sin intentar** buscarlo por el final, y el rechazo informa
+/// del número de lecturas esperadas del plan.
+#[test]
+fn a_file_shorter_than_the_eof_marker_is_missing_it() {
+    let root = temporary("shorter-than-eof-marker");
+    let reference = reference();
+    let individual = truth_state(&reference);
+    let identities = identities(&reference, &individual);
+    let (fastq_path, artifact) = write_fastq(
+        &root,
+        &reference,
+        &individual,
+        &identities,
+        EffectiveTechnicalEventTarget::ReadCount(1),
+    );
+    fs::write(&fastq_path, b"short").expect("tiny file");
+    match validate_wgs_fastq(
+        &fastq_path,
+        &artifact,
+        &reference,
+        &individual,
+        &identities,
+        EffectiveTechnicalEventTarget::ReadCount(1),
+    ) {
+        Err(FastqValidationError::Structural {
+            record_ordinal: 1,
+            detail: "FASTQ BGZF stream is missing its canonical EOF marker",
+            ..
+        }) => {}
+        other => panic!("expected a missing EOF marker, got {other:?}"),
+    }
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+fn is_invalid_summary<T: std::fmt::Debug>(result: Result<T, FastqValidationError>) -> bool {
+    matches!(result, Err(FastqValidationError::InvalidCoverageSummary))
+}
+
+/// El resumen de cobertura se niega a construirse con un objetivo que no es un
+/// número finito no negativo, con denominador cero, con más `N` que bases
+/// finales y con un total de bases que desborda. Cada rama del `||` tiene su
+/// caso, con el resto de argumentos válidos.
+#[test]
+fn the_coverage_summary_refuses_each_inconsistent_count() {
+    // Control, y los dos límites exactos que se aceptan: objetivo 0 y tantas
+    // `N` como bases finales.
+    F4CoverageReport::from_base_counts(1.5, 10, 10, 0, 10, 0).expect("valid summary");
+    F4CoverageReport::from_base_counts(0.0, 10, 10, 0, 10, 0).expect("target zero is valid");
+    F4CoverageReport::from_base_counts(1.0, 10, 10, 5, 10, 15).expect("N equal to the bases");
+
+    for target in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.5] {
+        assert!(
+            is_invalid_summary(F4CoverageReport::from_base_counts(target, 10, 10, 0, 10, 0)),
+            "target {target}"
+        );
+    }
+    assert!(
+        is_invalid_summary(F4CoverageReport::from_base_counts(1.0, 10, 10, 0, 0, 0)),
+        "a zero denominator"
+    );
+    assert!(
+        is_invalid_summary(F4CoverageReport::from_base_counts(1.0, 10, 10, 5, 10, 16)),
+        "more N than final bases"
+    );
+    assert!(
+        matches!(
+            F4CoverageReport::from_base_counts(1.0, 10, u64::MAX, 1, 10, 0),
+            Err(FastqValidationError::CounterOverflow)
+        ),
+        "own plus contaminant bases overflow"
+    );
+}
+
+/// DT-001, tanda 2: intento ejecutado de alcanzar el desbordamiento del
+/// recuento de bases de `validate_wgs_fastq`. **Esta prueba no discrimina**
+/// esa comprobación: con un plan de lecturas enorme, el juez rechaza antes por
+/// el primer registro que falta, de modo que `read_count * 150` nunca se
+/// calcula con un valor que desborde.
+#[test]
+fn a_read_plan_too_large_for_the_file_fails_on_the_first_missing_record() {
+    let root = temporary("huge-read-plan");
+    let reference = reference();
+    let individual = truth_state(&reference);
+    let identities = identities(&reference, &individual);
+    let (fastq_path, artifact) = write_fastq(
+        &root,
+        &reference,
+        &individual,
+        &identities,
+        EffectiveTechnicalEventTarget::ReadCount(1),
+    );
+    match validate_wgs_fastq(
+        &fastq_path,
+        &artifact,
+        &reference,
+        &individual,
+        &identities,
+        EffectiveTechnicalEventTarget::ReadCount(u64::MAX / 100),
+    ) {
+        Err(FastqValidationError::Structural {
+            record_ordinal: 1,
+            detail: "FASTQ header line is truncated",
+            ..
+        }) => {}
+        other => panic!("expected a truncation at the second record, got {other:?}"),
+    }
     fs::remove_dir_all(root).expect("cleanup");
 }

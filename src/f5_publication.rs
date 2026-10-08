@@ -260,6 +260,9 @@ fn publishable_relative(relative: &Path, field: &str) -> Result<String, Diagnost
     let text = relative
         .to_str()
         .ok_or_else(|| document_error(F5_EFFECTIVE_CONFIG_PATH, format!("{field}: no es UTF-8")))?;
+    // La mitad `!text.is_empty()` es **equivalente**, no inalcanzable: un texto
+    // vacío se parte en un único componente vacío, que la mitad `!component.is_empty()`
+    // ya rechaza con el mismo motivo. Se conserva por legibilidad.
     let representable = !text.is_empty()
         && text.split('/').all(|component| {
             !component.is_empty()
@@ -298,6 +301,12 @@ struct SharedContract {
 
 impl SharedContract {
     fn build(config: &EffectiveF5Config, sealed: &SealedF5Admission) -> Result<Self, Diagnostic> {
+        // Inalcanzable, esta guarda y la de `file_name` en `effective_document`
+        // porque: `general_path` es la ruta absoluta y normalizada de un fichero
+        // que la admisión abrió y cuyo nombre `require_publishable_general_name`
+        // ya validó (existe, no vacío, no `.` ni `..`); una ruta con nombre de
+        // fichero siempre tiene directorio padre. Intento ejecutado:
+        // `an_admitted_general_always_has_a_directory_and_a_publishable_name`.
         let root = config
             .general_path()
             .parent()
@@ -309,6 +318,10 @@ impl SharedContract {
             })?
             .to_path_buf();
         let receipt = sealed.receipt();
+        // Inalcanzable porque: el único constructor de un recibo sellado
+        // (`F5AdmissionReceipt::seal`) exige la lista contractual de roles, que
+        // empieza con el metadata del perfil; sin él no hay recibo. Intento
+        // ejecutado: `a_receipt_without_the_contractual_roles_cannot_be_sealed`.
         let metadata = receipt
             .identity(crate::f5_admission::InputRole::ProfileMetadata)
             .ok_or_else(|| {
@@ -465,6 +478,11 @@ pub(crate) fn limits_json(
 
 fn normalizations_json(config: &EffectiveF5Config) -> Result<Value, Diagnostic> {
     let audits = config.profile().normalizations();
+    // Inalcanzable, esta guarda y la del orden de debajo porque: el perfil
+    // admitido construye sus auditorías en un único sitio (`f5_profile.rs`), con
+    // un literal de cuatro y en este mismo orden cerrado. `normalizations_json`
+    // lo ejecuta cada publicación (`the_four_normalizations_travel_complete_and_in_their_closed_order`),
+    // pero esa prueba solo comprueba el caso válido y no discrimina estas dos.
     if audits.len() != NORMALIZATION_ORDER.len() {
         return Err(document_error(
             F5_EFFECTIVE_CONFIG_PATH,
@@ -527,6 +545,10 @@ fn sampling_json(
 ) -> Result<Value, Diagnostic> {
     let mut rows = Vec::with_capacity(assignment.sampling().len());
     for (declared, row) in declaration.sampling.iter().zip(assignment.sampling()) {
+        // Inalcanzable porque: `block_index` es menor que el número de bloques, y
+        // 2^32 bloques ya superan el límite duro de salida sellado
+        // (`F5_HARD_OUTPUT_LIMIT`, 2^31 bytes): cada bloque publica al menos una
+        // fila de muestreo de más de un byte.
         let block_index = u32::try_from(row.block_index()).map_err(|_| {
             document_error(
                 F5_EFFECTIVE_CONFIG_PATH,
@@ -620,6 +642,7 @@ fn effective_document(
         sampling_json(declaration, assignment)?,
     );
     shared.insert_into(&mut f5);
+    // Inalcanzable: ver la anotación de `SharedContract::build`.
     let source = config.general_path().file_name().ok_or_else(|| {
         document_error(
             F5_EFFECTIVE_CONFIG_PATH,
@@ -785,6 +808,11 @@ impl Serialize for SuccessF5Object<'_> {
 /// ajena y el contrato no puede descansar en que ninguna futura la relaje.
 fn ensure_recounts_match(summaries: &[F5InitializationSummary]) -> Result<(), Diagnostic> {
     for summary in summaries {
+        // Inalcanzable porque: `F5InitializationSummary` tiene los campos
+        // privados del oráculo y ningún constructor fuera de él; el oráculo solo
+        // devuelve un resumen con `recount_matches == true` (rechaza antes
+        // cualquier discrepancia). Desde este módulo no se puede fabricar uno
+        // desigual, ni siquiera en una prueba, sin cambiar la visibilidad.
         if !summary.recount_matches() {
             return Err(manifest_error(
                 Path::new(F5_MANIFEST_PATH),
@@ -2142,6 +2170,9 @@ fn collect_payload_files(
         )
     })?;
     for entry in entries {
+        // Inalcanzable porque: el error del iterador de `read_dir` es un fallo de
+        // E/S a mitad de la lectura de un directorio (`EIO` o similar) que una
+        // prueba no puede provocar de forma determinista.
         let entry = entry.map_err(|error| {
             manifest_error(
                 manifest_path,
@@ -2158,6 +2189,10 @@ fn collect_payload_files(
         // el que se hasheó. Hoy es inalcanzable —el provisional es 0o700, lo
         // crea el propio proceso y ninguna pieza F5 crea enlaces—, pero la
         // recursión tampoco tiene tope y un ciclo la colgaría.
+        // Inalcanzable porque: `file_type` solo falla si el sistema de ficheros no
+        // da el tipo con la entrada y la consulta posterior falla, o si el
+        // fichero desaparece entre el listado y la consulta; son una carrera que
+        // una prueba no puede provocar de forma determinista.
         let kind = entry.file_type().map_err(|error| {
             manifest_error(
                 manifest_path,
@@ -2182,6 +2217,9 @@ fn collect_payload_files(
                 ),
             ));
         }
+        // Inalcanzable porque: `path` es `directory.join(nombre)` y `directory` es
+        // la raíz o un descendiente suyo por la propia recursión, de modo que
+        // siempre cuelga de `payload_root`.
         let relative = path.strip_prefix(payload_root).map_err(|_| {
             manifest_error(
                 manifest_path,
@@ -3002,6 +3040,774 @@ mod tests {
         assert!(destination.join(F5_MANIFEST_PATH).is_file());
         assert!(destination.join(F5_EFFECTIVE_CONFIG_PATH).is_file());
         assert!(!destination.join("INCOMPLETE").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // -----------------------------------------------------------------------
+    // DT-001, tanda 2: la puerta física del paquete publicado.
+    //
+    // Cada caso toma un paquete sintético íntegro, altera UN solo término del
+    // documento publicado y exige la razón exacta del rechazo. Si una guarda
+    // se borrara, el paquete alterado pasaría la puerta, o la pararía otra
+    // guarda con otra razón, y el caso fallaría.
+    // -----------------------------------------------------------------------
+
+    fn detail_of(diagnostic: &Diagnostic) -> String {
+        assert_eq!(diagnostic.code(), "GPS-FMT-006");
+        diagnostic
+            .context()
+            .get("detail")
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn rewrite_json(path: &Path, alter: impl FnOnce(&mut Value)) {
+        let mut document: Value =
+            serde_json::from_slice(&std::fs::read(path).expect("leer")).expect("JSON");
+        alter(&mut document);
+        std::fs::write(path, serde_json::to_vec_pretty(&document).expect("JSON"))
+            .expect("escribir");
+    }
+
+    /// Juzga un paquete de éxito sintético después de alterar su manifiesto y
+    /// su efectivo en disco.
+    fn verify_altered_success(
+        label: &str,
+        alter_manifest: impl FnOnce(&mut Value),
+        alter_effective: impl FnOnce(&mut Value),
+    ) -> Result<(), Diagnostic> {
+        let (root, workspace) = staged_workspace(label);
+        let payload = workspace.payload_root().to_path_buf();
+        let manifest_path = payload.join(F5_MANIFEST_PATH);
+        rewrite_json(&manifest_path, alter_manifest);
+        rewrite_json(&payload.join(F5_EFFECTIVE_CONFIG_PATH), alter_effective);
+        let result = verify_published_f5_package(&payload, &manifest_path, workspace.artifacts());
+        drop(workspace);
+        let _ = std::fs::remove_dir_all(&root);
+        result
+    }
+
+    fn untouched(_: &mut Value) {}
+
+    /// Control: el paquete sintético, sin alterar, pasa la puerta. Sin esta
+    /// prueba, una puerta que rechazara todo satisfaría todas las demás.
+    #[test]
+    fn the_untouched_synthetic_success_package_passes_the_gate() {
+        verify_altered_success("gate-control", untouched, untouched).expect("paquete íntegro");
+        // Los dos extremos admitidos de las claves del recuento haplotípico:
+        // ambas presentes y con tantas filas como unidades de muestreo.
+        verify_altered_success(
+            "gate-control-counts",
+            |manifest| {
+                manifest["f5"]["haplotype_count_distribution"] = json!({});
+                manifest["f5"]["haplotype_counts"] = json!([]);
+            },
+            untouched,
+        )
+        .expect("distribución y recuentos juntos");
+        // Los límites exactos que se aceptan: tantas bases elegibles como
+        // recorridas, y un resumen que cita su fuente y coincide.
+        verify_altered_success(
+            "gate-control-limits",
+            |manifest| {
+                manifest["f5"]["eligible_bases"] = json!(1024_u64);
+                manifest["f5"]["initialization_summaries"] = json!([
+                    {"recount_source": F5_MAN70_RECOUNT_SOURCE, "recount_matches": true}
+                ]);
+            },
+            untouched,
+        )
+        .expect("límites exactos");
+    }
+
+    #[test]
+    fn every_success_term_outside_the_contract_is_rejected_with_its_own_reason() {
+        let contracts = F5_TSV_CONTRACTS.len();
+        type Alter = Box<dyn Fn(&mut Value)>;
+        let cases: Vec<(&str, Alter, Alter, String)> = vec![
+            (
+                "root manifest_kind",
+                Box::new(|m| m["manifest_kind"] = json!("other")),
+                Box::new(untouched),
+                "clase o versión incompatible con manifest-general-v5".to_owned(),
+            ),
+            (
+                "root schema_version",
+                Box::new(|m| m["schema_version"] = json!("4")),
+                Box::new(untouched),
+                "clase o versión incompatible con manifest-general-v5".to_owned(),
+            ),
+            (
+                "execution_id",
+                Box::new(|m| m["execution_id"] = json!("not an execution")),
+                Box::new(untouched),
+                "no es una identidad tipada".to_owned(),
+            ),
+            (
+                "state",
+                Box::new(|m| m["state"] = json!("running")),
+                Box::new(untouched),
+                "state: \"running\" no es complete ni failed".to_owned(),
+            ),
+            (
+                "artifact count",
+                Box::new(|m| {
+                    m["f5"]["artifacts"].as_array_mut().expect("lista").pop();
+                }),
+                Box::new(untouched),
+                format!(
+                    "/f5/artifacts: el contrato exige {contracts} enlaces y el manifiesto publica {}",
+                    contracts - 1
+                ),
+            ),
+            (
+                "link schema_version",
+                Box::new(|m| m["f5"]["artifacts"][2]["schema_version"] = json!("2")),
+                Box::new(untouched),
+                "/f5/artifacts/2/schema_version: el contrato fija 1 y el enlace publica 2"
+                    .to_owned(),
+            ),
+            (
+                "distribution without counts",
+                Box::new(|m| m["f5"]["haplotype_count_distribution"] = json!({})),
+                Box::new(untouched),
+                "se publican juntos o no se publican".to_owned(),
+            ),
+            (
+                "counts without distribution",
+                Box::new(|m| m["f5"]["haplotype_counts"] = json!([])),
+                Box::new(untouched),
+                "se publican juntos o no se publican".to_owned(),
+            ),
+            (
+                "counts that do not match the sampling units",
+                Box::new(|m| {
+                    m["f5"]["haplotype_count_distribution"] = json!({});
+                    m["f5"]["haplotype_counts"] = json!([{}]);
+                }),
+                Box::new(untouched),
+                "/f5/haplotype_counts: 1 filas frente a las 0 unidades de /f5/sampling".to_owned(),
+            ),
+            (
+                "link digest",
+                Box::new(|m| m["f5"]["artifacts"][1]["sha256"] = json!("0".repeat(64))),
+                Box::new(untouched),
+                "/f5/artifacts/1: el enlace declara".to_owned(),
+            ),
+            (
+                "link size",
+                Box::new(|m| m["f5"]["artifacts"][1]["size_bytes"] = json!(1_u64)),
+                Box::new(untouched),
+                "/f5/artifacts/1: el enlace declara".to_owned(),
+            ),
+            (
+                "link artifact_id out of position",
+                Box::new(|m| m["f5"]["artifacts"][0]["artifact_id"] = json!("other")),
+                Box::new(untouched),
+                "/f5/artifacts/0: el contrato fija".to_owned(),
+            ),
+            (
+                "link artifact_kind out of position",
+                Box::new(|m| m["f5"]["artifacts"][0]["artifact_kind"] = json!("other")),
+                Box::new(untouched),
+                "/f5/artifacts/0: el contrato fija".to_owned(),
+            ),
+            (
+                "link path out of position",
+                Box::new(|m| m["f5"]["artifacts"][0]["path"] = json!("outputs/other.tsv")),
+                Box::new(untouched),
+                "/f5/artifacts/0: el contrato fija".to_owned(),
+            ),
+            (
+                "truth artifact_id",
+                Box::new(|m| m["f5"]["truth"]["artifact_id"] = json!("other")),
+                Box::new(untouched),
+                "/f5/truth: identidad, clase, versión".to_owned(),
+            ),
+            (
+                "truth artifact_kind",
+                Box::new(|m| m["f5"]["truth"]["artifact_kind"] = json!("other")),
+                Box::new(untouched),
+                "/f5/truth: identidad, clase, versión".to_owned(),
+            ),
+            (
+                "truth schema_version",
+                Box::new(|m| m["f5"]["truth"]["schema_version"] = json!("9")),
+                Box::new(untouched),
+                "/f5/truth: identidad, clase, versión".to_owned(),
+            ),
+            (
+                "truth projection_version",
+                Box::new(|m| m["f5"]["truth"]["projection_version"] = json!("9")),
+                Box::new(untouched),
+                "/f5/truth: identidad, clase, versión".to_owned(),
+            ),
+            (
+                "truth path",
+                Box::new(|m| m["f5"]["truth"]["path"] = json!("outputs/other.jsonl")),
+                Box::new(untouched),
+                "/f5/truth: identidad, clase, versión".to_owned(),
+            ),
+            (
+                "truth size",
+                Box::new(|m| m["f5"]["truth"]["size_bytes"] = json!(1_u64)),
+                Box::new(untouched),
+                "/f5/truth: el enlace declara".to_owned(),
+            ),
+            (
+                "truth digest",
+                Box::new(|m| m["f5"]["truth"]["sha256"] = json!("0".repeat(64))),
+                Box::new(untouched),
+                "/f5/truth: el enlace declara".to_owned(),
+            ),
+            (
+                "counts fewer than the sampling units",
+                Box::new(|m| {
+                    m["f5"]["sampling"] = json!([{}]);
+                    m["f5"]["haplotype_count_distribution"] = json!({});
+                    m["f5"]["haplotype_counts"] = json!([]);
+                }),
+                Box::new(untouched),
+                "/f5/haplotype_counts: 0 filas frente a las 1 unidades de /f5/sampling".to_owned(),
+            ),
+            (
+                "summary from another recount source",
+                Box::new(|m| {
+                    m["f5"]["initialization_summaries"] =
+                        json!([{"recount_source": "other", "recount_matches": true}]);
+                }),
+                Box::new(untouched),
+                "/f5/initialization_summaries/0: recount_source debe ser".to_owned(),
+            ),
+            (
+                "summary whose recount does not match",
+                Box::new(|m| {
+                    m["f5"]["initialization_summaries"] = json!([
+                        {"recount_source": F5_MAN70_RECOUNT_SOURCE, "recount_matches": true},
+                        {"recount_source": F5_MAN70_RECOUNT_SOURCE, "recount_matches": false},
+                    ]);
+                }),
+                Box::new(untouched),
+                "/f5/initialization_summaries/1: recount_source debe ser".to_owned(),
+            ),
+            (
+                "preflight bound missing",
+                Box::new(|m| {
+                    m["f5"]["resource_preflight"]
+                        .as_object_mut()
+                        .expect("objeto")
+                        .remove("reference_bases_processed");
+                }),
+                Box::new(untouched),
+                "reference_bases_processed: falta o no es u64".to_owned(),
+            ),
+            (
+                "preflight bound not an integer",
+                Box::new(|m| {
+                    m["f5"]["resource_preflight"]["reference_bases_processed"] = json!("1024")
+                }),
+                Box::new(untouched),
+                "reference_bases_processed: falta o no es u64".to_owned(),
+            ),
+            (
+                "eligible bases above the scanned bases",
+                Box::new(|m| m["f5"]["eligible_bases"] = json!(1025_u64)),
+                Box::new(untouched),
+                "/f5/eligible_bases: 1025 excede las 1024 bases que el escaneo recorrió".to_owned(),
+            ),
+            (
+                "effective kind",
+                Box::new(untouched),
+                Box::new(|e| e["effective_config_kind"] = json!("other")),
+                format!("{F5_EFFECTIVE_CONFIG_PATH}: clase o versión incompatible con v5"),
+            ),
+            (
+                "effective schema_version",
+                Box::new(untouched),
+                Box::new(|e| e["schema_version"] = json!("4")),
+                format!("{F5_EFFECTIVE_CONFIG_PATH}: clase o versión incompatible con v5"),
+            ),
+            (
+                "subpopulation count",
+                Box::new(|m| m["f5"]["subpopulations"] = json!([])),
+                Box::new(untouched),
+                "/f5/subpopulations: el efectivo publica 1 y el manifiesto 0".to_owned(),
+            ),
+            (
+                "subpopulation that is not an object",
+                Box::new(|m| m["f5"]["subpopulations"] = json!([5])),
+                Box::new(untouched),
+                "/f5/subpopulations/0: no es un objeto".to_owned(),
+            ),
+            (
+                "subpopulation with an extra key",
+                Box::new(|m| m["f5"]["subpopulations"][0]["extra"] = json!(1)),
+                Box::new(untouched),
+                "/f5/subpopulations/0: el objeto cerrado exige".to_owned(),
+            ),
+            (
+                "subpopulation with a renamed key",
+                Box::new(|m| {
+                    let object = m["f5"]["subpopulations"][0]
+                        .as_object_mut()
+                        .expect("objeto");
+                    let value = object.remove("inbreeding_f_source").expect("clave");
+                    object.insert("inbreeding_f_origin".to_owned(), value);
+                }),
+                Box::new(untouched),
+                "/f5/subpopulations/0: el objeto cerrado exige".to_owned(),
+            ),
+        ];
+        for (name, alter_manifest, alter_effective, expected) in cases {
+            let rejection = verify_altered_success(
+                &format!("gate-{}", name.replace(' ', "-")),
+                alter_manifest,
+                alter_effective,
+            )
+            .expect_err(name);
+            let detail = detail_of(&rejection);
+            assert!(
+                detail.contains(&expected),
+                "{name}: se esperaba «{expected}» y la puerta dijo «{detail}»"
+            );
+        }
+    }
+
+    /// Un paquete de fallo sintético: el manifiesto, el diagnóstico y el
+    /// enlace que los une, con el tamaño y el SHA-256 del diagnóstico ya
+    /// alterado. Devuelve la raíz de la prueba, la carga útil y el catálogo.
+    fn staged_failure(
+        label: &str,
+        alter_diagnostic: impl FnOnce(&mut Value),
+        alter_manifest: impl FnOnce(&mut Value),
+    ) -> (PathBuf, PathBuf, Vec<ArtifactRecord>) {
+        let root = temporary(label);
+        let payload = root.join("payload");
+        std::fs::create_dir_all(payload.join("outputs")).expect("directorio");
+        let common = json!({
+            "code": "GPS-DOMAIN-101",
+            "stage": "layout",
+            "scenario_id": "scenario",
+            "population_id": null,
+            "block_id": null,
+            "limits": {"max_layout_attempts": 8},
+            "counters": {"layout_attempts_used": 1},
+            "best_layout": null,
+            "best_attempt": null,
+        });
+        let mut diagnostic = common.clone();
+        diagnostic["diagnostic_kind"] = json!(F5_FAILURE_DIAGNOSTIC_KIND);
+        diagnostic["schema_version"] = json!(F5_FAILURE_SCHEMA_VERSION);
+        diagnostic["artifacts"] = json!([]);
+        alter_diagnostic(&mut diagnostic);
+        let diagnostic_path = payload.join(F5_FAILURE_PATH);
+        std::fs::write(
+            &diagnostic_path,
+            serde_json::to_vec_pretty(&diagnostic).expect("JSON"),
+        )
+        .expect("diagnóstico");
+        let identity = identify_file(&diagnostic_path, F5_FAILURE_PATH).expect("identidad");
+        let mut failure = common;
+        failure["artifacts"] = json!([{
+            "artifact_id": F5_FAILURE_ARTIFACT_ID,
+            "artifact_kind": F5_FAILURE_ARTIFACT_KIND,
+            "schema_version": F5_TSV_SCHEMA_VERSION,
+            "path": F5_FAILURE_PATH,
+            "size_bytes": identity.size_bytes(),
+            "sha256": identity.digest(),
+        }]);
+        let mut manifest = json!({
+            "manifest_kind": "gps_execution_manifest",
+            "schema_version": F5_DOCUMENT_SCHEMA_VERSION,
+            "execution_id": "RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4",
+            "state": "failed",
+            "f5": {"schema_version": F5_OBJECT_SCHEMA_VERSION, "f5_failure": failure},
+        });
+        alter_manifest(&mut manifest);
+        std::fs::write(
+            payload.join(F5_MANIFEST_PATH),
+            serde_json::to_vec_pretty(&manifest).expect("JSON"),
+        )
+        .expect("manifiesto");
+        let record = ArtifactRecord::from_identity(
+            F5_FAILURE_ARTIFACT_ID,
+            F5_FAILURE_ARTIFACT_KIND,
+            &identity,
+        )
+        .expect("registro");
+        (root, payload, vec![record])
+    }
+
+    fn verify_failure_case(
+        label: &str,
+        alter_diagnostic: impl FnOnce(&mut Value),
+        alter_manifest: impl FnOnce(&mut Value),
+    ) -> Result<(), Diagnostic> {
+        let (root, payload, records) = staged_failure(label, alter_diagnostic, alter_manifest);
+        let result =
+            verify_published_f5_package(&payload, &payload.join(F5_MANIFEST_PATH), &records);
+        let _ = std::fs::remove_dir_all(&root);
+        result
+    }
+
+    #[test]
+    fn every_failure_term_outside_the_contract_is_rejected_with_its_own_reason() {
+        verify_failure_case("failure-control", untouched, untouched)
+            .expect("el paquete de fallo sintético íntegro pasa");
+        type Alter = Box<dyn Fn(&mut Value)>;
+        let cases: Vec<(&str, Alter, Alter, &str)> = vec![
+            (
+                "object schema_version",
+                Box::new(untouched),
+                Box::new(|m| m["f5"]["schema_version"] = json!("2")),
+                "/f5/schema_version: el contrato fija 1 y el manifiesto publica 2",
+            ),
+            (
+                "code outside the closed catalogue",
+                Box::new(untouched),
+                Box::new(|m| m["f5"]["f5_failure"]["code"] = json!("GPS-IO-001")),
+                "/f5/f5_failure/code: GPS-IO-001 no pertenece al catálogo cerrado",
+            ),
+            (
+                "stage outside the five stages",
+                Box::new(untouched),
+                Box::new(|m| m["f5"]["f5_failure"]["stage"] = json!("later")),
+                "/f5/f5_failure/stage: later no pertenece a las cinco etapas",
+            ),
+            (
+                "no link",
+                Box::new(untouched),
+                Box::new(|m| m["f5"]["f5_failure"]["artifacts"] = json!([])),
+                "exactamente un enlace y el manifiesto publica 0",
+            ),
+            (
+                "two links",
+                Box::new(untouched),
+                Box::new(|m| {
+                    let link = m["f5"]["f5_failure"]["artifacts"][0].clone();
+                    m["f5"]["f5_failure"]["artifacts"]
+                        .as_array_mut()
+                        .expect("lista")
+                        .push(link);
+                }),
+                "exactamente un enlace y el manifiesto publica 2",
+            ),
+            (
+                "link artifact_id",
+                Box::new(untouched),
+                Box::new(|m| m["f5"]["f5_failure"]["artifacts"][0]["artifact_id"] = json!("x")),
+                "/f5/f5_failure/artifacts/0: el contrato fija el enlace no biológico",
+            ),
+            (
+                "link artifact_kind",
+                Box::new(untouched),
+                Box::new(|m| m["f5"]["f5_failure"]["artifacts"][0]["artifact_kind"] = json!("x")),
+                "/f5/f5_failure/artifacts/0: el contrato fija el enlace no biológico",
+            ),
+            (
+                "link path",
+                Box::new(untouched),
+                Box::new(|m| {
+                    m["f5"]["f5_failure"]["artifacts"][0]["path"] = json!("outputs/x.json")
+                }),
+                "/f5/f5_failure/artifacts/0: el contrato fija el enlace no biológico",
+            ),
+            (
+                "link schema_version",
+                Box::new(untouched),
+                Box::new(|m| m["f5"]["f5_failure"]["artifacts"][0]["schema_version"] = json!("2")),
+                "/f5/f5_failure/artifacts/0/schema_version: el contrato fija 1 y el enlace publica 2",
+            ),
+            (
+                "diagnostic kind",
+                Box::new(|d| d["diagnostic_kind"] = json!("other")),
+                Box::new(untouched),
+                "clase o versión incompatible con f5-failure-v1",
+            ),
+            (
+                "diagnostic schema_version",
+                Box::new(|d| d["schema_version"] = json!("2")),
+                Box::new(untouched),
+                "clase o versión incompatible con f5-failure-v1",
+            ),
+            (
+                "diagnostic code differs",
+                Box::new(|d| d["code"] = json!("GPS-DOMAIN-102")),
+                Box::new(untouched),
+                "/code: el diagnóstico y el manifiesto discrepan",
+            ),
+            (
+                "diagnostic stage differs",
+                Box::new(|d| d["stage"] = json!("founders")),
+                Box::new(untouched),
+                "/stage: el diagnóstico y el manifiesto discrepan",
+            ),
+            (
+                "diagnostic scenario_id differs",
+                Box::new(|d| d["scenario_id"] = json!("other")),
+                Box::new(untouched),
+                "/scenario_id: el diagnóstico y el manifiesto discrepan",
+            ),
+            (
+                "diagnostic population_id differs",
+                Box::new(|d| d["population_id"] = json!("P9")),
+                Box::new(untouched),
+                "/population_id: el diagnóstico y el manifiesto discrepan",
+            ),
+            (
+                "diagnostic block_id differs",
+                Box::new(|d| d["block_id"] = json!("B9")),
+                Box::new(untouched),
+                "/block_id: el diagnóstico y el manifiesto discrepan",
+            ),
+            (
+                "diagnostic limits differ",
+                Box::new(|d| d["limits"]["max_layout_attempts"] = json!(9)),
+                Box::new(untouched),
+                "/limits: el diagnóstico y el manifiesto discrepan",
+            ),
+            (
+                "diagnostic counters differ",
+                Box::new(|d| d["counters"]["layout_attempts_used"] = json!(2)),
+                Box::new(untouched),
+                "/counters: el diagnóstico y el manifiesto discrepan",
+            ),
+            (
+                "diagnostic best_layout differs",
+                Box::new(|d| d["best_layout"] = json!({"x": 1})),
+                Box::new(untouched),
+                "/best_layout: el diagnóstico y el manifiesto discrepan",
+            ),
+            (
+                "diagnostic best_attempt differs",
+                Box::new(|d| d["best_attempt"] = json!({"x": 1})),
+                Box::new(untouched),
+                "/best_attempt: el diagnóstico y el manifiesto discrepan",
+            ),
+            (
+                "diagnostic with artifacts",
+                Box::new(|d| d["artifacts"] = json!([{}])),
+                Box::new(untouched),
+                "/artifacts: el contrato exige la lista vacía y publica 1",
+            ),
+        ];
+        for (name, alter_diagnostic, alter_manifest, expected) in cases {
+            let rejection = verify_failure_case(
+                &format!("failure-{}", name.replace(' ', "-")),
+                alter_diagnostic,
+                alter_manifest,
+            )
+            .expect_err(name);
+            let detail = detail_of(&rejection);
+            assert!(
+                detail.contains(expected),
+                "{name}: se esperaba «{expected}» y la puerta dijo «{detail}»"
+            );
+        }
+    }
+
+    /// Un manifiesto que no existe no se puede abrir: la razón lo dice.
+    #[test]
+    fn a_missing_manifest_is_reported_as_unopenable() {
+        let root = temporary("missing-manifest");
+        std::fs::create_dir_all(&root).expect("raíz");
+        let missing = root.join(F5_MANIFEST_PATH);
+        let rejection =
+            verify_published_f5_package(&root, &missing, &[]).expect_err("sin manifiesto");
+        let detail = detail_of(&rejection);
+        assert!(
+            detail.contains("la raíz del manifiesto: no se pudo abrir"),
+            "{detail}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Un fichero cuyo nombre no es UTF-8 no se puede declarar por huella: el
+    /// inventario lo rechaza **por esa razón** y no por «sin declarar».
+    #[test]
+    fn a_payload_file_whose_name_is_not_utf8_is_rejected_by_the_inventory() {
+        use std::os::unix::ffi::OsStrExt;
+        let (root, workspace) = staged_workspace("non-utf8-name");
+        let payload = workspace.payload_root().to_path_buf();
+        let name = std::ffi::OsStr::from_bytes(b"outputs/stray-\xff.tsv");
+        std::fs::write(payload.join(name), b"x").expect("fichero con nombre no UTF-8");
+        let rejection = verify_published_f5_package(
+            &payload,
+            &payload.join(F5_MANIFEST_PATH),
+            workspace.artifacts(),
+        )
+        .expect_err("nombre no UTF-8");
+        let detail = detail_of(&rejection);
+        assert!(detail.contains("no es una ruta UTF-8"), "{detail}");
+        drop(workspace);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Un directorio de la carga útil que no se puede recorrer se rechaza por
+    /// esa razón. Los ficheros de dentro siguen siendo legibles (modo `x` sin
+    /// `r`), de modo que las comprobaciones anteriores pasan.
+    ///
+    /// No discrimina si la prueba se ejecuta como administrador, que lee
+    /// cualquier directorio: entonces solo comprueba que no hay rechazo.
+    #[test]
+    fn a_payload_directory_that_cannot_be_listed_is_rejected_by_the_inventory() {
+        use std::os::unix::fs::PermissionsExt;
+        let (root, workspace) = staged_workspace("unlistable-directory");
+        let payload = workspace.payload_root().to_path_buf();
+        let outputs = payload.join("outputs");
+        std::fs::set_permissions(&outputs, std::fs::Permissions::from_mode(0o311))
+            .expect("permisos");
+        let listable = std::fs::read_dir(&outputs).is_ok();
+        let result = verify_published_f5_package(
+            &payload,
+            &payload.join(F5_MANIFEST_PATH),
+            workspace.artifacts(),
+        );
+        std::fs::set_permissions(&outputs, std::fs::Permissions::from_mode(0o700))
+            .expect("restaurar permisos");
+        if listable {
+            result.expect("con permisos de administrador el directorio se recorre");
+        } else {
+            let detail = detail_of(&result.expect_err("directorio ilegible"));
+            assert!(detail.contains("no se pudo recorrer"), "{detail}");
+        }
+        drop(workspace);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `publishable_relative` y `publishable_path`: lo que es representable en
+    /// `$defs/path` y lo que no, cada exclusión con su caso y su razón.
+    #[test]
+    fn publishable_paths_reject_each_unrepresentable_shape_with_its_reason() {
+        use std::os::unix::ffi::OsStrExt;
+        for good in ["a", "a.b-c_d/E9", "scenarios/scenario.toml", "a/.hidden"] {
+            assert_eq!(
+                publishable_relative(Path::new(good), "campo").expect(good),
+                good
+            );
+        }
+        for bad in [
+            "", "a//b", "a/", "/a", ".", "..", "a/./b", "a/../b", "a b", "a/b c", "ñ", "a:b",
+            "a\\b", "a/b*",
+        ] {
+            let detail = detail_of(&publishable_relative(Path::new(bad), "campo").expect_err(bad));
+            assert!(
+                detail.contains("campo:") && detail.contains("no es representable en $defs/path"),
+                "{bad:?}: {detail}"
+            );
+        }
+        let detail = detail_of(
+            &publishable_relative(Path::new(std::ffi::OsStr::from_bytes(b"a/\xff")), "campo")
+                .expect_err("no UTF-8"),
+        );
+        assert!(detail.contains("campo: no es UTF-8"), "{detail}");
+
+        assert_eq!(
+            publishable_path(
+                Path::new("/authoring"),
+                Path::new("/authoring/a/b.tsv"),
+                "campo"
+            )
+            .expect("dentro de la raíz"),
+            "a/b.tsv"
+        );
+        let detail = detail_of(
+            &publishable_path(
+                Path::new("/authoring"),
+                Path::new("/elsewhere/b.tsv"),
+                "campo",
+            )
+            .expect_err("fuera de la raíz"),
+        );
+        assert!(
+            detail.contains("campo: /elsewhere/b.tsv no cuelga de la raíz de autoría /authoring"),
+            "{detail}"
+        );
+    }
+
+    /// Intento ejecutado de construir un recibo de admisión sin los roles
+    /// contractuales (el metadata del perfil entre ellos). **No discrimina** la
+    /// guarda anotada como inalcanzable en `SharedContract::build`: demuestra
+    /// que el único constructor del recibo se niega, de modo que esa guarda no
+    /// tiene un recibo con el que dispararse.
+    #[test]
+    fn a_receipt_without_the_contractual_roles_cannot_be_sealed() {
+        let rejection = crate::f5_admission::F5AdmissionReceipt::seal(Vec::new(), Vec::new())
+            .expect_err("un recibo sin identidades no se sella");
+        assert!(
+            rejection
+                .render_human()
+                .contains("las identidades selladas no siguen el orden contractual de roles"),
+            "{}",
+            rejection.render_human()
+        );
+    }
+
+    /// Un enlace simbólico en la carga útil se rechaza **por ser un enlace**:
+    /// la razón dice que un paquete declarado por huella no admite enlaces, no
+    /// solo que sobra un fichero. Sin la guarda del tipo, el inventario lo vería
+    /// como un fichero sin declarar y rechazaría igual, con otra razón.
+    #[test]
+    fn a_symbolic_link_in_the_payload_is_rejected_for_being_a_link() {
+        let (root, workspace) = staged_workspace("symlink-reason");
+        let payload = workspace.payload_root().to_path_buf();
+        std::os::unix::fs::symlink(
+            payload.join(F5_MANIFEST_PATH),
+            payload.join("outputs/link.tsv"),
+        )
+        .expect("enlace simbólico");
+        let rejection = verify_published_f5_package(
+            &payload,
+            &payload.join(F5_MANIFEST_PATH),
+            workspace.artifacts(),
+        )
+        .expect_err("un enlace simbólico no es admisible");
+        let detail = detail_of(&rejection);
+        assert!(
+            detail.contains("no es un fichero regular ni un directorio")
+                && detail.contains("no admite enlaces"),
+            "{detail}"
+        );
+        drop(workspace);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Un directorio de la carga útil cuya ruta supera `PATH_MAX` (4096 bytes) no
+    /// se puede listar (`ENAMETOOLONG`) y el inventario lo rechaza por eso. A
+    /// diferencia de quitar permisos, **no depende de quién ejecute la prueba**:
+    /// vale igual como administrador y en un sistema de ficheros que ignore
+    /// permisos. Cada cadena de directorios se crea por separado con una ruta
+    /// corta y luego se renombra dentro de la otra, de modo que ninguna llamada
+    /// de creación o de renombrado ve una ruta larga.
+    #[test]
+    fn a_payload_directory_whose_path_is_too_long_to_list_is_rejected_by_the_inventory() {
+        let (root, workspace) = staged_workspace("path-too-long");
+        let payload = workspace.payload_root().to_path_buf();
+        let chain = |base: &Path| {
+            let mut deepest = base.to_path_buf();
+            for _ in 0..18 {
+                deepest.push("d".repeat(200));
+            }
+            std::fs::create_dir_all(&deepest).expect("cadena de directorios");
+            deepest
+        };
+        let outer_deepest = chain(&payload.join("deep"));
+        let spare = root.join("spare");
+        chain(&spare);
+        assert!(outer_deepest.as_os_str().len() < 4000);
+        let moved = outer_deepest.join("inner");
+        std::fs::rename(&spare, &moved).expect("anidar la segunda cadena");
+        let result = verify_published_f5_package(
+            &payload,
+            &payload.join(F5_MANIFEST_PATH),
+            workspace.artifacts(),
+        );
+        // Desanidar antes de limpiar: `remove_dir_all` tampoco recorre rutas largas.
+        std::fs::rename(&moved, &spare).expect("desanidar");
+        let detail = detail_of(&result.expect_err("ruta demasiado larga"));
+        assert!(detail.contains("no se pudo recorrer"), "{detail}");
+        assert!(detail.contains("File name too long"), "{detail}");
+        drop(workspace);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

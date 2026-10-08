@@ -284,6 +284,9 @@ pub fn validate_final_fastq_mate(
     // La comprobación del marcador deja la posición al final del fichero. Sin
     // rebobinar, el lector BGZF vería cero bytes y daría por bueno cualquier
     // contenido sin leer un solo registro (DT-026).
+    // Redundante, no una guarda: `reject_oversized_blocks` también deja el fichero
+    // al principio, de modo que quitar este rebobinado no cambia el resultado. Se
+    // conserva explícito para que DT-026 no dependa de un efecto de otra función.
     file.seek(SeekFrom::Start(0))
         .map_err(|error| io_error(path, "rewind_after_eof_check", error))?;
     reject_oversized_blocks(&mut file, path)?;
@@ -323,6 +326,9 @@ pub fn validate_final_fastq_mate(
         if expected_mate == crate::technical_identity::TechnicalMate::R1 {
             pair_bits.push(facts.pair_bits);
         }
+        // Inalcanzable porque: el contador solo desborda tras 2^64 registros de
+        // cuatro líneas cada uno, que ningún fichero contiene. La comprobación
+        // evita aritmética sin comprobar en un juez; no hay entrada que la dispare.
         tally.records = tally
             .records
             .checked_add(1)
@@ -404,6 +410,9 @@ pub fn validate_final_paired_fastq(
         if left.is_none() && right.is_none() {
             return Ok(());
         }
+        // Las dos primeras mitades son **equivalentes**, no inalcanzables: cuando
+        // solo uno de los dos es `None`, `left != right` ya es cierto. Se conservan
+        // por legibilidad; quitarlas no cambia ningún resultado.
         if left.is_none() || right.is_none() || left != right {
             return Err(rejected(FastqValidationError::Structural {
                 path: format!("{} / {}", r1_path.display(), r2_path.display()),
@@ -411,6 +420,9 @@ pub fn validate_final_paired_fastq(
                 detail: "FASTQ final mates are orphaned or have different pair IDs",
             }));
         }
+        // Inalcanzable porque: el ordinal cuenta las parejas que acaba de leer el
+        // bucle, y el recuento de parejas del mate (`FinalMateTally::records`)
+        // no pudo desbordar (ver su guarda en `validate_final_fastq_mate`).
         ordinal = ordinal
             .checked_add(1)
             .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
@@ -441,6 +453,11 @@ fn validate_final_artifact(
     path: &Path,
     artifact: &ArtifactRecord,
 ) -> Result<(), FastqValidationError> {
+    // Inalcanzable porque: `identify_file` solo falla si no puede abrir o leer
+    // `path`, y el juez de cada mate acaba de abrirlo y leerlo entero desde la
+    // misma ruta, sin devolver antes un error de E/S. Solo lo alcanzaría que el
+    // fichero desapareciese o se volviese ilegible entre las dos lecturas, una
+    // carrera que una prueba no puede provocar de forma determinista.
     let identity =
         crate::integrity::identify_file(path, Path::new(&artifact.path)).map_err(|error| {
             rejected(FastqValidationError::Artifact {
@@ -487,6 +504,9 @@ fn read_final_line(
             .iter()
             .position(|byte| *byte == b'\n')
             .map_or(buffer.len(), |index| index + 1);
+        // Inalcanzable porque: `line` mide como mucho 256 bytes (se rechaza al
+        // pasar de ahí) y `take` no supera el búfer del lector; su suma no
+        // se acerca a `usize::MAX`.
         if line
             .len()
             .checked_add(take)
@@ -538,6 +558,11 @@ fn validate_final_record(
         record_ordinal: ordinal,
         detail,
     };
+    // La última guarda («la cabecera no termina en salto de línea») es
+    // inalcanzable porque: `read_final_line` rechaza antes toda línea final sin
+    // salto («FASTQ final line is truncated») y el bucle rechaza antes todo
+    // registro con una línea vacía; cuando llegan las cuatro líneas, todas
+    // acaban ya en `\n`.
     let header = std::str::from_utf8(&lines[0])
         .map_err(|_| rejected(structural("FASTQ final header is not UTF-8")))?
         .strip_suffix('\n')
@@ -621,6 +646,15 @@ fn read_final_header(
     if lines.iter().all(Vec::is_empty) {
         return Ok(None);
     }
+    // Inalcanzable, las cuatro comprobaciones de este lector de cabeceras
+    // (registro truncado, cabecera no UTF-8, sin salto de línea y sin `@`)
+    // porque: se ejecuta después de que `validate_final_fastq_mate` haya
+    // recorrido y juzgado **los mismos dos ficheros**, con las mismas
+    // comprobaciones sobre cada registro (`validate_final_record`) y los mismos
+    // textos, y los haya aceptado. Un fichero que las incumpla no llega aquí:
+    // lo para el juez de su mate. Solo lo alcanzaría que el fichero cambiase
+    // entre las dos lecturas, una carrera que una prueba no puede provocar de
+    // forma determinista. Intento ejecutado: `the_pair_judge_never_reaches_its_own_header_reader_with_a_corrupt_mate`.
     if lines.iter().any(Vec::is_empty) {
         return Err(rejected(FastqValidationError::Structural {
             path: path.display().to_string(),
@@ -675,6 +709,9 @@ fn parse_final_header(
     expected_mate: crate::technical_identity::TechnicalMate,
 ) -> Result<FinalFastqHeader, &'static str> {
     let mut fields = header.split(' ');
+    // Inalcanzable porque: partir un texto por espacios siempre da un primer
+    // trozo, aunque sea vacío, y ese trozo vacío lo rechaza la comprobación del
+    // prefijo `GPS` (cubierta por `every_header_rejection_names_its_own_reason`).
     let identity = fields
         .next()
         .ok_or_else(|| rejected("FASTQ final header lacks identity"))?;
@@ -851,6 +888,8 @@ pub fn validate_wgs_fastq(
         let expected = replay
             .origin(ordinal)
             .map_err(FastqValidationError::Replay)?;
+        // Inalcanzable porque: un identificador de plantilla mide decenas de
+        // bytes, no `usize::MAX - 1`.
         let header_maximum = expected
             .template_id
             .as_str()
@@ -911,6 +950,10 @@ pub fn validate_wgs_fastq(
     // asociarse la semántica de una versión con el SHA-256 de otra apertura.
     let (observed_size_bytes, observed_digest) = reader.into_inner().finish();
 
+    // Inalcanzable porque: para llegar aquí el bucle ha leído `expected_count`
+    // registros enteros, y desbordar exige más de 2^64 / 150 (unos 1,2·10^17)
+    // registros: el fichero falla antes por truncamiento. Un `expected_count`
+    // así de grande solo da un rechazo anterior («FASTQ header line is truncated»).
     let base_count = expected_count
         .checked_mul(WGS_READ_LENGTH)
         .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
@@ -975,6 +1018,8 @@ fn read_line(
             .iter()
             .position(|byte| *byte == b'\n')
             .map_or(buffer.len(), |index| index + 1);
+        // Inalcanzable porque: `line` no pasa de `maximum_length` (como mucho 151
+        // bytes) y `take` no supera el búfer del lector.
         let new_length = line
             .len()
             .checked_add(take)
@@ -993,6 +1038,8 @@ fn read_line(
             break;
         }
     }
+    // La mitad `line.is_empty()` es **equivalente**: la última byte de una línea
+    // vacía es `None`, distinta de `Some(&b'\n')`, y la otra mitad ya la rechaza.
     if line.is_empty() || line.last() != Some(&b'\n') {
         return Err(rejected(FastqValidationError::Structural {
             path: path.display().to_string(),
@@ -1052,6 +1099,8 @@ fn validate_canonical_bgzf_eof(
         .metadata()
         .map_err(|error| io_error(path, "metadata_eof_marker", error))?
         .len();
+    // Inalcanzable, esta conversión y la siguiente a `i64` porque: el marcador
+    // mide 28 bytes, que caben en `u64` e `i64`.
     let marker_length = u64::try_from(BGZF_EOF_MARKER.len())
         .map_err(|_| rejected(FastqValidationError::CounterOverflow))?;
     if size < marker_length {
@@ -1083,6 +1132,9 @@ fn missing_canonical_eof(path: &Path, record_ordinal: u64) -> FastqValidationErr
 
 impl StreamDigest {
     fn update(&mut self, bytes: &[u8]) -> Result<(), FastqValidationError> {
+        // Inalcanzable, las dos comprobaciones porque: `bytes.len()` cabe en
+        // `u64` en toda plataforma que compila este crate, y el tamaño
+        // acumulado no llega a 2^64 bytes.
         self.size_bytes = self
             .size_bytes
             .checked_add(
@@ -1152,11 +1204,17 @@ fn validate_record(
         let expected_quality = match base {
             b'A' | b'C' | b'G' | b'T' => ILLUMINA_SE_MINIMAL_ACGT_PHRED + b'!',
             b'N' => {
+                // Inalcanzable porque: cada lectura aporta como mucho 150 `N` y
+                // llegar a 2^64 exigiría más de 10^17 lecturas.
                 unknowns = unknowns
                     .checked_add(1)
                     .ok_or_else(|| rejected(FastqValidationError::CounterOverflow))?;
                 ILLUMINA_SE_MINIMAL_N_PHRED + b'!'
             }
+            // Inalcanzable porque: la secuencia ya es igual a `expected.true_sequence`
+            // (guarda anterior), que solo contiene `ACGTN` por contrato de la
+            // materialización —`reverse_complement_in_place` entra en pánico con
+            // cualquier otra base—. Una base ajena haría fallar antes esa igualdad.
             _ => {
                 return Err(rejected(structural(
                     "FASTQ sequence contains a non-ACGTN base",
@@ -1204,6 +1262,12 @@ impl<'a> ReplayedWgsPlan<'a> {
         if individual.reference_id() != reference.id() {
             return Err(rejected(FastqReplayError::IndividualReferenceMismatch));
         }
+        // Esta comprobación protege el camino de **cobertura**: sin ella, con
+        // `CoverageWgs` el plan llama antes a `derive_library_count_subseed`, que
+        // falla con otro error (`Replay(TechnicalIdentity(GPS-DOMAIN-001))`). Con
+        // `ReadCount` la repite `validate_declared_artifact` con el mismo error y
+        // borrarla no se nota. Las dos variantes las ejercita
+        // `the_replay_refuses_inputs_that_do_not_belong_together`.
         if identities.library(individual.id()).is_none() {
             return Err(rejected(FastqReplayError::MissingTechnicalLibrary));
         }
@@ -1211,6 +1275,9 @@ impl<'a> ReplayedWgsPlan<'a> {
             .sequences()
             .iter()
             .filter(|sequence| sequence.length() >= WGS_READ_LENGTH)
+            // Inalcanzable porque: `Reference::new` ya sumó con `checked_add` las
+            // longitudes de todas sus secuencias y rechazó el desbordamiento; esta
+            // suma recorre un subconjunto.
             .try_fold(0_u64, |total, sequence| {
                 total
                     .checked_add(sequence.length())
@@ -1228,6 +1295,11 @@ impl<'a> ReplayedWgsPlan<'a> {
                 continue;
             }
             for copy in genotype.copies() {
+                // Inalcanzable porque: `current_length` solo falla si las piezas de
+                // la copia suman más de `u64::MAX`. `SegmentChain::new` no comprueba
+                // la longitud total, pero `with_segments` exige la longitud de una
+                // referencia materializada, y desbordar pediría del orden de
+                // 2^64 / L segmentos de longitud L: una memoria que no existe.
                 let current_length = copy
                     .segments()
                     .current_length()
@@ -1238,6 +1310,9 @@ impl<'a> ReplayedWgsPlan<'a> {
                 else {
                     continue;
                 };
+                // Inalcanzable porque: la suma de `start_count` no pasa de la suma de
+                // las longitudes de las copias, y desbordar `u64` pediría la misma
+                // memoria imposible que la guarda anterior.
                 total_start_count = total_start_count
                     .checked_add(start_count)
                     .ok_or_else(|| rejected(FastqReplayError::LengthOverflow))?;
@@ -1284,6 +1359,8 @@ impl<'a> ReplayedWgsPlan<'a> {
         let mut cursor = 0_u64;
         let mut candidate = None;
         for replayed in &self.eligible_copies {
+            // Inalcanzable porque: `cursor` es una suma parcial de los mismos
+            // `start_count` cuya suma total ya se comprobó en `new`.
             cursor = cursor
                 .checked_add(replayed.start_count)
                 .ok_or_else(|| rejected(FastqReplayError::LengthOverflow))?;
@@ -1292,9 +1369,14 @@ impl<'a> ReplayedWgsPlan<'a> {
                 break;
             }
         }
+        // Inalcanzable porque: `selection` sale de `uniform_u64_below(.., total_start_count)`,
+        // es decir, es menor que la suma de todos los `start_count`, y el último
+        // `cursor` del bucle vale exactamente esa suma: alguna copia lo cumple.
         let candidate = candidate.ok_or_else(|| rejected(FastqReplayError::LengthOverflow))?;
         let start =
             uniform_u64_below(&mut rng, candidate.start_count).map_err(FastqReplayError::Random)?;
+        // Inalcanzable porque: `start` es menor que `candidate.start_count`, que no
+        // pasa de la longitud de una copia (cabe en `u64` por lo anterior).
         let end = start
             .checked_add(WGS_READ_LENGTH)
             .ok_or_else(|| rejected(FastqReplayError::LengthOverflow))?;
@@ -1330,6 +1412,9 @@ fn validate_declared_artifact(
     identities: &TechnicalIdentityPlan,
     individual: &Individual,
 ) -> Result<(), FastqValidationError> {
+    // Inalcanzable porque: `ReplayedWgsPlan::new`, que se ejecuta antes en
+    // `validate_wgs_fastq`, ya rechazó con el mismo error un individuo sin
+    // biblioteca en el plan de identidades.
     let library = identities.library(individual.id()).ok_or_else(|| {
         rejected(FastqValidationError::Replay(
             FastqReplayError::MissingTechnicalLibrary,

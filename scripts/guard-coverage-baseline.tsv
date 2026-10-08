@@ -326,6 +326,17 @@
 # el código como inalcanzables, cada una con su porqué junto a la guarda; no se
 # borró ninguna. Es lo medido por la puerta, un suelo y no una prueba de que
 # fallaría si estuviera mal escrita.
+# **El 08/10/2026 bajan dos techos en la segunda tanda de DT-001 (jueces
+# medianos), sin tocar el número de comprobaciones:** `src/fastq_validation.rs`
+# de 36 a 26 y `src/f5_publication.rs` de 36 a 10. Lo cubren pruebas nuevas que
+# exigen el motivo exacto de cada rechazo (en el propio módulo para el paquete F5
+# y en `tests/f3_fastq_validation.rs` y `tests/final_fastq_record_validation.rs`
+# para el FASTQ, más una en `tests/f5_publication.rs`) y se verificaron mutando
+# cada guarda, cada mitad de sus disyunciones y cada motivo en una copia (DT-001
+# en el registro lo detalla). Las 36 que quedan sin disparar (26 + 10) están
+# documentadas en el código como inalcanzables, cada una con su porqué junto a
+# la guarda; no se borró ninguna. Es lo medido por la puerta, un suelo y no una
+# prueba de que fallaría si estuviera mal escrita.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
@@ -334,9 +345,9 @@ src/results.rs	779	618
 src/event_manifest.rs	147	117
 src/truth_validation.rs	118	93
 src/truth_schema.rs	69	44
-src/fastq_validation.rs	84	36
+src/fastq_validation.rs	84	26
 src/population_snvs.rs	143	123
-src/f5_publication.rs	53	36
+src/f5_publication.rs	53	10
 src/reference_fasta.rs	41	7
 src/reference_reduction_io.rs	55	12
 src/integrity.rs	1	0
