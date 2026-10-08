@@ -747,6 +747,15 @@ impl ExecutionWorkspace {
         self.retain_only_artifacts(&BTreeSet::new())
     }
 
+    /// ¿Los bytes que hay hoy en disco son exactamente los de `record`, tal
+    /// como se catalogaron al validarlos? Responde «no» también si el fichero
+    /// no se puede leer.
+    pub(crate) fn disk_still_matches(&self, record: &ArtifactRecord) -> bool {
+        crate::integrity::identify_file(&self.payload.join(&record.path), &record.path)
+            .and_then(|identity| ArtifactRecord::from_identity(&record.id, &record.kind, &identity))
+            .is_ok_and(|now| now == *record)
+    }
+
     #[cfg(test)]
     pub(crate) fn replace_artifact_bytes_for_validation_test(
         &mut self,

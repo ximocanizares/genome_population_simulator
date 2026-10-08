@@ -39,7 +39,9 @@ const BGZF_EOF_MARKER: [u8; 28] = [
 #[cfg(test)]
 thread_local! {
     static FORCE_FINAL_R2_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static FORCE_FINAL_PAIR_VALIDATION_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Cuenta atrás: 0 apagado; `n` hace fallar la validación conjunta de la
+    /// n-ésima biblioteca que se cierre (1 es la primera).
+    pub(crate) static FORCE_FINAL_PAIR_VALIDATION_FAILURE: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 /// Codifica calidades numéricas estrictas como FASTQ Sanger (Phred+33).
@@ -463,12 +465,18 @@ pub fn write_final_paired_fastq(
 fn maybe_inject_final_pair_validation_failure()
 -> Result<(), crate::fastq_validation::FastqValidationError> {
     #[cfg(test)]
-    if FORCE_FINAL_PAIR_VALIDATION_FAILURE.replace(false) {
-        return Err(crate::fastq_validation::FastqValidationError::Structural {
-            path: "injected-final-pair".to_owned(),
-            record_ordinal: 0,
-            detail: "injected final-pair validation failure",
-        });
+    {
+        let remaining = FORCE_FINAL_PAIR_VALIDATION_FAILURE.get();
+        if remaining > 0 {
+            FORCE_FINAL_PAIR_VALIDATION_FAILURE.set(remaining - 1);
+        }
+        if remaining == 1 {
+            return Err(crate::fastq_validation::FastqValidationError::Structural {
+                path: "injected-final-pair".to_owned(),
+                record_ordinal: 0,
+                detail: "injected final-pair validation failure",
+            });
+        }
     }
     Ok(())
 }
@@ -1148,7 +1156,7 @@ mod tests {
             if inject_r2 {
                 FORCE_FINAL_R2_FAILURE.set(true);
             } else {
-                FORCE_FINAL_PAIR_VALIDATION_FAILURE.set(true);
+                FORCE_FINAL_PAIR_VALIDATION_FAILURE.set(1);
             }
             let result = write_final_paired_fastq(
                 &mut workspace,

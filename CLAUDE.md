@@ -289,16 +289,17 @@ tenerla: mide si una comprobación **llega a dispararse**, no si una prueba
 que demuestra que una comprobación está probada de verdad sigue siendo
 **mutarla y ver morir la prueba**. Ver DT-001 en el registro de deudas.
 
-**Trampa de `pytest`:** no está instalado ni declarado en `pyproject.toml`. La
-puerta canónica es `unittest`, y bajo ella `tests/test_process_adapter.py`
-aborta con `ModuleNotFoundError` desde el commit `6139fe9` (25/08/2026): lleva
-sin ejecutarse desde entonces. Solo corre con `uv run --with pytest`. Deuda
-registrada en el plan de F5, sin destino asignado.
+**Las pruebas de Python viven en `tests_ui/`**, que es lo único que recorre la
+puerta canónica (`unittest`). `pytest` no está instalado ni declarado: no se
+usa. Un fichero de pruebas Python fuera de `tests_ui/` **no lo ejecuta nadie**;
+así pasó con `tests/test_process_adapter.py` del 25/08 al 06/10/2026 (DT-004,
+cerrada) y sigue pasando con `tests/test_population_snvs_editor.py` (DT-037).
 
 Fallos preexistentes y ajenos que **no** hay que perseguir: dos en `tests_ui`
-(F2.5 VCF UI y F4.1 evento técnico) y once pruebas ignoradas históricas de
+(F2.5 VCF UI y F4.1 evento técnico) y nueve pruebas ignoradas históricas de
 F3/F4 —eran doce hasta que la de normalización con `bcftools` se encendió el
-20 de septiembre de 2026—.
+20 de septiembre de 2026, y once hasta que el 06/10/2026 se borraron dos que
+estaban vaciadas (DT-002)—.
 
 ## 8. Entorno
 

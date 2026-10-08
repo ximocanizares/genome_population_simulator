@@ -509,25 +509,51 @@ fn execute_validated_config_with_effective_document(
             })
         }
         Err(cause) => {
-            for reduction in &mut manifest_reductions {
+            // REQ-SAL-25, DTC-045 y REQ-SAL-27, **una sola regla**: una reducción
+            // completa cuyos bytes en disco siguen siendo los que se validaron al
+            // escribirlos se conserva entera, haya evento o no y falle lo que
+            // falle; la que no pasa esa comprobación, o la que causó el fallo,
+            // queda fallida y sin artefactos. Solo se comprueba que los bytes en
+            // disco son los que se validaron al escribirlos; no se repite el juicio
+            // final (reconstruir la derivada desde subsemilla y selección y
+            // compararla base a base), de modo que un defecto del propio productor
+            // en la selección no se detectaría aquí.
+            let kept = published_reductions
+                .iter()
+                .filter(|published| {
+                    manifest_reductions[published.effective_index].state == UnitState::Complete
+                        && workspace.disk_still_matches(&published.fasta)
+                        && workspace.disk_still_matches(&published.map)
+                })
+                .map(|published| published.effective_index)
+                .collect::<BTreeSet<_>>();
+            for (index, reduction) in manifest_reductions.iter_mut().enumerate() {
+                if kept.contains(&index) {
+                    continue;
+                }
                 reduction.state = UnitState::Failed;
                 reduction.fasta_artifact_id = None;
                 reduction.map_artifact_id = None;
                 reduction.source_fasta_artifact_id = None;
             }
-            let failure_references = if event_links.is_some() {
-                manifest_references
-                    .iter()
-                    .filter(|reference| {
-                        !manifest_reductions
-                            .iter()
-                            .any(|reduction| reduction.id == reference.id)
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>()
-            } else {
-                Vec::new()
-            };
+            let failure_references = manifest_references
+                .iter()
+                .filter(|reference| {
+                    match manifest_reductions
+                        .iter()
+                        .find(|reduction| reduction.id == reference.id)
+                    {
+                        Some(reduction) => reduction.state == UnitState::Complete,
+                        // Sin evento solo sobrevive la suministrada, y solo si
+                        // alguna reducción se conserva y la nombra de origen.
+                        None => {
+                            event_links.is_some()
+                                || (!kept.is_empty() && reference.id == effective.reference_id())
+                        }
+                    }
+                })
+                .cloned()
+                .collect::<Vec<_>>();
             // **Con lecturas ya publicadas, la referencia final se conserva con
             // su mapa** (DTC-098): las lecturas salieron de ella, y el paquete
             // fallido tiene que poder relacionarla con la suministrada
@@ -805,11 +831,6 @@ impl TechnicalEventArtifact {
             diagnostic: None,
         }
     }
-}
-
-#[cfg(test)]
-thread_local! {
-    static FORCE_FASTQ_REVALIDATION_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Ensambla el único evento técnico real de F3 exclusivamente desde FASTQ ya
@@ -1859,12 +1880,17 @@ fn publish_controlled_failure(
     if let Some(artifact) = &configuration_artifact {
         retained.insert(artifact.id.clone());
     }
+    retained.extend(
+        references
+            .iter()
+            .map(|reference| reference.fasta_artifact_id.clone()),
+    );
+    retained.extend(
+        reductions
+            .iter()
+            .filter_map(|reduction| reduction.map_artifact_id.clone()),
+    );
     if events.is_some() {
-        retained.extend(
-            references
-                .iter()
-                .map(|reference| reference.fasta_artifact_id.clone()),
-        );
         retained.extend(
             workspace
                 .artifacts()
@@ -3631,119 +3657,285 @@ i5 = "TGCATGCA"
         fs::remove_dir_all(root).expect("cleanup");
     }
 
-    #[test]
-    #[ignore = "F4.5.2 sustituye la ruta SE histórica; la vía PE se cubre en f3_event_assembly"]
-    #[allow(unreachable_code)]
-    fn controlled_failure_after_event_discards_derived_references_with_failed_reductions() {
-        let root = std::env::temp_dir().join(format!(
-            "gps-f3-event-reduction-failure-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&root).expect("test root");
-        fs::write(
-            root.join("reference.fa"),
-            format!(">chr1\n{}\n", "A".repeat(200)),
-        )
-        .expect("reference");
+    /// Configuración sobre una referencia suministrada de 2000 pb con **dos**
+    /// referencias reducidas derivadas (`ref-small` y `ref-small-b`) y, si
+    /// `individuals` no está vacío, un evento técnico de la vía de parejas.
+    fn reductions_config(root: &Path, individuals: &[(&str, &str, &str)]) -> PathBuf {
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let bases = (0..2000)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                char::from(b"ACGT"[(state % 4) as usize])
+            })
+            .collect::<String>();
+        fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
+        let (population_ids, event) = if individuals.is_empty() {
+            ("\"I1\"".to_owned(), String::new())
+        } else {
+            let ids = individuals
+                .iter()
+                .map(|(id, _, _)| format!("\"{id}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let libraries = individuals
+                .iter()
+                .map(|(id, i7, i5)| {
+                    format!(
+                        "[[technical_event.libraries]]\nindividual_id = \"{id}\"\ni7 = \"{i7}\"\ni5 = \"{i5}\"\n"
+                    )
+                })
+                .collect::<String>();
+            (
+                ids.clone(),
+                format!(
+                    "\n[technical_event]\nevent_id = \"reads-main\"\nindividual_ids = [{ids}]\ntarget_coverage_wgs = 2\nsequencing_errors = \"disabled\"\n{libraries}"
+                ),
+            )
+        };
+        let count = individuals.len().max(1);
         let config = root.join("general.toml");
         fs::write(
             &config,
-            r#"config_kind = "general"
-schema_version = "2"
-seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
-[reference]
-kind = "supplied"
-id = "reference-main"
-fasta = "reference.fa"
-[[reference.sequences]]
-id = "chr1"
-class = "chromosome"
-length = 200
-[[reduced_references]]
-id = "reference-small"
-source_reference_id = "reference-main"
-region_size_bases = 10
-target_bases = 100
+            format!(
+                r#"config_kind = "general"
+schema_version = "4"
+seed = "00000000000000000000000000000000000000000000000000000000000000bb"
+
 [population_snvs]
 mode = "generate"
+
 [population_snvs.generate]
 count_mode = "exact"
 locus_count = 1
 spatial_mode = "uniform"
 substitution_profile = "uniform_snv12_v1"
+
 [[population_snvs.generate.populations]]
 population_id = "P1"
 frequency_model = "uniform"
 min_alt_af = 0.2
 max_alt_af = 0.8
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 2000
+
+[[reduced_references]]
+id = "ref-small"
+source_reference_id = "ref-main"
+region_size_bases = 100
+target_bases = 1000
+
+[[reduced_references]]
+id = "ref-small-b"
+source_reference_id = "ref-main"
+region_size_bases = 100
+target_bases = 800
+
 [[initial_populations]]
 population_id = "P1"
-individual_count = 1
-individual_ids = ["sample-A"]
+individual_count = {count}
+individual_ids = [{population_ids}]
 ploidy = 2
 genotype_model = "hwe"
-[technical_event]
-event_id = "reads-main"
-individual_ids = ["sample-A"]
-target_coverage_wgs = 1.0
-[[technical_event.libraries]]
-individual_id = "sample-A"
-i7 = "ACGTACGT"
-i5 = "TGCATGCA"
-"#,
+{event}"#
+            ),
         )
         .expect("config");
-        let effective = load_and_validate_config(&config).expect("effective config");
-        let destination = root.join("result");
+        config
+    }
 
+    #[derive(Clone, Copy)]
+    enum FailureScenario {
+        /// El gancho previo al manifiesto falla con un error de E/S propio.
+        HookFails,
+        /// Una base del FASTA de `ref-small` cambia **después** de validarse.
+        TamperedFasta,
+        /// El mapa de `ref-small` gana un campo ajeno después de validarse.
+        TamperedMap,
+    }
+
+    /// Ejecuta `reductions_config` con o sin evento hasta un fallo controlado y
+    /// devuelve el error, el manifiesto fallido y el destino.
+    fn run_failed_with_reductions(
+        with_event: bool,
+        scenario: FailureScenario,
+    ) -> (Diagnostic, serde_json::Value, PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "gps-failure-reductions-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("test root");
+        let individuals: &[(&str, &str, &str)] = if with_event {
+            &[("I1", "ACGTACGT", "TGCATGCA")]
+        } else {
+            &[]
+        };
+        let config = reductions_config(&root, individuals);
+        let effective = load_and_validate_config(&config).expect("valid config");
+        let destination = root.join("result");
         let error = execute_validated_config_with_effective_document(
             &effective,
             &destination,
             ExecutionAuthorizations::default(),
             |_| Ok(()),
             std::convert::identity,
-            |_| {
-                Err(Diagnostic::internal_invariant(
-                    "test",
-                    "before-manifest-failure",
-                ))
+            |workspace| match scenario {
+                FailureScenario::HookFails => Err(Diagnostic::io(
+                    "GPS-IO-001",
+                    "Una operación de lectura o escritura falló.",
+                )
+                .with("detail", "fallo provocado tras las reducciones")),
+                FailureScenario::TamperedFasta => {
+                    let artifact = workspace
+                        .artifacts()
+                        .iter()
+                        .find(|artifact| artifact.id == "reference-fasta-ref-small")
+                        .expect("derived reference artifact")
+                        .clone();
+                    let mut bytes =
+                        fs::read(workspace.root().join(&artifact.path)).expect("derived FASTA");
+                    let start = bytes
+                        .iter()
+                        .position(|byte| *byte == b'\n')
+                        .expect("header")
+                        + 1;
+                    bytes[start] = if bytes[start] == b'A' { b'C' } else { b'A' };
+                    workspace.replace_artifact_bytes_for_validation_test(
+                        "reference-fasta-ref-small",
+                        &bytes,
+                    )
+                }
+                FailureScenario::TamperedMap => {
+                    let artifact = workspace
+                        .artifacts()
+                        .iter()
+                        .find(|artifact| artifact.id == "reference-map-ref-small")
+                        .expect("derived map artifact")
+                        .clone();
+                    let mut document: serde_json::Value = serde_json::from_slice(
+                        &fs::read(workspace.root().join(&artifact.path)).expect("derived map"),
+                    )
+                    .expect("map JSON");
+                    document["foreign_field"] = json!(1);
+                    workspace.replace_artifact_bytes_for_validation_test(
+                        "reference-map-ref-small",
+                        &serde_json::to_vec(&document).expect("map bytes"),
+                    )
+                }
             },
         )
-        .expect_err("injected failure");
-        assert_eq!(error.code(), "GPS-CONF-008");
-        assert!(!destination.exists());
-        fs::remove_dir_all(root).expect("cleanup");
-        return;
+        .expect_err("la ejecución falla");
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(destination.join("manifest.json")).expect("manifiesto fallido"),
+        )
+        .expect("JSON");
+        (error, manifest, destination, root)
+    }
 
-        let manifest_path = destination.join("manifest.json");
-        let manifest_bytes = fs::read(&manifest_path).expect("failed manifest");
-        crate::results::validate_general_manifest_bytes(&manifest_path, &manifest_bytes)
-            .expect("controlled failure remains publishable");
-        let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).expect("JSON");
-        assert_eq!(manifest["state"], "failed");
+    fn assert_reduction_kept(manifest: &serde_json::Value, destination: &Path, id: &str) {
+        let reduction = manifest["reference_reductions"]
+            .as_array()
+            .expect("reductions")
+            .iter()
+            .find(|reduction| reduction["id"] == id)
+            .expect("reduction");
+        assert_eq!(reduction["state"], "complete", "{id}");
         assert_eq!(
-            manifest["references"],
-            json!([{
-                           "id": "reference-main",
-                           "fasta_artifact_id": "reference-fasta"
-            }])
+            reduction["fasta_artifact_id"],
+            format!("reference-fasta-{id}")
         );
-        assert_eq!(manifest["reference_reductions"][0]["state"], "failed");
+        assert_eq!(reduction["map_artifact_id"], format!("reference-map-{id}"));
+        assert_eq!(reduction["source_fasta_artifact_id"], "reference-fasta");
+        assert!(
+            manifest["references"]
+                .as_array()
+                .expect("references")
+                .contains(&json!({"id": id, "fasta_artifact_id": format!("reference-fasta-{id}")})),
+            "{id} in {}",
+            manifest["references"]
+        );
+        for relative in [
+            format!("resources/references/{id}.fa"),
+            format!("resources/references/{id}.map.json"),
+        ] {
+            assert!(destination.join(&relative).is_file(), "missing {relative}");
+        }
+    }
+
+    fn assert_reduction_discarded(manifest: &serde_json::Value, destination: &Path, id: &str) {
+        let reduction = manifest["reference_reductions"]
+            .as_array()
+            .expect("reductions")
+            .iter()
+            .find(|reduction| reduction["id"] == id)
+            .expect("reduction");
+        assert_eq!(reduction["state"], "failed", "{id}");
+        assert_eq!(reduction["fasta_artifact_id"], serde_json::Value::Null);
+        assert_eq!(reduction["map_artifact_id"], serde_json::Value::Null);
         assert_eq!(
-            manifest["reference_reductions"][0]["fasta_artifact_id"],
+            reduction["source_fasta_artifact_id"],
             serde_json::Value::Null
         );
         assert!(
-            manifest["artifacts"]
+            manifest["references"]
                 .as_array()
-                .expect("catalog")
+                .expect("references")
                 .iter()
-                .all(
-                    |artifact| artifact["id"] != "reference-fasta-reference-small"
-                        && artifact["id"] != "reference-map-reference-small"
-                )
+                .all(|reference| reference["id"] != id),
+            "{id} in {}",
+            manifest["references"]
         );
+        for relative in [
+            format!("resources/references/{id}.fa"),
+            format!("resources/references/{id}.map.json"),
+        ] {
+            assert!(!destination.join(&relative).exists(), "retained {relative}");
+        }
+    }
+
+    /// REQ-SAL-25 y DTC-045. Un fallo **después** de publicar el evento no
+    /// invalida lo ya publicado y validado que sea independiente: el paquete
+    /// fallido conserva la referencia suministrada, el manifiesto del evento y
+    /// **las dos** referencias reducidas completas (FASTA y mapa en disco,
+    /// enlaces y estado `complete`), y registra la ejecución como fallida con su
+    /// causa. Las aserciones sobre la lista de artefactos y sobre la presencia
+    /// en disco **no son independientes del juez del catálogo**
+    /// (`require_artifact_kind`, `verify_catalog`): sacar la reducción de
+    /// `references` o no retener su mapa cae antes por `GPS-FMT-006` en la
+    /// primera aserción. Las que sí cazan por sí solas son las del estado, la
+    /// lista de referencias y la de que se conservan las dos.
+    #[test]
+    fn a_failure_after_the_event_keeps_the_completed_reduced_references() {
+        let (error, manifest, destination, root) =
+            run_failed_with_reductions(true, FailureScenario::HookFails);
+        assert_eq!(error.code(), "GPS-IO-001");
+        assert!(format!("{error:?}").contains("fallo provocado"));
+        assert_eq!(manifest["state"], "failed");
+        // Al manifiesto solo llegan el código y el mensaje de catálogo, así que
+        // una causa distinta se detecta por un código distinto del genérico.
+        assert_eq!(manifest["diagnostics"][0]["code"], "GPS-IO-001");
+        assert_eq!(manifest["diagnostics"].as_array().expect("array").len(), 1);
+        assert_eq!(manifest["events"][0]["event_id"], "reads-main");
+        assert_eq!(
+            manifest["references"],
+            json!([
+                {"id": "ref-main", "fasta_artifact_id": "reference-fasta"},
+                {"id": "ref-small", "fasta_artifact_id": "reference-fasta-ref-small"},
+                {"id": "ref-small-b", "fasta_artifact_id": "reference-fasta-ref-small-b"}
+            ])
+        );
+        assert_reduction_kept(&manifest, &destination, "ref-small");
+        assert_reduction_kept(&manifest, &destination, "ref-small-b");
         assert!(
             destination
                 .join("events/reads-main/manifest.json")
@@ -3752,101 +3944,145 @@ i5 = "TGCATGCA"
         fs::remove_dir_all(root).expect("cleanup");
     }
 
+    /// REQ-SAL-25 y DTC-045 sin evento: la misma regla. Una reducción completa
+    /// se conserva aunque el fallo llegue antes de cualquier lectura, junto con
+    /// la referencia suministrada de la que deriva.
     #[test]
-    #[ignore = "F4.5.2 elimina la validación SE histórica; la publicación PE valida ambos mates"]
-    #[allow(unreachable_code)]
-    fn failed_independent_fastq_validation_discards_fastq_before_failed_event_manifest() {
+    fn a_failure_without_event_keeps_the_completed_reduced_references_and_their_source() {
+        let (error, manifest, destination, root) =
+            run_failed_with_reductions(false, FailureScenario::HookFails);
+        assert_eq!(error.code(), "GPS-IO-001");
+        assert_eq!(manifest["state"], "failed");
+        assert_eq!(manifest["events"], serde_json::Value::Null);
+        assert_eq!(
+            manifest["references"],
+            json!([
+                {"id": "ref-main", "fasta_artifact_id": "reference-fasta"},
+                {"id": "ref-small", "fasta_artifact_id": "reference-fasta-ref-small"},
+                {"id": "ref-small-b", "fasta_artifact_id": "reference-fasta-ref-small-b"}
+            ])
+        );
+        assert_reduction_kept(&manifest, &destination, "ref-small");
+        assert_reduction_kept(&manifest, &destination, "ref-small-b");
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    /// REQ-SAL-27. Una reducción cuyos bytes cambian **después** de validarse
+    /// —el juez final la rechaza— no se publica como completa en el paquete
+    /// fallido, con evento o sin él, ni cambiando el FASTA ni el mapa: queda
+    /// `failed`, sin enlaces y sin ficheros, y la otra reducción, intacta, se
+    /// conserva.
+    #[test]
+    fn a_reduction_altered_after_validation_is_discarded_and_the_other_is_kept() {
+        for with_event in [true, false] {
+            for scenario in [FailureScenario::TamperedFasta, FailureScenario::TamperedMap] {
+                let (error, manifest, destination, root) =
+                    run_failed_with_reductions(with_event, scenario);
+                assert_eq!(error.code(), "GPS-FMT-006");
+                assert_eq!(manifest["state"], "failed");
+                assert_reduction_discarded(&manifest, &destination, "ref-small");
+                assert_reduction_kept(&manifest, &destination, "ref-small-b");
+                fs::remove_dir_all(root).expect("cleanup");
+            }
+        }
+    }
+
+    /// REQ-SAL-22, REQ-SAL-23 y REQ-SAL-25. Si el ensamblado del evento falla
+    /// en la **segunda** biblioteca —la validación conjunta de sus mates—, la
+    /// primera ya cerró sus FASTQ, y aun así el paquete fallido no conserva
+    /// ninguno ni nada del evento ni artefactos parciales, pero **sí** las
+    /// reducciones completas y su referencia de origen, y registra la causa (el
+    /// manifiesto solo guarda su código y el mensaje de catálogo, de modo que
+    /// esta prueba no distingue dos fallos internos entre sí; la que sí lo hace
+    /// es la de fallo tras el evento, con un código propio). **No exige**
+    /// `events: null`: que un evento fallido no quede enlazado contradice
+    /// REQ-SAL-21 y está registrado como DT-036, sin fijarlo aquí.
+    #[test]
+    fn a_failed_event_assembly_keeps_the_completed_reductions_but_no_fastq_nor_event() {
+        use crate::fastq_output::FORCE_FINAL_PAIR_VALIDATION_FAILURE;
         let root = std::env::temp_dir().join(format!(
-            "gps-f3-fastq-revalidation-failure-{}-{}",
+            "gps-failure-event-assembly-{}-{}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
-        if root.exists() {
-            fs::remove_dir_all(&root).expect("remove stale test root");
-        }
         fs::create_dir(&root).expect("test root");
-        let config = root.join("general.toml");
-        fs::write(
-            &config,
-            r#"config_kind = "general"
-schema_version = "2"
-seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
-[reference]
-kind = "simulated"
-id = "reference-main"
-[reference.composition]
-A = 0.25
-C = 0.25
-G = 0.25
-T = 0.25
-[[reference.sequences]]
-id = "chr1"
-class = "chromosome"
-length = 200
-[population_snvs]
-mode = "generate"
-[population_snvs.generate]
-count_mode = "exact"
-locus_count = 1
-spatial_mode = "uniform"
-substitution_profile = "uniform_snv12_v1"
-[[population_snvs.generate.populations]]
-population_id = "P1"
-frequency_model = "uniform"
-min_alt_af = 0.2
-max_alt_af = 0.8
-[[initial_populations]]
-population_id = "P1"
-individual_count = 1
-individual_ids = ["sample-A"]
-ploidy = 2
-genotype_model = "hwe"
-[technical_event]
-event_id = "reads-main"
-individual_ids = ["sample-A"]
-target_coverage_wgs = 1.0
-[[technical_event.libraries]]
-individual_id = "sample-A"
-i7 = "ACGTACGT"
-i5 = "TGCATGCA"
-"#,
-        )
-        .expect("config");
-        let effective = load_and_validate_config(&config).expect("effective config");
+        let config = reductions_config(
+            &root,
+            &[
+                ("I1", "ACGTACGT", "TGCATGCA"),
+                ("I2", "TGCATGCA", "ACGTACGT"),
+            ],
+        );
+        let effective = load_and_validate_config(&config).expect("valid config");
         let destination = root.join("result");
-        FORCE_FASTQ_REVALIDATION_FAILURE.set(true);
-        let error = execute_validated_config(&effective, &destination)
-            .expect_err("injected FASTQ validation failure");
-        assert_eq!(error.code(), "GPS-CONF-008");
-        assert!(!destination.exists());
-        fs::remove_dir_all(root).expect("cleanup");
-        return;
-        assert!(!FORCE_FASTQ_REVALIDATION_FAILURE.get());
-
-        let manifest: serde_json::Value = serde_json::from_slice(
-            &fs::read(destination.join("manifest.json")).expect("failed manifest"),
+        FORCE_FINAL_PAIR_VALIDATION_FAILURE.set(2);
+        let error = execute_validated_config_with_effective_document(
+            &effective,
+            &destination,
+            ExecutionAuthorizations::default(),
+            |_| Ok(()),
+            std::convert::identity,
+            |_| Ok(()),
         )
-        .expect("manifest JSON");
+        .expect_err("la validación conjunta de la segunda biblioteca falla");
+        assert_eq!(
+            FORCE_FINAL_PAIR_VALIDATION_FAILURE.get(),
+            0,
+            "the injected failure must have fired on the second library"
+        );
+        assert!(
+            format!("{error:?}").contains("injected final-pair validation failure"),
+            "{error:?}"
+        );
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(destination.join("manifest.json")).expect("manifiesto fallido"),
+        )
+        .expect("JSON");
         assert_eq!(manifest["state"], "failed");
-        assert_eq!(manifest["events"][0]["state"], "failed");
-        assert!(
-            destination
-                .join("events/reads-main/manifest.json")
-                .is_file()
+        assert_eq!(manifest["diagnostics"][0]["code"], error.code());
+        assert_eq!(
+            manifest["references"],
+            json!([
+                {"id": "ref-main", "fasta_artifact_id": "reference-fasta"},
+                {"id": "ref-small", "fasta_artifact_id": "reference-fasta-ref-small"},
+                {"id": "ref-small-b", "fasta_artifact_id": "reference-fasta-ref-small-b"}
+            ])
         );
-        assert!(
-            !destination
-                .join("outputs/fastq/reads-main/sample-A.fastq.gz")
-                .exists(),
-            "a FASTQ rejected by independent replay must not be retained"
+        assert_reduction_kept(&manifest, &destination, "ref-small");
+        assert_reduction_kept(&manifest, &destination, "ref-small-b");
+        let mut ids = manifest["artifacts"]
+            .as_array()
+            .expect("catalog")
+            .iter()
+            .map(|artifact| artifact["id"].as_str().expect("id").to_owned())
+            .collect::<Vec<_>>();
+        ids.sort();
+        assert_eq!(
+            ids,
+            [
+                "config-general",
+                "reference-fasta",
+                "reference-fasta-ref-small",
+                "reference-fasta-ref-small-b",
+                "reference-map-ref-small",
+                "reference-map-ref-small-b"
+            ]
         );
-        assert!(
-            manifest["artifacts"]
-                .as_array()
-                .expect("catalog")
-                .iter()
-                .all(|artifact| artifact["kind"] != "fastq")
-        );
+        let mut pending = vec![destination.clone()];
+        while let Some(directory) = pending.pop() {
+            for entry in fs::read_dir(&directory).expect("read directory") {
+                let path = entry.expect("entry").path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else {
+                    let name = path.to_string_lossy().into_owned();
+                    assert!(
+                        !name.contains("fastq") && !name.contains("/events/"),
+                        "retained {name}"
+                    );
+                }
+            }
+        }
         fs::remove_dir_all(root).expect("cleanup");
     }
 

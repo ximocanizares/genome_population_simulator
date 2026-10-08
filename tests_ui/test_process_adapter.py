@@ -167,6 +167,29 @@ class ProcessAdapterTests(unittest.TestCase):
                 )
         run.assert_not_called()
 
+    def test_e147_f1_version_is_rejected_before_any_form_action(self) -> None:
+        """F1 e14705a reported 0.1.0; F2's UI must reject it at the version gate."""
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            legacy = work / "genome-population-simulator"
+            legacy.write_text(
+                "#!/bin/sh\n"
+                'echo "$1" >> "$(dirname "$0")/calls"\n'
+                'if [ "$1" = "--version" ]; then\n'
+                "  echo 'genome-population-simulator 0.1.0'\n"
+                "  exit 0\n"
+                "fi\n"
+                "echo 'form action was reached' >&2\n"
+                "exit 99\n",
+                encoding="utf-8",
+            )
+            legacy.chmod(0o755)
+
+            with self.assertRaisesRegex(ProcessAdapterError, "0.2.0"):
+                validate_toml(legacy, 'config_kind = "general"', work)
+
+            self.assertEqual((work / "calls").read_text(encoding="utf-8"), "--version\n")
+
     @unittest.skipUnless(BINARY.exists(), "compile the Rust binary before this integration test")
     def test_real_binary_validates_and_runs_without_loading_result_artifacts(self) -> None:
         toml = render_general_toml(default_form())

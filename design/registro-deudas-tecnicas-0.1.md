@@ -22,6 +22,12 @@ Este registro las reúne.
 Una entrada se cierra cuando la deficiencia deja de existir, **no** cuando se
 documenta mejor.
 
+**Estado «Aceptada».** La deficiencia sigue existiendo y **sigue abierta**: es
+conocida, el responsable ha decidido convivir con ella y no hay trabajo
+previsto. Se distingue de «Cerrada» porque nada la ha arreglado, y de «Abierta»
+porque no se espera arreglarla. Cada entrada aceptada dice **qué** se paga por
+convivir con ella y **qué condición** obligaría a reconsiderarla.
+
 ---
 
 ## 2. Registro
@@ -29,11 +35,11 @@ documenta mejor.
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
 | DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026) |
-| DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | Abierta |
+| DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | **Cerrada (06/10/2026)**, borradas; los dos huecos que dejaban, cubiertos con pruebas nuevas de la vía de parejas |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
-| DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | Abierta |
+| DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | **Cerrada (06/10/2026)** |
 | DT-005 | La marca del lector de verdad que distingue un tramo sustituido por un tracto no la ejercita ninguna prueba | Baja | 22/09/2026 | Abierta |
-| DT-006 | El sorteo del inserto por rechazo es inutilizable cuando la copia más larga acerca el máximo al mínimo del perfil | Media | 24/09/2026 | Abierta, con guarda de admisión (25/09/2026) |
+| DT-006 | El sorteo del inserto por rechazo es inutilizable cuando la copia más larga acerca el máximo al mínimo del perfil | Media | 24/09/2026 | **Aceptada (06/10/2026)**, con guarda de admisión (25/09/2026) |
 | DT-007 | Ningún diagnóstico público nuevo puede publicarse en un manifiesto del recorrido general | Baja | 25/09/2026 | Abierta |
 | DT-008 | El orden entre el paso de linaje y la decisión de base no lo separaba ninguna prueba | Baja | 26/09/2026 | **Cerrada (26/09/2026)** |
 | DT-009 | Las dos fuentes de la calibración discrepan en cuánto multiplica la PCR el tartamudeo de los homopolímeros | Media | 27/09/2026 | Abierta |
@@ -50,7 +56,7 @@ documenta mejor.
 | DT-020 | Sin VCF, quitar un caso indel o de repetición de la verdad se publica | Media | 03/10/2026 | **Cerrada (03/10/2026)** |
 | DT-021 | El juez de la verdad no ancla los casos todo-REF, deja pasar un SNP quitado y clasifica mal una corrupción estructural | Media | 03/10/2026 | **Cerrada (04/10/2026)** |
 | DT-022 | El juez de los recursos publicados resuelve la ruta de una matriz reutilizada respecto al directorio de trabajo, no al paquete | Media | 04/10/2026 | **Cerrada (04/10/2026)** |
-| DT-023 | Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete | Baja | 04/10/2026 | **Cerrada por aceptación (04/10/2026)** |
+| DT-023 | Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete | Baja | 04/10/2026 | **Aceptada (04/10/2026)** |
 | DT-024 | `validate_published_resources` no termina con `lineages` = 18446744073709551615 en la configuración efectiva | Media | 04/10/2026 | **Cerrada (06/10/2026)** |
 | DT-025 | `validate_published_resources` aborta con `capacity overflow` si `reference_units[1]` = 18446744073709551615 en la efectiva | Media | 04/10/2026 | **Cerrada (06/10/2026)** |
 | DT-026 | El juez de cada mate del FASTQ final no leía ni un registro: toda la validación de registros era código muerto en producción | **Grave** | 05/10/2026 | **Cerrada (05/10/2026)** |
@@ -63,6 +69,10 @@ documenta mejor.
 | DT-033 | La verificación del paquete F5 publicado acepta manifiestos con enlaces escritos como lista JSON, que el esquema rechaza | Baja | 06/10/2026 | **Cerrada (06/10/2026)** |
 | DT-034 | Lo publicado atribuye las cifras de calibración del tartamudeo solo a Raz et al. (2019), cuando son de Gymrek (2016), cuya licencia exige atribuirlas | Baja | 06/10/2026 | Abierta |
 | DT-035 | La puerta del paquete F5 acepta manifiestos que el esquema rechaza en campos que no lee con forma tipada (`attempt_summary`, `quota_ties`, `limits`, `profile`) | Baja | 06/10/2026 | Abierta |
+| DT-036 | Un ensamblado de evento fallido no deja el evento enlazado con su estado (REQ-SAL-21); el campo `link` nunca lleva valor | Media | 06/10/2026 | Abierta |
+| DT-037 | `tests/test_population_snvs_editor.py` está fuera de la puerta de Python y falla 1 de 7 | Baja | 06/10/2026 | Abierta |
+| DT-038 | Ante un fallo posterior al evento, el VCF ya publicado y validado se descarta del paquete fallido aunque es independiente | Media | 06/10/2026 | Abierta |
+| DT-039 | Con evento, si se altera el FASTA de la referencia suministrada antes del cierre, la rama de fallo controlado no consigue publicar y se pierde la causa original | Media | 06/10/2026 | Abierta |
 
 ---
 
@@ -474,7 +484,105 @@ no existe.
 
 O se restauran enteras, o se borran. Conservarlas así es peor que no tenerlas.
 
+### Cómo se cerró (06/10/2026)
+
+**Se borraron las dos**, por decisión del responsable, y con ellas el único
+lector del ayudante de prueba `FORCE_FASTQ_REVALIDATION_FAILURE`, que quedó
+huérfano y se borró también. Las pruebas ignoradas del proyecto pasan de once a
+nueve.
+
+Antes de borrarlas se comprobó, **mutando una copia** del árbol, qué parte de lo
+que decían cubrir tiene hoy una prueba viva que pueda fallar:
+
+| Propiedad de las pruebas vaciadas | Cobertura viva | Mutación en la copia |
+|---|---|---|
+| Un fallo conjunto de R1 y R2 al publicar el FASTQ descarta los dos mates y no deja nada en el catálogo | `fastq_output::tests::paired_publication_rolls_back_on_injected_r2_or_joint_validation_failure` | quitar el descarte de R1: la prueba cae; sustituir la inyección del juez conjunto por `Ok(())`: la prueba cae |
+| Con el evento ya publicado, el paquete fallido conserva la referencia, su mapa y el manifiesto del evento | `execution::tests::a_failed_run_with_reads_keeps_the_final_reference_with_its_map` | no retener el manifiesto del evento, no retener los FASTQ o conservar todo el catálogo: la prueba cae las tres veces |
+| Las reducciones de un paquete fallido quedan en estado `failed` sin identificadores de artefacto, y sus ficheros no se publican | `execution::tests::physical_resource_failure_marks_reduction_failed_without_partial_artifacts` | quitar la línea que las marca `failed`: la prueba cae |
+
+**Dos propiedades no tenían equivalente en la vía actual** (mutadas, la
+batería entera seguía en verde), y se cubrieron el mismo día con pruebas nuevas
+de la vía de parejas, no restaurando las de lecturas sueltas:
+
+1. **Fallo con referencias reducidas ya completas.** Al cubrirlo se vio que el
+   código **descartaba** la reducción completa y validada, contra REQ-SAL-25 (un
+   fallo no invalida retroactivamente lo ya publicado y validado que sea
+   independiente) y DTC-045 (el fallo controlado conserva y declara
+   exportables esos artefactos); REQ-SAL-27 solo obliga a marcar fallida la
+   reducción cuando falla **ella misma**. Por decisión del responsable se
+   **corrigió el código con una regla única**: toda reducción completa cuyos
+   bytes en disco siguen siendo los que se validaron al escribirlos (FASTA y
+   mapa, comparados con el registro de cuando se catalogaron) se conserva
+   entera —FASTA, mapa, enlaces y estado `complete`—, haya evento o no y falle
+   lo que falle; la que no pasa esa comprobación, o la que causó el fallo, queda
+   `failed`, sin enlaces y sin ficheros (REQ-SAL-27). Sin evento se conserva
+   además la referencia suministrada de la que deriva. Una primera versión de la
+   corrección distinguía «con evento», y una revisión adversarial encontró que
+   publicaba como completa una reducción que el juez final rechazaba (FASTA con
+   una base cambiada, mapa con un campo ajeno), porque el manifiesto fallido no
+   lleva configuración efectiva y ese juez ya no volvía a correr. Pruebas, todas
+   en `src/execution.rs`:
+   - `a_failure_after_the_event_keeps_the_completed_reduced_references` y
+     `a_failure_without_event_keeps_the_completed_reduced_references_and_their_source`
+     (dos reducciones, ambas deben conservarse);
+   - `a_reduction_altered_after_validation_is_discarded_and_the_other_is_kept`
+     (con y sin evento, alterando el FASTA o el mapa: solo la alterada queda
+     fallida);
+   - `physical_resource_failure_marks_reduction_failed_without_partial_artifacts`
+     (la reducción misma falla) sigue pasando.
+   El manifiesto fallido sin evento y con reducción completa lo aceptan el juez
+   del manifiesto y el esquema `manifest-general-v4` (jsonschema 4.10.3), con y
+   sin evento.
+
+   **Limitación conocida (no es deuda nueva).** La comprobación es que los bytes
+   en disco son los que se validaron al escribirlos; **no** equivale a repetir el
+   juicio final. Al escribir, `validate_reduction_map_document` compara el mapa
+   con la derivada que construye el propio productor; el juez final
+   (`validate_published_resources`) además reconstruye la derivada desde la
+   subsemilla y la selección y la compara base a base. Si el productor tuviera un
+   defecto en la selección, el juez final rechazaría la reducción con los bytes
+   intactos, la comprobación de huellas pasaría y se conservaría como completa
+   aunque fuera la causa del fallo. Exige un defecto del productor, no una
+   manipulación, y queda fuera de lo decidido.
+
+   Mutaciones (SHA de `src/execution.rs` `68c26a929762` antes y
+   restaurado; entre paréntesis el mutado y lo que cae):
+   - conservar sin revalidar el disco (`b97471fc6588`): la prueba de la
+     reducción alterada y la de fallo físico;
+   - nunca conservar (`76edda1e4481`): las cuatro pruebas de conservación;
+   - conservar solo la reducción de índice 0 (`0b2d3bc18d5c`): las cuatro;
+   - no comprobar el FASTA (`e2e7d84552d5`) o no comprobar el mapa
+     (`c40ab2c2150a`): la de la reducción alterada (y, en el primer caso, la de
+     fallo físico);
+   - sin evento, no conservar la suministrada (`21a831263125`): tres;
+   - sacar la reducción de `references` (`0a1bce0be540`) o no retener su mapa
+     (`014e13dbdcba`): cuatro, pero **por el juez del catálogo** en la primera
+     aserción (`GPS-FMT-006`), no por las aserciones de lista o de disco, que
+     quedan implicadas por él (dicho en el docstring de la prueba);
+   - sustituir la causa registrada (`888b53f0aa13`): cae la prueba de fallo tras
+     el evento, que usa un código propio.
+   La mutación original de esta deuda (la primera versión, que no excluía la
+   derivada) caía **primero por el juez del manifiesto**, no por una aserción
+   propia; por eso se rehízo la prueba.
+2. **Fallo del ensamblado del evento, incluida la validación del FASTQ.**
+   `execution::tests::a_failed_event_assembly_keeps_the_completed_reductions_but_no_fastq_nor_event`
+   (REQ-SAL-22, REQ-SAL-23 y REQ-SAL-25): con dos individuos, la validación
+   conjunta falla en la **segunda** biblioteca, cuando la primera ya cerró sus
+   FASTQ; el paquete fallido no conserva ningún FASTQ ni fichero de evento ni
+   artefactos parciales (el catálogo es exactamente la configuración, la
+   referencia suministrada y las dos reducciones con sus mapas), y registra la
+   causa. **No exige `events: null`**: que el evento fallido no quede enlazado
+   contradice REQ-SAL-21, y está en DT-036. El gancho de prueba de
+   `src/fastq_output.rs` (solo `#[cfg(test)]`) pasó de booleano a cuenta atrás
+   para poder fallar la n-ésima biblioteca. Mutaciones: la guarda
+   `if events.is_some()` a `if true` (`68c26a929762` a `47c507f623ff`), cae; un
+   gancho que nunca dispara (`fastq_output.rs` `2df62d66de71` a `67ffdb7d82e7`),
+   cae; `retain_only_artifacts` sin borrar los mapas de reducción
+   (`publication.rs` `816eba15b479` a `aebc945a9785`), cae (con la versión
+   anterior de la prueba; no se repitió sobre la actual).
+
 ---
+
 
 ## DT-003. Ocho pruebas ignoradas son de contratos que ya no existen
 
@@ -493,18 +601,44 @@ prueba apagada porque su contrato desapareció no es inofensiva, porque nadie
 sabe si lo es sin volver a averiguarlo — y en dos de los ocho casos la respuesta
 resulta ser que **ni siquiera dirían nada si se encendieran**.
 
+**Actualización (06/10/2026):** las dos de `src/execution.rs` se borraron al
+cerrar DT-002. Quedan nueve ignoradas en total, de las cuales **seis** son de
+contratos obsoletos (una en `src/publication.rs`, una en
+`tests/f3_event_assembly.rs`, cuatro en `tests/f3_event_admission.rs`).
+
 ---
 
 ## DT-004. La puerta de Python no corre desde el 25 de agosto de 2026
 
 **Gravedad: media.** `tests/test_process_adapter.py` importa `pytest`, que no
-está declarado en `pyproject.toml`. Bajo la puerta canónica —`unittest`— el
-módulo aborta al importar y se cuenta como error; solo corre invocándolo con la
-dependencia añadida a mano.
+está declarado en `pyproject.toml`. La puerta canónica
+(`unittest discover -s tests_ui`) **nunca lo recogía**, porque el fichero estaba
+en `tests/`, fuera de lo que recorre; solo corría invocándolo a mano, y entonces
+abortaba al importar `pytest` si no estaba instalado.
 
 Viene del commit `6139fe9`. Registrada también en el plan de la fase 5; se
 recoge aquí porque es transversal. Quien la cierre debe decidir entre declarar
 `pytest` como dependencia de desarrollo o reescribir el módulo con `unittest`.
+
+### Cómo se cerró (06/10/2026)
+
+**Decisión del responsable: reescribirlo con `unittest`, sin añadir
+dependencias** (`pyproject.toml` y `uv.lock` no se tocan). El módulo tenía una
+sola prueba, la que exige que el adaptador rechace un binario que declara la
+versión 0.1.0 antes de ejecutar ninguna acción del formulario. Se pasó, con sus
+mismas aserciones, a `tests_ui/test_process_adapter.py` como
+`test_e147_f1_version_is_rejected_before_any_form_action` —`tmp_path` es ahora
+`tempfile.TemporaryDirectory`, `pytest.raises(match=...)` es
+`assertRaisesRegex`— y se borró `tests/test_process_adapter.py`. Con eso la
+descubre la puerta canónica, `uv run --frozen python -m unittest discover -s
+tests_ui`, **sin ningún comando nuevo**: el fichero estaba en `tests/`, fuera
+de lo que esa puerta recorre, y además importaba `pytest`, así que ni
+`discover` ni `unittest` podían ejecutarlo.
+
+Comprobado mutando el adaptador en una copia: si la comparación de versión
+acepta cualquiera, la prueba nueva cae (y con ella las dos de
+`test_version_check_accepts_only_the_supported_literal`); si solo compara el
+nombre y no la versión, vuelve a caer.
 
 ---
 
@@ -654,6 +788,21 @@ demuestra que el último intento permitido todavía puede acertar).
 **Lo que queda:** DTF-060, el método de muestreo sin rechazo, sigue aplazado
 y no es de esta guarda. Y el diagnóstico reutiliza `GPS-DOMAIN-003` en vez de
 un código propio, por la limitación que registra DT-007.
+
+### Estado: aceptada (06/10/2026)
+
+**Aceptada, sigue abierta**, por decisión del responsable: el muestreador se
+deja como está y no hay trabajo previsto. El tope de intentos convierte lo que
+parecía un cuelgue en un diagnóstico claro, y el resultado nunca es incorrecto.
+**Lo que se paga** es doble: en los casos extremos, una ejecución rechazada; y,
+antes de llegar a ellos, un **régimen lento pero admitido** —del orden de
+23 000 intentos por sorteo con una copia de 271 pb, y hasta un millón admitidos
+por sorteo—, en el que la ejecución termina, pero tarda. Arreglarlo de fondo
+cambiaría cada byte publicado y exigiría rehacer toda la evidencia de
+congelación, un coste que hoy no compensa. **Se reconsidera si** una fase puede
+permitirse reescribir la línea base de azar de la fase de realismo técnico; el
+método sin rechazo sigue registrado como ampliación futura DTF-060. No se tocó
+código.
 
 ---
 
@@ -1864,8 +2013,8 @@ congelado.
 
 ## DT-023. Resolver una referencia desde un manifiesto juzga la verdad entera de aquel paquete
 
-**Gravedad: baja. Cerrada por aceptación el 04/10/2026**, con una condición
-para reabrirla.
+**Gravedad: baja. Aceptada el 04/10/2026**, con una condición para
+reconsiderarla.
 
 ### Qué pasa
 
@@ -2684,3 +2833,70 @@ puerta salta sin leer `attempt_summary`, `quota_ties` y `f_realized`.
 
 **Qué haría falta.** Validar la forma de esos campos contra el esquema o con
 comprobaciones propias. No se ha corregido.
+
+---
+
+## DT-036. Un ensamblado de evento fallido no deja el evento enlazado con su estado
+
+**Gravedad: media.** Defecto contra REQ-SAL-21, que exige un estado explícito
+para cada evento y que el manifiesto general enlace los estados de sus unidades.
+Hallado el 06/10/2026 al cerrar DT-002. **Sin arreglar**, a resolver en un
+trabajo aparte.
+
+`TechnicalEventAssemblyFailure` (en `src/execution.rs`) tiene un campo
+`link: Option<ManifestEventLink>`, y la ejecución lo lee tras un fallo
+(`event_links = failure.link.map(|link| vec![link])`) para decidir si el paquete
+fallido enlaza el evento. **Todas** las construcciones del fallo escriben
+`link: None`, así que ese camino no se recorre nunca: un fallo del ensamblado
+deja el manifiesto con `events: null`, sin el evento ni su manifiesto fallido.
+La prueba ignorada
+`tests/f3_event_assembly.rs::controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest`
+codificaba justo lo contrario —un manifiesto de evento fallido que conserva solo
+los FASTQ cerrados—, y la de lecturas sueltas de `src/execution.rs` borrada en
+DT-002 afirmaba un evento con estado `failed`.
+
+Lo que sí cubre una prueba hoy
+(`a_failed_event_assembly_leaves_no_fastq_nor_derived_reference`) es lo demás:
+ni FASTQ, ni referencia derivada, ni artefactos parciales, y la causa
+registrada. **Esa prueba deliberadamente no exige `events: null`**, para no
+fijar el defecto. Arreglarlo es una decisión de contrato: o el campo `link` se
+rellena con un evento fallido y su manifiesto, o se quita y el evento fallido se
+declara de otro modo.
+
+---
+
+## DT-037. `tests/test_population_snvs_editor.py` está fuera de la puerta de Python y falla una prueba de siete
+
+**Gravedad: baja.** Mismo tipo de problema que DT-004. La puerta canónica
+(`unittest discover -s tests_ui`) no recorre `tests/`, así que este módulo no se
+ejecuta nunca desde ella. Lanzado a mano (`python -m unittest
+tests.test_population_snvs_editor`) falla 1 de 7:
+`test_draft_schema_rejects_generate_with_supplied_or_reuse`, con
+`'2' was expected`. **Sin arreglar.**
+
+---
+
+## DT-038. Un fallo posterior al evento descarta el VCF ya publicado y validado
+
+**Gravedad: media.** Contra REQ-SAL-25 y DTC-045: un fallo no debe invalidar
+retroactivamente artefactos ya publicados y validados que sean independientes, y
+el VCF, una vez escrito y validado, lo es. `publish_controlled_failure`
+(`src/execution.rs`) retiene solo la copia de la configuración, las
+referencias, los FASTQ, los manifiestos de evento, el mapa de la inserción y,
+desde el cierre de DT-002, las reducciones completas; el VCF y su índice se
+borran del paquete fallido. Ya ocurría antes de DT-002. Reproducido por el
+revisor de ese cierre: con VCF y evento, la reducción se conserva y el VCF se
+descarta. **Sin arreglar**: exigiría decidir también qué hacer con la verdad y
+la matriz que el VCF cita, que tampoco se retienen.
+
+---
+
+## DT-039. Con evento, alterar la referencia suministrada antes del cierre impide publicar el paquete fallido
+
+**Gravedad: media.** Con un evento ya publicado, si el FASTA de la referencia
+suministrada se altera antes del cierre, la propia rama de fallo controlado no
+consigue publicar: falla con `GPS-FMT-006` «artefacto de evento no coincide con
+el catálogo físico general», **no queda ningún destino y se pierde la causa
+original**. Reproducido por el revisor del cierre de DT-002 con el gancho previo
+al manifiesto. Un fallo controlado debería publicar siempre un paquete fallido
+coherente o, al menos, conservar y devolver la causa original. **Sin arreglar.**
