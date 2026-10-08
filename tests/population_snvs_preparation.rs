@@ -343,3 +343,82 @@ fn preparation_treats_every_negative_zero_alt_frequency_as_globally_absent() {
     assert_eq!(authorized.discarded_globally_absent().len(), 1);
     fs::remove_dir_all(root).expect("cleanup");
 }
+
+/// DT-001, tanda 3: el lector del FASTA autoritativo rechaza cada forma rota
+/// por su propio motivo. El FASTA se estropea **después** de resolver la
+/// referencia (así la resolución, que comprueba su huella, no lo ve) y la
+/// matriz es válida: el único rechazo posible es el del lector.
+#[test]
+fn the_authoritative_fasta_reader_rejects_each_broken_shape_for_its_own_reason() {
+    let duplicated_or_empty = "cabecera FASTA duplicada o vacía";
+    let cases: Vec<(&str, &[u8], &str)> = vec![
+        ("completely empty file", b"", "FASTA vacío"),
+        (
+            "sequence lines but no header",
+            b"ACGT\nACGT\n",
+            "FASTA vacío",
+        ),
+        (
+            "first header empty",
+            b">\nACGT\n>chr1\nACGT\n",
+            duplicated_or_empty,
+        ),
+        (
+            "middle header repeated",
+            b">chr1\nACGT\n>chr1\nACGT\n>chr2\nACGT\n",
+            duplicated_or_empty,
+        ),
+        (
+            "last header repeated",
+            b">chr1\nACGT\n>chr1\nACGT\n",
+            duplicated_or_empty,
+        ),
+        (
+            "last header empty",
+            b">chr1\nACGT\n>\nACGT\n",
+            duplicated_or_empty,
+        ),
+        ("only header, empty", b">\nACGT\n", duplicated_or_empty),
+    ];
+    for (name, content, detail) in cases {
+        let root = temporary();
+        let reference = resolved(&root, "reference-main");
+        fs::write(reference.fasta_path(), content).expect("replace the FASTA");
+        let error = prepare_supplied_population_snvs(
+            &table(&["x\tchr1\t2\tC\tA\tP1\t0.2\t"]),
+            &reference,
+            1e-9,
+            false,
+        )
+        .expect_err(name);
+        assert_eq!(
+            error,
+            PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: detail.to_owned()
+            },
+            "{name}"
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    // Un FASTA que desaparece tras resolver: el motivo es el del sistema de
+    // ficheros, que la prueba calcula leyendo la misma ruta.
+    let root = temporary();
+    let reference = resolved(&root, "reference-main");
+    fs::remove_file(reference.fasta_path()).expect("remove the FASTA");
+    let io_reason = fs::read(reference.fasta_path())
+        .expect_err("the file is gone")
+        .to_string();
+    let error = prepare_supplied_population_snvs(
+        &table(&["x\tchr1\t2\tC\tA\tP1\t0.2\t"]),
+        &reference,
+        1e-9,
+        false,
+    )
+    .expect_err("missing FASTA");
+    assert_eq!(
+        error,
+        PopulationSnvsPreparationError::AuthoritativeFasta { detail: io_reason }
+    );
+    fs::remove_dir_all(root).expect("cleanup");
+}

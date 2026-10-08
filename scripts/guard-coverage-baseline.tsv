@@ -337,6 +337,16 @@
 # documentadas en el código como inalcanzables, cada una con su porqué junto a
 # la guarda; no se borró ninguna. Es lo medido por la puerta, un suelo y no una
 # prueba de que fallaría si estuviera mal escrita.
+# **El 08/10/2026 (DT-001, tanda 3) `src/population_snvs.rs` baja de 123 a 25
+# sin disparar; las comprobaciones siguen en 143.** Lo cubren pruebas nuevas que
+# exigen el motivo exacto de cada rechazo (módulo `guard_tests` dentro del propio
+# fichero, que parte de una matriz y unos metadatos reales alterados en un solo
+# punto, y una prueba de integración para el lector del FASTA autoritativo en
+# `tests/population_snvs_preparation.rs`); se verificaron mutando cada guarda,
+# cada mitad de sus disyunciones y cada motivo en una copia (DT-001 en el
+# registro lo detalla). Las 25 que quedan son inalcanzables y cada una lleva
+# junto a la guarda el porqué; no se borró ninguna. Es lo medido por la puerta,
+# un suelo y no una prueba de que fallaría si estuviera mal escrita.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
@@ -346,7 +356,7 @@ src/event_manifest.rs	147	117
 src/truth_validation.rs	118	93
 src/truth_schema.rs	69	44
 src/fastq_validation.rs	84	26
-src/population_snvs.rs	143	123
+src/population_snvs.rs	143	25
 src/f5_publication.rs	53	10
 src/reference_fasta.rs	41	7
 src/reference_reduction_io.rs	55	12

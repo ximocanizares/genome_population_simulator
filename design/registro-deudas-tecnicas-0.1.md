@@ -34,7 +34,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026) |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026); tanda 3, matriz de SNV (08/10/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | **Cerrada (06/10/2026)**, borradas; los dos huecos que dejaban, cubiertos con pruebas nuevas de la vía de parejas |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | **Cerrada (06/10/2026)** |
@@ -78,6 +78,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-042 | En el cuaderno, con un evento técnico activo, la celda que reconstruye el formulario falla con `NameError` sobre `TechnicalEventForm`: ningún control del panel de PCR llega al TOML | Media | 08/10/2026 | Abierta |
 | DT-043 | El juez acepta en el manifiesto de evento los ciclos de la amplificación fuera del bloque del tartamudeo y los recuentos de linaje alterados, con las huellas rehechas | Media | 08/10/2026 | Abierta |
 | DT-044 | REQ-CONF-134 a 138, REQ-DAT-81 a 85 y REQ-MAN-94 no tienen fila en la matriz de trazabilidad | Baja | 08/10/2026 | Abierta |
+| DT-045 | El juez de la matriz de SNV tiene catorce comprobaciones de código muerto y un conjunto redundante, porque repite lo que `parse_metadata_json` ya exige | Baja | 08/10/2026 | Abierta; encargo aparte |
 
 ---
 
@@ -489,6 +490,7 @@ SHA antes, mutada y restaurada. Una línea por tanda:
 | 1 | 08/10/2026 | `src/reference_reduction_io.rs` | 55 / 45 | 55 / **12** |
 | 2 | 08/10/2026 | `src/fastq_validation.rs` | 84 / 36 | 84 / **26** |
 | 2 | 08/10/2026 | `src/f5_publication.rs` | 53 / 36 | 53 / **10** |
+| 3 | 08/10/2026 | `src/population_snvs.rs` | 143 / 123 | 143 / **25** |
 
 **Tanda 1 (08/10/2026): 65 sin disparar menos (de 89 a 24; ninguna guarda
 borrada, el número de comprobaciones no cambia).** Las 24 que quedan (5 + 7 + 12) están todas anotadas en el código
@@ -640,6 +642,130 @@ llamantes; se probó cada enlace del manifiesto, de la verdad y del fallo, cada
 término del diagnóstico y las listas ya cubiertas por la prueba de la tanda
 anterior. En el FASTQ, `validate_final_artifact` y `read_final_line` sirven a
 varios llamantes; se probaron R1 y R2 del primero.
+
+**Tanda 3 (08/10/2026): 98 sin disparar menos (de 123 a 25) en la matriz de
+SNV, `src/population_snvs.rs`; ninguna guarda borrada, las 143 comprobaciones
+siguen siendo 143.** Las 25 que quedan están todas anotadas en el código como
+inalcanzables, cada una con su porqué junto a la guarda:
+
+- *Cubiertas con prueba y motivo exacto (98).* Los analizadores de forma del TSV
+  canónico y del suministrado (UTF-8, VCF, cabecera, número de columnas con su
+  línea) y el de los metadatos (cada campo ausente, de tipo erróneo, de más o con
+  literal distinto, y los tres ayudantes `required_object`, `required_string` y
+  `required_literal` y el `closed_object` **por llamante**); la preparación de
+  filas (contig, posición, alelos, población, REF distinto del de la referencia y
+  posición fuera del contig, cada uno con su fila y valor); la normalización de
+  frecuencias (tolerancia fuera de rango, frecuencia ilegible o fuera de [0, 1],
+  exceso de suma con sus números exactos y el límite inclusivo); la autorización
+  de la matriz vacía; el juez de la pareja reutilizada (referencia, huella, SHA
+  del FASTA y de la matriz, orden canónico, poblaciones, referencia sin bases,
+  metadatos o matriz que no se pueden leer); la restauración de las frecuencias
+  desde la auditoría publicada; el juez de la auditoría (cada campo del grupo y
+  del valor, identidad, orden, sumas, las tres decisiones y los pares descartados);
+  y el lector del FASTA autoritativo. Las pruebas viven en el módulo
+  `guard_tests` del propio fichero, que parte de una matriz y unos metadatos
+  reales preparados con el código de producción y alterados **en un solo punto**,
+  y en una prueba de integración de `tests/population_snvs_preparation.rs`.
+- *Inalcanzables (25).* Trece comprobaciones de `validate_reusable_population_snvs_bytes`
+  que repiten una forma de los metadatos que `parse_metadata_json` ya exigió
+  sobre esos mismos bytes (objeto en la raíz, `reference`, `reference_fasta`,
+  `matrix` y su `sha256`, `normalization_audit`, `populations` y cada
+  `population_id`, `provenance`, y la lista, los objetos y los dos identificadores
+  de los pares descartados); la lista de la restauración (la misma razón, y la
+  comprobación gemela del juez público sí está cubierta); en la preparación, el
+  recorrido de bases de `prepare_population_snvs_from_reference` (ya lo
+  rechazó `PreparedReferenceIdentity::from_reference`), la población del segundo
+  recorrido de filas (la rechazó el primero), la posición textual de la
+  auditoría y la clave de identidad de cada valor, que proceden de filas ya
+  analizadas, y el `find` de la cobertura de población, que usa el mismo
+  predicado que el `any` anterior; tres derivaciones de `derive_matrix_variant_id`
+  y la conversión `usize::try_from(position - 1)` del juez de la auditoría, que
+  no fallan (componentes de 64 bytes como máximo, 64 bits); y dos de la
+  normalización (el efectivo fuera de [0, 1] y la suma normalizada que se desvía
+  de 1 más que la tolerancia), que acota el redondeo (un ulp) y cuyo intento
+  ejecutado fue una búsqueda al azar de 1,19 millones de grupos sin ningún caso.
+  La prueba `the_shape_guards_of_the_reuse_judge_are_shadowed_by_the_metadata_parser`
+  ejecuta el intento sobre las de forma de los metadatos: cada metadato roto de esa forma lo
+  rechaza antes el analizador con su propio texto (y por eso **no discrimina**
+  las guardas inalcanzables que ilustra). Un metadato o una matriz publicados y
+  manipulados **no** pueden llegar a ninguna de las 25: se comprobó una a una.
+
+**Pendientes: ninguno.** Ninguna guarda exigía cambiar código de producción
+(solo comentarios).
+
+**Defectos encontrados: ninguno.** Ninguna prueba reveló una guarda mal
+escrita.
+
+**Verificación por mutación.** Sobre una copia fuera del repositorio, con huella
+SHA antes, mutada y restaurada de cada una (el arnés se niega a trabajar bajo
+`/home/ximo/devel` y comprueba que la restauración devuelve la huella original),
+**249 ejecuciones**: cada guarda cubierta, cada mitad de sus disyunciones, cada
+motivo (todos los `audit_error`, `missing` e `invalid` con su literal), cada
+llamante de los ayudantes y de las clausuras `text` y `number`, y las
+comparaciones por bits (`-0.0` frente a `0.0`) de las sumas, la tolerancia y, tras
+la ronda 2, la frecuencia de referencia. 235 mueren, 1 no compiló y se
+rehízo, 1 es el control (un cambio sin efecto, que **debe sobrevivir** y
+sobrevive) y **12 sobreviven, todas demostradas**:
+
+- *Inalcanzables (3 de los mutantes de motivo):* la lista de la restauración, la
+  derivación del identificador de la auditoría y la conversión de la posición.
+- *Mitades que no discriminan, anotadas en el código y sin quitar (9):*
+  `is_finite()` de la tolerancia, de `reference_frequency` y `effective` en la
+  restauración, de `original` en el juez de la auditoría y del lector `number`
+  (en la tolerancia de `normalize_alt_frequencies` la mitad es
+  redundante porque `NaN` y el infinito tampoco están en el intervalo; en los
+  campos del JSON, `1e999` se lee como número pero `as_f64()` da `None`, no un
+  infinito: lo demuestra `an_out_of_range_json_number_is_not_a_finite_float_for_the_audit_judge`);
+  `!value.is_empty()` de `variant_id` (`VariantId::parse("")` ya falla con el mismo
+  motivo); la mitad `effective_delta > tolerance` de la decisión `normalized`
+  (inalcanzable por la cota de redondeo); y las dos mitades que se solapan del
+  orden de grupos, `last >= key` y `!seen.insert(..)`: cada una por separado es
+  redundante (la secuencia aceptada es estrictamente creciente, así que una clave
+  repetida siempre la caza la otra), pero **debilitar las dos a la vez sí
+  mata la prueba** (mutación `J-order-and-seen-both-weakened`).
+
+**Lecciones aplicadas de las tandas 1 y 2 y lo que mostró la ronda 1.** Un primer
+conjunto de pruebas dejó vivas 13 mutaciones reales: cuatro lecturas de texto de
+la cabecera del grupo (`population_id`, `contig`, `position`, `ref`), cuya
+caída a «vacío» daba el mismo motivo por otra guarda con un solo fallo (hizo falta
+un caso con **dos fallos a la vez**, que distingue qué lectura falló primero); las
+cuatro sumas y la tolerancia, que se comparaban por bits sin caso que distinguiera
+el `-0.0`; y las guardas de duplicado, cobertura y exceso de suma que solo
+disparaban pruebas existentes sin exigir el motivo. Todas se cubrieron y mueren.
+
+**Ronda 2 tras la revisión adversarial (08/10/2026).** La revisión aprobó las 25
+inalcanzables y los 12 supervivientes y halló cuatro cosas, ya resueltas:
+
+- *`-0.0` en la rama `reference_remainder`.* Ninguna prueba distinguía `-0.0` de
+  `0.0` en la frecuencia de referencia publicada (la afirmación anterior de que
+  «todas las comparaciones por bits» estaban cubiertas era falsa para esta). Caso
+  nuevo en `the_audit_judge_rejects_a_decision_that_the_values_do_not_support`
+  (P2 chr2:2 con REF `-0.0`, por la vía directa y por la de bytes): la
+  comparación numérica lo deja pasar y esa mutación **muere**.
+- *Cambio de producción de una línea (decidido por el responsable).* En esa misma
+  rama el juez comparaba `originals != effectives` numéricamente: unos metadatos
+  manipulados con `original` `-0.0` y `effective` `0.0` pasaban toda la vía de
+  reutilización. Ahora se compara por bits, como el resto de ramas; el caso
+  (P2 chr1:2) está en la misma prueba y la versión numérica lo hace fallar. No
+  cambia el número de comprobaciones (143).
+- *Campos admitidos de cada población.* La prueba
+  `a_population_with_every_admitted_field_is_accepted` acepta una población con
+  los seis campos que admite la especificación; quitar cualquiera de la lista
+  cerrada la hace fallar (se mutaron `data_version`, `filters`, `description` y
+  `sample_size`).
+- *Dos mitades `is_finite()` que no se habían mutado*: la de la frecuencia en
+  `normalize_alt_frequencies` y la de `effective` en el juez de la auditoría.
+  Sobreviven y son equivalentes (el intervalo cerrado ya excluye `NaN` y el
+  infinito); la primera no estaba anotada y ahora lo está. Con ellas, **siete**
+  mitades `is_finite()` equivalentes, y 14 supervivientes demostrados en total.
+
+**Alcance de «0 pendientes» en esta tanda.** Se refiere a las guardas que cuenta
+la puerta. `required_object`, `required_string`, `required_literal`,
+`closed_object` y las clausuras `text` y `number` de la auditoría cuentan como
+**una** guarda para varios llamantes: se probó cada llamante (tres, cinco, cuatro
+y seis de los ayudantes de metadatos; siete campos de texto y seis numéricos de la
+auditoría). No se vigila aquí la configuración del **generador** de matrices
+(fuera de la puerta, ver más arriba).
 
 ---
 
@@ -3203,3 +3329,22 @@ solo lo comprueban su esquema y las relaciones internas que
 DT-009 y comprobada con `grep`: REQ-CONF-134 a 138, REQ-DAT-81 a 85 y REQ-MAN-94
 no tienen fila en `design/trazabilidad-requisitos-0.1.md`, aunque la
 especificación ya los presenta como implementados. **Sin arreglar.**
+
+## DT-045. El juez de la matriz de SNV repite comprobaciones que ya hizo el analizador de metadatos
+
+**Gravedad: baja.** Hallada en la tanda 3 de DT-001 (08/10/2026) y confirmada por
+la revisión adversarial. Trece comprobaciones de
+`validate_reusable_population_snvs_bytes` y la de la lista de
+`restore_published_allele_frequencies` son **código muerto**: repiten sobre el
+mismo `Value` lo que `parse_metadata_json` ya exigió, de modo que ningún dato
+publicado puede alcanzarlas (la prueba
+`the_shape_guards_of_the_reuse_judge_are_shadowed_by_the_metadata_parser` lo
+ejecuta). Además, el conjunto `seen` del orden de grupos de
+`validate_normalization_audit_document` es redundante: la secuencia aceptada es
+estrictamente creciente.
+
+**Simplificación propuesta** (decidida como encargo aparte, **sin hacer**): que
+`parse_metadata_json` entregue tipados los campos que comprueba y que la
+restauración reciba la lista ya extraída. El total del juez bajaría a unas 129
+comprobaciones con 11 sin disparar. Las otras inalcanzables de la tanda 3 (cotas
+de redondeo, conversiones, invariantes entre recorridos) no se eliminan así.
