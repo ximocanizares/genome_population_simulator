@@ -533,6 +533,11 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
     // ya sería un byte distinto.
     let mut document = document;
     if let Some(stutter) = manifest.stutter.as_ref() {
+        // **Inalcanzable** (DT-001, tanda 4): `document` se acaba de construir
+        // con el literal `json!({...})` de arriba, cuya clave `artifacts` es
+        // un objeto literal; `get_mut` más `as_object_mut` no pueden fallar.
+        // Ningún manifiesto, publicado o no, llega aquí con otra forma. La
+        // comprobación existe por si alguien cambia el literal sin tocar esto.
         let artifacts = document
             .get_mut("artifacts")
             .and_then(Value::as_object_mut)
@@ -765,6 +770,17 @@ fn validate_event_manifest_document(path: &Path, bytes: &[u8]) -> Result<(), Dia
             "falta cobertura de una biblioteca completa",
         ));
     }
+    // **Inalcanzable** (DT-001, tanda 4): `coverage` y `final_fastq_summary`
+    // son aquí los **conjuntos** (`BTreeSet`) que devuelven
+    // `validate_coverage` y `validate_final_fastq_summary`, y la primera
+    // guarda de estas cuatro ya exigió que sean iguales; dos conjuntos
+    // iguales tienen la misma longitud, y la guarda anterior ya exigió que la
+    // de `coverage` fuera la de `selected`. Un resumen más corto que los
+    // individuos seleccionados implica, pues, una cobertura igual de corta, y
+    // el rechazo es el de la cobertura. Intento ejecutado:
+    // `unreachable_guards_are_shadowed_by_other_checks` recorre las 16
+    // combinaciones de subconjuntos de coberturas y resúmenes con el evento
+    // completo y ninguna da este motivo.
     if state == UnitState::Complete && final_fastq_summary.len() != selected.len() {
         return Err(event_error(
             path,
@@ -777,6 +793,13 @@ fn validate_event_manifest_document(path: &Path, bytes: &[u8]) -> Result<(), Dia
             "un evento no completo no publica cobertura F4",
         ));
     }
+    // **Inalcanzable** (DT-001, tanda 4): llegar aquí exige un resumen no
+    // vacío con el evento no completo y **sin** cobertura (la guarda anterior
+    // la rechaza si la hay). Pero `validate_final_fastq_summary_coverage`, que
+    // corre antes, rechaza todo resumen sin su cobertura asociada
+    // («resumen FASTQ no tiene cobertura asociada»), y con cobertura vacía
+    // todos lo están. Intento ejecutado: ver
+    // `unreachable_guards_are_shadowed_by_other_checks`.
     if state != UnitState::Complete && !final_fastq_summary.is_empty() {
         return Err(event_error(
             path,
@@ -874,6 +897,9 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
             "el modo de errores no coincide con la configuración efectiva",
         ));
     }
+    // Este rechazo repite el texto de `validate_error_quality`; solo se
+    // distingue de él con una incoherencia **anterior** que el validador vea
+    // antes (DT-001, tanda 4: casos con un resumen incoherente detrás).
     if !has_fixed_error_quality_adjustments(manifest.error_quality.r1)
         || !has_fixed_error_quality_adjustments(manifest.error_quality.r2)
     {
@@ -882,6 +908,10 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
             "F4 no admite ajustes de error/calidad distintos de quality_shift=0 y error_scale=1",
         ));
     }
+    // **Equivalentes** (DT-001, tanda 4): las mitades `!is_finite()` y `!(0.0..=1.0)` no
+    // deciden nunca: la primera ya exige que la tasa sea la del evento, y la
+    // configuración efectiva solo admite tasas finitas en [0, 1]. Mutadas
+    // sobreviven, y no hay entrada que las distinga.
     if manifest.chimera_rate != manifest.event.chimera_rate()
         || !manifest.chimera_rate.is_finite()
         || !(0.0..=1.0).contains(&manifest.chimera_rate)
@@ -916,6 +946,9 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
         .libraries()
         .map(|library| library.individual_id())
         .collect::<BTreeSet<_>>();
+    // **Equivalente** (DT-001, tanda 4): la primera mitad no decide nunca; la configuración
+    // rechaza individuos repetidos, así que `configured` tiene tantos elementos
+    // como la lista.
     if configured.len() != manifest.event.individual_ids().len() || configured != planned {
         return Err(event_error(
             &path,
@@ -975,6 +1008,12 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
             }
         }
     }
+    // **Mitades mutuamente redundantes** (DT-001, tanda 4): cada artefacto ya es de un
+    // individuo del plan y no repite mate, así que `len == 2n` implica que
+    // están todos, y que estén todos implica `len == 2n`. Cada mitad sola
+    // sobrevive mutada; quitar las dos a la vez la mata. Además este rechazo
+    // repite el texto del validador final: lo ejercita el caso con un resumen
+    // incoherente detrás.
     if artifact_mates.len() != planned.len() * 2
         || !planned.iter().all(|individual| {
             TechnicalMate::all()
@@ -1179,6 +1218,12 @@ fn validate_selected_individuals(
                 return Err(event_error(path, "UDI de biblioteca inválido"));
             }
         }
+        // **Equivalentes** (DT-001, tanda 4): `selected.insert(..).is_some()` (un
+        // individuo repetido ya incumple `prior >= actual`) y `>=` frente a
+        // `>` (el repetido lo caza el `insert`) no deciden por separado; el
+        // `insert` se necesita por su efecto. Pasa igual en las listas de
+        // coberturas, resúmenes y diagnósticos, y en el orden de las salidas
+        // FASTQ (`ids.insert` caza antes la tupla repetida).
         if previous
             .as_deref()
             .is_some_and(|prior| prior >= individual.as_str())
@@ -1360,6 +1405,14 @@ fn validate_final_fastq_summary_coverage(
             (
                 required_u64(entry, "denominator_bases", path)?,
                 required_u64(entry, "n_bases", path)?,
+                // **Inalcanzables los dos `ok_or_else`** (DT-001, tanda 4): este
+                // cruce corre después de `validate_coverage`, que exige que
+                // `own_x` y `contaminant_x` de **cada** entrada de esta misma
+                // lista sean números finitos y no negativos
+                // (`validate_nonnegative_finite`, con `as_f64`), así que
+                // `as_f64` no puede dar `None` aquí. Intento ejecutado: ver
+                // `unreachable_guards_are_shadowed_by_other_checks` (una
+                // cobertura rota da `own_x de cobertura inválida`).
                 final_x
                     .get("own_x")
                     .and_then(Value::as_f64)
@@ -1422,6 +1475,9 @@ fn validate_demultiplexing(
         "demultiplexing",
         path,
     )?;
+    // `is_finite()` es equivalente aquí (DT-001, tanda 4): `as_f64()` ya
+    // devuelve `None` para lo no finito (con `arbitrary_precision`, `1e400` se
+    // lee pero `as_f64()` lo filtra). Igual en las otras guardas con `is_finite()` del módulo.
     if !matches!(report.get("index_hopping_rate").and_then(Value::as_f64), Some(value) if value.is_finite() && (0.0..=1.0).contains(&value))
         || report
             .get("reassigned_pairs")
@@ -1542,6 +1598,10 @@ fn validate_demultiplexing_aggregates(
         let source = entry
             .get("source_library_id")
             .and_then(Value::as_str)
+            // **Equivalente** (DT-001, tanda 4): `valid_manifest_id` repite la sintaxis de
+            // `LibraryId`, y todo elemento de `selected_libraries` salió de
+            // `parse_id::<LibraryId>`; la mitad `valid_manifest_id` no decide
+            // (ni aquí ni en el destino).
             .filter(|value| valid_manifest_id(value) && selected_libraries.contains(value))
             .ok_or_else(|| event_error(path, "origen de demultiplexado inválido"))?;
         let destination = entry.get("destination_library_id").and_then(Value::as_str);
@@ -1553,6 +1613,13 @@ fn validate_demultiplexing_aggregates(
                 return Err(event_error(path, "reasignación de demultiplexado circular"));
             }
         } else if destination.is_some() {
+            // **Inalcanzable** (DT-001, tanda 4): sin destino obligatorio los
+            // campos esperados son `source_library_id`, `cause` y
+            // `pair_count`, y `validate_closed` exige que el objeto tenga
+            // **exactamente** esas claves; una fila con
+            // `destination_library_id` ya la rechazó con «campos inválidos en
+            // discarded_by_sample». Intento ejecutado: ver
+            // `unreachable_guards_are_shadowed_by_other_checks`.
             return Err(event_error(path, "descarte de demultiplexado con destino"));
         }
         if entry.get("cause").and_then(Value::as_str) != Some(expected_cause) {
@@ -1670,6 +1737,8 @@ fn validate_error_quality(value: &Value, path: &Path) -> Result<(), Diagnostic> 
                 "errores realizados exceden oportunidades",
             ));
         }
+        // El índice es equivalente a cualquier otro (DT-001, tanda 4): el arreglo solo se
+        // compara con `[0, 0]`.
         realized_errors[usize::from(mate == "r2")] = mate_errors;
     }
     if effective_mode == SequencingErrorsMode::Disabled && realized_errors != [0, 0] {
@@ -2032,6 +2101,9 @@ fn validate_pcr_manifest(
             ));
         }
         previous = Some(size);
+        // **Redundante** (DT-001, tanda 4): la suma de familias desborda solo si desborda
+        // antes o a la vez la de parejas (cada tamaño es al menos 1), y el
+        // desborde de parejas da el mismo motivo.
         histogram_families = histogram_families
             .checked_add(count)
             .ok_or_else(|| event_error(path, "el histograma de familias desborda"))?;
@@ -2057,7 +2129,9 @@ fn validate_pcr_manifest(
     } else {
         1.0 - (families as f64) / (pairs as f64)
     };
-    if realized != expected_realized {
+    // Por bits, como el cruce resumen-cobertura: `-0.0` y `0.0` no son el mismo
+    // número publicado (DT-001, tanda 4, decisión del responsable).
+    if realized.to_bits() != expected_realized.to_bits() {
         return Err(event_error(
             path,
             "la fracción realizada de duplicados no sale de los recuentos publicados",
@@ -2204,6 +2278,8 @@ fn validate_biological_contamination_manifest(
         let minimum = range.get("minimum").and_then(Value::as_f64);
         let maximum = range.get("maximum").and_then(Value::as_f64);
         let sampled = record.get("sampled_percent").and_then(Value::as_f64);
+        // Las mitades `is_finite()` son equivalentes (DT-001, tanda 4):
+        // `as_f64()` ya devuelve `None` para lo no finito.
         if !matches!((minimum, maximum, sampled), (Some(minimum), Some(maximum), Some(sampled)) if minimum.is_finite() && maximum.is_finite() && sampled.is_finite() && (0.0..=100.0).contains(&minimum) && (0.0..=100.0).contains(&maximum) && minimum <= sampled && sampled <= maximum)
         {
             return Err(event_error(
@@ -2211,6 +2287,11 @@ fn validate_biological_contamination_manifest(
                 "porcentaje de contaminación biológica inválido",
             ));
         }
+        // **Inalcanzable** (DT-001, tanda 4): la guarda de arriba exige
+        // `(Some(minimum), Some(maximum), Some(sampled))` dentro de un
+        // `matches!`; si `sampled` fuera `None` ya habría devuelto «porcentaje
+        // de contaminación biológica inválido». Intento ejecutado: ver
+        // `unreachable_guards_are_shadowed_by_other_checks`.
         let sampled = sampled
             .ok_or_else(|| event_error(path, "porcentaje de contaminación biológica ausente"))?;
         let clean = record
@@ -2251,6 +2332,10 @@ fn validate_biological_contamination_manifest(
                 "objetivo de contaminación no aplica el redondeo normativo",
             ));
         }
+        // **Cinco igualdades mutuamente redundantes** (DT-001, tanda 4): cada una se
+        // deduce de las otras cuatro, así que ninguna mitad **sola** puede
+        // morir. Lo que se verifica es que quitar **cualquier par** mata una
+        // prueba (diez casos, uno por par, y las diez mutaciones mueren).
         if removed != target
             || inserted != target
             || retained.checked_add(removed) != Some(clean)
@@ -2392,6 +2477,9 @@ fn validate_outputs(
                 if record.id != id
                     || record.kind != kind
                     || record.path != paired_path(event_id.as_str(), individual, mate)
+                    // `!paths.insert(..)` es equivalente (DT-001, tanda 4): una ruta repetida
+                    // implica un (individuo, mate) repetido o una ruta distinta de
+                    // la canónica, y los dos se rechazan antes.
                     || !paths.insert(record.path.clone())
                     || record.id == reference.id
                     || record.path == reference.path
@@ -2458,6 +2546,9 @@ fn validate_event_state(
     path: &Path,
 ) -> Result<(), Diagnostic> {
     match state {
+        // **Mitades equivalentes** (DT-001, tanda 4): una salida no completa exige un
+        // diagnóstico (`validate_outputs`), de modo que la segunda mitad del
+        // evento completo y la primera del no completo no deciden nunca.
         UnitState::Complete
             if !diagnostics.is_empty()
                 || artifact_states
@@ -2745,6 +2836,7 @@ fn validate_stutter_manifest(value: &Value, path: &Path) -> Result<(), Diagnosti
         )?;
         let expected = crate::stutter::STUTTER_TRACT_LENGTH_REFERENCE_BASES[index];
         let published = entry.get("reference_tract_bases").and_then(|value| {
+            // La rama nula es equivalente a `as_u64()` (devuelve `None`).
             if value.is_null() {
                 None
             } else {
@@ -2914,6 +3006,17 @@ fn required_array<'a>(
         .map(Vec::as_slice)
         .ok_or_else(|| event_error(path, format!("{context} no es lista")))
 }
+/// **El `falta {field}` es inalcanzable** (DT-001, tanda 4): todo llamante
+/// de este ayudante, y de `required_string` y `required_non_null` que pasan
+/// por él (`required_u64` no: lee `object.get` directamente y su motivo es
+/// «no es entero sin signo»), lee un campo de un objeto sobre el que
+/// **ya** corrió `validate_closed` con ese campo en su lista, y un objeto
+/// cerrado trae todas las claves de la lista (misma longitud y todas
+/// pertenecientes, sin repetidos). Quitar una clave da «campos inválidos en
+/// …», nunca «falta …»: lo ejercita cada caso `una clave de menos` de
+/// `every_object_list_and_closed_object_is_judged_by_its_own_context`. La
+/// excepción aparente, `locus_slip_counts`, solo se llama con `pcr` cerrado
+/// sobre la lista que incluye las claves de linaje.
 fn required_value<'a>(
     object: &'a serde_json::Map<String, Value>,
     field: &str,

@@ -347,12 +347,25 @@
 # registro lo detalla). Las 25 que quedan son inalcanzables y cada una lleva
 # junto a la guarda el porqué; no se borró ninguna. Es lo medido por la puerta,
 # un suelo y no una prueba de que fallaría si estuviera mal escrita.
+# **El 08/10/2026 (DT-001, tanda 4) `src/event_manifest.rs` baja de 117 a 8
+# sin disparar; las comprobaciones siguen en 147.** Lo cubre
+# `tests/event_manifest_guards.rs`, que parte de manifiestos de evento
+# **publicados de verdad** por el programa (cuatro escenarios: dos bibliotecas
+# con contaminación y salto de índice; con amplificación; con amplificación y
+# microsatélites; con tartamudeo sin amplificar), los altera en un solo punto y
+# exige el motivo exacto de cada rechazo, más los hechos del escritor
+# (`validate_writer_facts`) armando un `EventManifest` incoherente. Se
+# verificó mutando cada guarda, cada mitad de sus disyunciones, cada motivo y
+# cada llamante de los ayudantes compartidos en una copia (DT-001 en el
+# registro lo detalla). Las 8 que quedan son inalcanzables y cada una lleva
+# junto a la guarda el porqué; no se borró ninguna. Es lo medido por la puerta,
+# un suelo y no una prueba de que fallaría si estuviera mal escrita.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
 src/results.rs	779	618
-src/event_manifest.rs	147	117
+src/event_manifest.rs	147	8
 src/truth_validation.rs	118	93
 src/truth_schema.rs	69	44
 src/fastq_validation.rs	84	26

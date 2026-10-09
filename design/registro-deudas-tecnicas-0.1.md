@@ -34,7 +34,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026); tanda 3, matriz de SNV (08/10/2026) |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026); tanda 3, matriz de SNV (08/10/2026); tanda 4, manifiesto de evento (08/10/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | **Cerrada (06/10/2026)**, borradas; los dos huecos que dejaban, cubiertos con pruebas nuevas de la vía de parejas |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | **Cerrada (06/10/2026)** |
@@ -78,6 +78,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-042 | En el cuaderno, con un evento técnico activo, la celda que reconstruye el formulario falla con `NameError` sobre `TechnicalEventForm`: ningún control del panel de PCR llega al TOML | Media | 08/10/2026 | Abierta |
 | DT-043 | El juez acepta en el manifiesto de evento los ciclos de la amplificación fuera del bloque del tartamudeo y los recuentos de linaje alterados, con las huellas rehechas | Media | 08/10/2026 | Abierta |
 | DT-044 | REQ-CONF-134 a 138, REQ-DAT-81 a 85 y REQ-MAN-94 no tienen fila en la matriz de trazabilidad | Baja | 08/10/2026 | Abierta |
+| DT-046 | Referencias cruzadas internas del manifiesto de evento no atadas por su propio juez (`id_catalog`, bibliotecas repetidas, receptora y donantes ajenos, UDI repetidos, esquema v2 en los hechos del escritor) | Baja | 08/10/2026 | Abierta |
 | DT-045 | El juez de la matriz de SNV tiene catorce comprobaciones de código muerto y un conjunto redundante, porque repite lo que `parse_metadata_json` ya exige | Baja | 08/10/2026 | Abierta; encargo aparte |
 
 ---
@@ -491,6 +492,7 @@ SHA antes, mutada y restaurada. Una línea por tanda:
 | 2 | 08/10/2026 | `src/fastq_validation.rs` | 84 / 36 | 84 / **26** |
 | 2 | 08/10/2026 | `src/f5_publication.rs` | 53 / 36 | 53 / **10** |
 | 3 | 08/10/2026 | `src/population_snvs.rs` | 143 / 123 | 143 / **25** |
+| 4 | 08/10/2026 | `src/event_manifest.rs` | 147 / 117 | 147 / **8** |
 
 **Tanda 1 (08/10/2026): 65 sin disparar menos (de 89 a 24; ninguna guarda
 borrada, el número de comprobaciones no cambia).** Las 24 que quedan (5 + 7 + 12) están todas anotadas en el código
@@ -766,6 +768,101 @@ la puerta. `required_object`, `required_string`, `required_literal`,
 y seis de los ayudantes de metadatos; siete campos de texto y seis numéricos de la
 auditoría). No se vigila aquí la configuración del **generador** de matrices
 (fuera de la puerta, ver más arriba).
+
+**Tanda 4 (08/10/2026): 109 sin disparar menos (de 117 a 8) en el manifiesto de
+evento, `src/event_manifest.rs`; ninguna guarda borrada, las 147 comprobaciones
+siguen siendo 147.** Las 8 que quedan están todas anotadas junto a la guarda
+como inalcanzables, con su porqué.
+
+- *Cubiertas con prueba y motivo exacto (109).* `tests/event_manifest_guards.rs`
+  parte de cuatro manifiestos de evento **publicados de verdad** por el programa
+  (dos bibliotecas con contaminación biológica y salto de índice; con
+  amplificación; con amplificación y microsatélites; con tartamudeo sin
+  amplificar), altera cada uno **en un solo punto** y exige el motivo exacto, con
+  control positivo, comprobación de que la alteración alteró y casos de «lado
+  aceptado» (límites inclusivos, `-0.0` frente a `0.0` en las coberturas
+  comparadas por bits). Tablas por contexto para los ayudantes compartidos
+  (`required_object`, `required_array`, `validate_closed`: una clave de más, de
+  menos y con otro nombre, **por llamante**; `parse_id`, `require_text` y
+  `validate_hex`, por llamante; `locus_slip_counts` y
+  `validate_demultiplexing_aggregates`, por lista), y los hechos del escritor
+  (`validate_writer_facts`) armando un `EventManifest` incoherente.
+- *Inalcanzables (8).* (1) la sección `artifacts` del literal `json!` que
+  acaba de construir `event_manifest_document`; (2) «falta resumen FASTQ de una
+  biblioteca completa» y (3) «un evento no completo no publica resúmenes FASTQ»,
+  que otras comprobaciones anteriores ganan siempre; (4, 5) `cobertura propia` y
+  `cobertura contaminante inválida` del cruce resumen-cobertura, que
+  `validate_coverage` rechaza antes; (6) «descarte de demultiplexado con
+  destino», que `validate_closed` rechaza antes; (7) «porcentaje de
+  contaminación biológica ausente», que el control del porcentaje rechaza antes;
+  (8) el `falta {campo}` de `required_value`, porque todo llamante lo precede un
+  `validate_closed` sobre el mismo objeto. La prueba
+  `unreachable_guards_are_shadowed_by_other_checks` ejecuta el intento y **no
+  discrimina** esas guardas.
+
+**Pendientes: ninguno.** Ninguna guarda exigía cambiar código de producción
+(solo comentarios, más la comparación por bits de la ronda 2).
+
+**Defectos encontrados: holguras menores, registradas en DT-046.** No son
+guardas mal escritas en sentido estricto pero dejan pasar documentos que no
+deberían; no se arreglan aquí.
+
+**Verificación por mutación.** Sobre copias fuera del repositorio (el arnés se
+niega a trabajar bajo `/home/ximo/devel`), **un mutante por ejecución**, con
+huella SHA antes, mutada y restaurada de cada una: **540 ejecuciones**: cada
+motivo (147), cada guarda entera y cada mitad de cada disyunción o conjunción
+(215), cada llamante de `require_text`, `validate_closed`, `parse_id` y
+`validate_hex` (70), comparaciones y límites a mano (91, incluidos `>=` frente a
+`>`, rangos cerrados, aritmética que desborda y bits frente a valor), los diez
+pares de las cinco igualdades de la contaminación y siete variantes que
+conservan el efecto lateral de un `insert`. **493 mueren y 47 sobreviven
+(tras añadir el caso del `-0.0` propio); todos demostrados**:
+
+- *Inalcanzables (11 mutantes de las 8 guardas).*
+- *Mitades equivalentes anotadas en el código (36).* Las de `is_finite()` (JSON no
+  trae infinitos: cuatro lugares) y las de la tasa de quimera (`!is_finite`,
+  `!(0..=1)`) y de los individuos repetidos del escritor, que la configuración ya
+  excluye; `valid_manifest_id` en origen y destino (misma sintaxis que
+  `LibraryId`); `>=` frente a `>` y `insert().is_some()` en los órdenes de
+  individuos, coberturas, resúmenes, diagnósticos y salidas FASTQ (cada una la
+  caza la otra; en las salidas, `ids.insert` caza antes la tupla repetida);
+  `!paths.insert` de las salidas; las mitades de `artifact_mates` en el escritor
+  y en el validador (**mutuamente** redundantes: quitar las dos a la vez muere);
+  las cinco igualdades de conservación de la contaminación (**cada una se deduce
+  de las otras cuatro**: ninguna sola muere, los diez pares sí); la suma de
+  familias del histograma (el desborde de parejas llega a la vez y da el mismo
+  motivo); las dos mitades del estado del evento que implica `validate_outputs`;
+  la rama nula de `reference_tract_bases`; el índice del arreglo de errores; y
+  `unwrap_or(0)` de los heredados.
+- *Ronda 2 (09/10/2026), revisión adversarial.* Tres mutantes no equivalentes
+  sobrevivían y se cubrieron: `len() != 64` frente a `< 64` en `validate_hex` y
+  en `validate_subseed_hex` (casos de 65 caracteres: subsemilla del evento,
+  huella de la referencia y las tres subsemillas de la contaminación) y
+  `expects_lineage` sin `expects_pcr &&` (caso con `"stutter": {}` en
+  `artifacts.pcr` de un evento sin amplificar, que exige «campos inválidos en
+  artifacts.pcr»). Además, por decisión del responsable, **cambio de producción
+  de una línea**: la fracción realizada de duplicados se compara ahora por bits
+  (`to_bits()`), como el cruce resumen-cobertura, y un caso con `-0.0` falla con
+  la comparación numérica. Los mecanismos de `is_finite()` quedan corregidos
+  (`as_f64()` filtra lo no finito, también con `arbitrary_precision`). Las cifras
+  de la puerta no cambian (147 / 8). Las siete ejecuciones de esta ronda: los
+  cuatro mutantes nuevos mueren y los tres de `>=` frente a `>` del orden
+  sobreviven (ya contados).
+
+**Lecciones aplicadas.** Tres rechazos del escritor repetían el texto del
+validador final (ajustes de calidad, mate ausente y cobertura de un evento no
+completo): quitar la guarda del escritor daba el mismo motivo por otra vía y
+**ninguna prueba lo notaba**; se añadieron casos con una incoherencia anterior
+que el validador ve antes. Y un primer arnés por lotes daba **muertes falsas**
+(un mutante hacía alcanzable la guarda inalcanzable de otro: el porcentaje
+ausente): por eso las 540 ejecuciones son una a una.
+
+**Alcance de «0 pendientes» en esta tanda.** Se refiere a las guardas que
+cuenta la puerta. DT-043 (el juez de recursos publicados no ata la sección de
+amplificación) y DT-036 (evento fallido sin estado en el manifiesto general) no
+se tocan: los documentos de evento fallido que aquí se juzgan se derivan del
+completo alterándolo, porque el programa no publica hoy ese documento por la vía
+del ensamblado.
 
 ---
 
@@ -3348,3 +3445,29 @@ estrictamente creciente.
 restauración reciba la lista ya extraída. El total del juez bajaría a unas 129
 comprobaciones con 11 sin disparar. Las otras inalcanzables de la tanda 3 (cotas
 de redondeo, conversiones, invariantes entre recorridos) no se eliminan así.
+
+## DT-046. Referencias cruzadas internas del manifiesto de evento no atadas por su propio juez
+
+**Gravedad: baja.** Halladas en la tanda 4 de DT-001 (08/10/2026) al cubrir
+`src/event_manifest.rs`, ampliadas en la ronda 2 (09/10/2026). **Sin arreglar**
+(decisión del agente raíz: registrar).
+
+1. `validate_f4_id_catalog` compara `values.iter().filter_map(Value::as_str)` con
+   la lista esperada: un elemento que no es texto se descarta, así que
+   `"v1": ["execution", ..., 7]` **se acepta** (reproducido). Valoración del
+   revisor: el juez lo acepta y `jsonschema` 4.10.3 lo **rechaza**.
+2. `validate_selected_individuals` exige individuos y grupos de lectura únicos,
+   pero **no** bibliotecas: dos individuos con el mismo `library_id` se aceptan
+   (reproducido). Valoración del revisor: **los dos** (juez y `jsonschema`) lo
+   aceptan.
+3. Los diagnósticos de `validate_writer_facts` llevan el nombre provisional del
+   esquema v2 aunque el documento sea v3, porque `event_manifest_document` los
+   devuelve sin el retiquetado que sí aplica `validate_event_manifest_bytes`
+   (mismo defecto que DT-017 en el otro juez; etiqueta reproducida por el
+   revisor).
+4. El juez aislado también acepta, y `jsonschema` 4.10.3 tampoco rechaza: una
+   receptora de contaminación que no está entre los seleccionados, un donante
+   ajeno, una biblioteca receptora que es la de otro individuo y dos bibliotecas
+   con el mismo par de UDI. **No verificado por ejecución:** por lectura, el
+   juez del paquete completo (`src/results.rs`, hacia las líneas 3281 y 3399)
+   los cazaría al comparar `selected_individuals` con el plan rederivado.
