@@ -81,8 +81,9 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-046 | Referencias cruzadas internas del manifiesto de evento no atadas por su propio juez (`id_catalog`, bibliotecas repetidas, receptora y donantes ajenos, UDI repetidos, esquema v2 en los hechos del escritor) | Baja | 08/10/2026 | Abierta |
 | DT-045 | El juez de la matriz de SNV tiene catorce comprobaciones de código muerto y un conjunto redundante, porque repite lo que `parse_metadata_json` ya exige | Baja | 08/10/2026 | Abierta; encargo aparte |
 | DT-047 | El contrato de la verdad admite un cambio de base de segmento cubierto por una deleción del mismo segmento y la réplica del juez lo rechaza como «no se reproduce» | Baja | 09/10/2026 | **Cerrada (09/10/2026)**: el error estaba en el contrato |
-| DT-048 | El juez no exige que el estado heredado de una copia recorra la referencia una vez y en orden creciente (colinealidad): acepta rotaciones y duplicaciones | Media | 09/10/2026 | Abierta; se arregla en un cambio aparte |
+| DT-048 | El juez no exige que el estado heredado de una copia recorra la referencia una vez y en orden creciente (colinealidad): acepta rotaciones y duplicaciones | Media | 09/10/2026 | **Cerrada (09/10/2026)**: el juez exige que los segmentos recorran la referencia una vez y en orden |
 | DT-049 | El lector por flujo de la verdad no aplica a los casos genotípicos el paso léxico del contrato | Media-baja | 09/10/2026 | Abierta (junto a DT-015) |
+| DT-050 | En memoria, el juez de la verdad aceptaba una copia con un segmento de otra secuencia en medio | Baja | 09/10/2026 | **Cerrada (09/10/2026)**, en el mismo cambio que DT-048 |
 
 ---
 
@@ -3651,8 +3652,8 @@ comprobaciones no cambia (69).
 
 **Gravedad: media.** Hallada por la revisión adversarial de la tanda 5 de DT-001
 (09/10/2026) y confirmada por el responsable: **el estado heredado debe cubrir la
-referencia exactamente una vez y en orden creciente**. **Sin arreglar** en la
-tanda 5; el arreglo se hará en un cambio aparte, justo después.
+referencia exactamente una vez y en orden creciente**. **Cerrada el 09/10/2026**,
+en un cambio aparte justo después de la tanda 5 (ver «Cómo se cerró»).
 
 `inherited_loss` (`src/truth_validation.rs`) solo busca bases que **faltan**: no
 detecta duplicaciones ni reordenaciones. Reproducido sobre la verdad publicada por
@@ -3668,7 +3669,7 @@ el programa:
 *Referencia normativa:* `design/especificaciones-0.1.md` (línea ~367, «intervalos
 colineales») y `schemas/truth-v4.md` (exige «conservar la referencia entera»).
 
-*Corrección propuesta* (no hecha): al formar la réplica inicial, exigir segmentos
+*Corrección propuesta* (se hizo con una adaptación, ver abajo): al formar la réplica inicial, exigir segmentos
 **ordenados, sin solaparse y sin huecos**, y convertir en rechazos las dos pruebas
 que se quitaron de la tanda 5 (`touching_source_fragments_in_reverse_order_are_accepted`
 y `a_repeat_tract_touching_the_previous_fragment_is_accepted`, que daban por
@@ -3677,6 +3678,143 @@ válida la rotación).
 *Mutante relacionado:* `cursor = cursor.max(end)` por `cursor = end` en
 `inherited_loss` **sobrevive y no es equivalente**: solo lo distinguen documentos
 con segmentos solapados.
+
+### Cómo se cerró (09/10/2026)
+
+**La regla.** Los segmentos de cada copia (`segments[*].source`), en el orden en
+que se publican, recorren la secuencia de la referencia de la copia
+**exactamente una vez y en orden creciente**: cada segmento es de esa secuencia y
+no está vacío ni invertido (añadido en la ronda 2), el primero empieza en 0, cada uno
+empieza donde acaba el anterior y el último acaba en la longitud de la secuencia
+según la referencia. Las modificaciones de segmento no cuentan para el recorrido:
+un cambio de base y una inserción heredados no consumen referencia, y una deleción
+de segmento la sigue rechazando el juez del conjunto de casos. Los fragmentos
+vigentes no necesitan regla propia: salen de replicar el historial sobre los
+segmentos (inserciones entre fragmentos, deleciones que los recortan, tractos que
+sustituyen un tramo de un fragmento), lo que nunca reordena ni duplica, y el juez
+exige que coincidan con esa réplica.
+
+**Dónde.** `require_collinear_segments` (`src/truth_validation.rs`), con el rechazo
+nuevo `SegmentsNotCollinear { identity, reached, next_start }` —hasta dónde había
+llegado el recorrido y dónde empieza el segmento siguiente (tras el último, la
+longitud de la secuencia)—. Corre en `reconstruct_copy`, que es común a los dos
+lectores (completo y por flujo), al documento en memoria, a las fronteras del VCF y
+a la publicación. Sustituye a la búsqueda de huecos de `inherited_loss`, que ordenaba
+los segmentos antes de mirarlos y por eso no veía rotaciones ni desórdenes; queda en
+`inherited_loss` solo la deleción de segmento. La regla es del juez y no del
+contrato porque necesita la longitud de la secuencia **de la referencia**.
+
+**Adaptación respecto a la propuesta.** Se exige **después** de replicar y
+materializar la copia, no al formar la réplica inicial. Exigida al principio, la
+batería mostró once pruebas de guardas que dejaban de alcanzar su guarda (dos
+fragmentos que se solapan, longitudes que desbordan, un fragmento más allá del
+final, un cambio en la última posición representable, dos cambios en una posición,
+inserciones y deleciones sin base de referencia delante): todas usan segmentos no
+colineales para llegar a ellas, y habrían pasado a inalcanzables. Exigida al final,
+esas guardas siguen parando lo suyo con su motivo, y la nueva para lo que ninguna
+otra ve: el hueco, la rotación, el desorden y el tramo duplicado o solapado que una
+deleción del historial vuelve a quitar. Un solape que llega a los fragmentos
+vigentes sigue rechazándose antes como `DuplicateCurrentSourcePosition`.
+
+**Ninguna verdad del programa la incumple.** Comprobado antes de tocar el juez, con
+un comprobador independiente en Python sobre una copia del árbol instrumentada para
+volcar cada verdad que el programa proyecta: **409 verdades (2857 copias)
+publicadas por la batería entera** (1972 pruebas en verde), con inserciones y
+deleciones (102 y 113 verdades), fragmentos insertados (96), tractos de repetición
+(193; 80 con un *indel* en la misma copia), referencias simuladas con
+microsatélites plantados y suministradas, varias secuencias (31), varias
+poblaciones (36), ploidías 1, 2, 3, 4 y 10 y una secuencia de más de 100 kb; **35
+verdades (1227 copias)** publicadas con el binario de *release* desde cada
+configuración de los *fixtures* que publica (`vcf-fusion`, `snp-order`,
+`vcf-null-effect`, `reference_reduction`); y las tres verdades ya publicadas en
+`results/` que tienen copias (1300). Todas las copias tienen un único segmento
+`[0, longitud)`: el productor solo crea cadenas intactas (`SegmentChain::intact`).
+Cero incumplimientos.
+
+**Pruebas** (`tests/truth_validation_guards.rs`, sección «El estado heredado recorre
+la referencia una vez y en orden»), todas sobre la verdad publicada de verdad, con
+el motivo exacto y los dos lectores cuando los dos pueden verlo:
+`touching_source_fragments_in_reverse_order_are_rejected` y
+`a_repeat_tract_touching_the_previous_fragment_is_rejected` (las dos de la tanda 5,
+ahora rechazos), `a_duplicated_stretch_that_the_history_deletes_again_is_rejected`
+(el caso 2), `a_partial_overlap_hidden_by_a_deletion_is_rejected` (segmentos
+`[0, 424)` y `[422, 600)` con `del-1`: los fragmentos vigentes ya no se solapan),
+`a_gap_between_segments_is_rejected`,
+`segments_out_of_order_on_another_sequence_are_rejected` (`chr2`, tres segmentos
+fuera de orden), `a_copy_without_segments_does_not_walk_the_reference` (en
+memoria; también la secuencia ausente) y, del lado aceptado,
+`collinear_segments_cut_anywhere_are_accepted` (las seis copias de `chr1` partidas
+en tres segmentos, con inserciones, deleciones y, en la versión 5, el tracto). En
+`tests/truth_validation.rs`, `both_readers_reject_a_segment_trimmed_at_either_end`
+pasa del rechazo del conjunto de casos al nuevo. Contra el comportamiento anterior
+(el juez de antes reconstruido en una copia), las ocho pruebas de rechazo fallan: la
+rotación, el tracto rotado, el tramo duplicado, el solape escondido y el desorden en
+`chr2` se **aceptaban**; el hueco y los recortes los paraba el conjunto de casos con
+otro motivo.
+
+**Mutaciones** (copia fuera del repositorio, un mutante por ejecución, huella SHA
+antes, mutada y restaurada): quitar la llamada, `!=` por `<` o por `>`, quitar el
+centinela de la longitud, empezar el recorrido en 1, tomar longitud 0 si falta la
+secuencia, intercambiar los dos campos del error y que `inherited_loss` no vea la
+deleción de segmento: **todos mueren**. `reached = end` por
+`reached = reached.max(end)` sobrevivía y se anotó como equivalente porque un
+segmento invertido lo rechazaría la réplica; **la revisión mostró que no siempre**
+(ver la ronda 2, donde se endureció la regla). El mutante antiguo de `cursor`
+desaparece con el código que lo contenía.
+
+**Ronda 2 (09/10/2026, tras la revisión adversarial).** El revisor lo aprobó con un
+fuzzer propio (cadenas colineales y perturbadas en `chr1` y `chr2`, versiones 4 y
+5, los dos lectores): cero no colineales aceptados, frente a unos 190 (v4) y 40
+(v5) con el juez anterior; 3000 documentos basura sin pánicos; ningún colineal
+válido rechazado. Sus hallazgos y lo hecho:
+
+- **La regla no dependía solo de sí misma.** Un segmento invertido en memoria
+  (`[200, 100)` entre `[0, 200)` y `[100, 400)`, con deleciones de segmento que
+  reponen el cursor) superaba la réplica; lo paraba el conjunto de casos, y las
+  fronteras del VCF, que no lo juzgan, lo aceptaban. Ahora cada segmento tiene que
+  **avanzar** el recorrido: se rechaza también un segmento invertido o **vacío**
+  (`end <= start`). El vacío se rechaza porque no recorre nada y el contrato ya lo
+  prohíbe por bytes (`InvalidSegmentInterval`); admitirlo solo en memoria no
+  aportaría nada. Con eso, `reached = reached.max(end)` sí es equivalente por la
+  propia condición (`end > start == reached`), y lo dice el comentario.
+- **DT-050 se cierra de paso**: la misma condición exige que cada segmento sea de
+  la secuencia de la copia.
+- **Huecos de prueba**: un segmento que vuelve a empezar en 0 (`[0, 50)` y
+  `[0, 400)` en `chr2`, con una deleción del historial que quita el duplicado) y
+  una deleción de segmento detrás de otros cambios del mismo segmento (copia 1 de
+  I3, 550..560), que distinguen una regla que tolerara reiniciar en 0 y un
+  `inherited_loss` que solo mirara la primera modificación. Al mutar se vio un
+  tercero: nada distinguía un recorrido que acaba **más allá** de la longitud
+  (`!=` por `<` en la comprobación final sobrevivía); lo cubre
+  `a_walk_past_the_end_of_the_sequence_is_rejected` (en memoria, el último
+  segmento acaba en 610 y una deleción de segmento quita lo que sobra).
+- **Las guardas «posición de fuente duplicada» (dos) y «un cambio en dos
+  fragmentos»** son inalcanzables con documentos colineales y redundantes para la
+  seguridad: quitarlas no dejaría pasar nada, solo cambiaría el motivo. Se
+  mantienen por el diagnóstico, con una nota junto a cada una.
+- **Textos normativos.** La regla se escribió en `schemas/truth-v4.md` como regla
+  de la réplica, en su propio párrafo, y en DTC-061: rige en las versiones `"4"` y
+  `"5"`, y una versión futura con variantes estructurales (duplicaciones,
+  inversiones, translocaciones; REQ-IND-46 a 49 y REQ-REC-20) tendrá que
+  sustituirla. **No se sube la versión del contrato** (decisión del responsable):
+  el productor nunca escribió documentos no colineales, mismo criterio que DT-047.
+
+Pruebas nuevas de la ronda 2: `an_inverted_segment_that_the_replay_lets_through_is_rejected`,
+`an_empty_segment_is_rejected`, `a_segment_of_another_sequence_is_rejected` (las
+tres en memoria), `a_segment_restarting_at_zero_is_rejected`,
+`a_segment_deletion_after_other_inherited_changes_has_no_case` (las dos por bytes,
+con los dos lectores) y `a_walk_past_the_end_of_the_sequence_is_rejected`. Mutantes
+de la ronda 2, uno por ejecución en una copia: quitar la mitad «vacío o
+invertido», `<=` por `<`, quitar la mitad de la secuencia, tolerar reiniciar en 0,
+`!=` por `<` o por `>` en el inicio y en la comprobación final, quitar la
+comprobación final, empezar en 1, longitud 0 si falta la secuencia, intercambiar
+los campos del error, `inherited_loss` solo con la primera modificación y quitar la
+llamada: **todos mueren**; `reached.max(end)` sobrevive y es equivalente.
+
+**Cobertura.** `src/truth_validation.rs` pasa de 118 a 121 comprobaciones: el
+rechazo nuevo en dos sitios (un segmento que no avanza donde debe y el recorrido
+que no acaba en la longitud) y el de la secuencia ausente que necesita para
+medirlo. Las tres se disparan y las sin disparar siguen en 32.
 
 ## DT-049. El lector por flujo de la verdad no aplica a los casos genotípicos el paso léxico del contrato
 
@@ -3691,3 +3829,19 @@ más de 64 caracteres, y un alelo de deleción cuyo evento fuente empieza en 421
 vez de 420, que el lector completo rechaza. Las tablas léxicas de
 `tests/truth_schema_guards.rs` se prueban por eso sobre el documento en memoria, no
 con los dos lectores.
+
+## DT-050. En memoria, el juez de la verdad aceptaba una copia con un segmento de otra secuencia en medio
+
+**Gravedad: baja. Cerrada (09/10/2026), en el mismo cambio que DT-048.** Hallada
+por la revisión adversarial de DT-048. Un documento **en memoria**, que no pasa
+por el contrato, con una copia de `chr2` cuyos segmentos eran `chr2[0, 100)`,
+`chr1[100, 300)` y `chr2[300, 400)` lo aceptaba `validate_and_reconstruct_truth`
+(pública), y la copia reconstruida no era `chr2`: ni el recorrido de los segmentos
+ni la detección de fragmentos duplicados miraban la secuencia de cada segmento.
+Por bytes lo rechaza el contrato (`SegmentSourceMismatch`). Es de la misma familia
+que las demás vías en memoria que saltan el contrato.
+
+*Cómo se cerró.* La regla de DT-048 (`require_collinear_segments`) exige además que
+cada segmento sea de la secuencia de la copia; si no, `SegmentsNotCollinear` en ese
+segmento. Lo prueba `a_segment_of_another_sequence_is_rejected`, que falla al
+quitar esa condición.

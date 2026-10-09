@@ -2577,3 +2577,736 @@ fn a_copy_of_another_reference_is_not_a_candidate_carrier() {
     );
     judge(&all).expect("la copia ajena no cambia ningún caso");
 }
+
+// ---------------------------------------------------------------------------
+// El estado heredado recorre la referencia una vez y en orden (DT-048)
+// ---------------------------------------------------------------------------
+//
+// Los segmentos de una copia, en el orden publicado, recorren su secuencia de
+// la referencia exactamente una vez y en orden creciente. Los documentos de
+// abajo están armados con los fragmentos vigentes que salen de replicar esos
+// segmentos y su historial, de modo que la réplica, la materialización y el
+// conjunto de casos los dejan pasar y solo la comprobación del recorrido puede
+// pararlos (salvo el hueco, que antes paraba el conjunto de casos con otro
+// motivo).
+
+fn not_collinear(
+    individual: &str,
+    copy_index: u8,
+    reached: u64,
+    next_start: u64,
+) -> TruthValidationError {
+    TruthValidationError::SegmentsNotCollinear {
+        identity: identity(individual, copy_index),
+        reached,
+        next_start,
+    }
+}
+
+/// Dos fragmentos de fuente que se tocan sin solaparse, en el orden de la
+/// copia **inverso** al de la referencia: la copia 1 de I3 pasa a los segmentos
+/// `[300, 600)` y `[0, 300)` —el cromosoma rotado—, con sus fragmentos vigentes
+/// en ese orden. Hasta el 09/10/2026 lo aceptaban los dos lectores.
+#[test]
+fn touching_source_fragments_in_reverse_order_are_rejected() {
+    let mut all = lines();
+    let at = copy_line(&all, "I3", 1);
+    let mods = all[at]["segments"][0]["modifications"]
+        .as_array()
+        .expect("modificaciones")
+        .clone();
+    let pieces = all[at]["current_pieces"]
+        .as_array()
+        .expect("fragmentos")
+        .clone();
+    let snps = pieces[0]["snps"].as_array().expect("cambios").clone();
+    assert_eq!(
+        (snps[0]["position"].as_u64(), snps[1]["position"].as_u64()),
+        (Some(49), Some(499))
+    );
+    let history = all[at]["history"].as_array().expect("historial").clone();
+    set_copy(
+        &mut all,
+        "I3",
+        1,
+        vec![
+            segment(300, 600, vec![mods[1].clone()]),
+            segment(0, 300, vec![mods[0].clone()]),
+        ],
+        vec![
+            source_piece(300, 600, vec![snps[1].clone()]),
+            source_piece(0, 300, vec![snps[0].clone()]),
+        ],
+        history,
+    );
+    assert_both("rotación", &bytes_of(&all), &not_collinear("I3", 1, 0, 300));
+}
+
+/// Lo mismo con un tracto de repetición que acaba donde empieza el fragmento
+/// anterior (versión 5: solo el lector completo). Hasta el 09/10/2026 se
+/// aceptaba.
+#[test]
+fn a_repeat_tract_touching_the_previous_fragment_is_rejected() {
+    let mut all = lines_v5();
+    let at = copy_line(&all, "I3", 0);
+    let mods = all[at]["segments"][0]["modifications"]
+        .as_array()
+        .expect("modificaciones")
+        .clone();
+    let pieces = all[at]["current_pieces"]
+        .as_array()
+        .expect("fragmentos")
+        .clone();
+    let history = all[at]["history"].as_array().expect("historial").clone();
+    assert_eq!(pieces.len(), 3, "izquierda, tracto, derecha");
+    assert_eq!(pieces[1]["kind"], "repeat_allele");
+    set_copy(
+        &mut all,
+        "I3",
+        0,
+        vec![segment(300, 600, vec![]), segment(0, 300, mods)],
+        vec![pieces[2].clone(), pieces[0].clone(), pieces[1].clone()],
+        history,
+    );
+    assert_eq!(
+        full(jsonl(&all).as_bytes()).err(),
+        Some(not_collinear("I3", 0, 0, 300))
+    );
+}
+
+/// La copia 1 de I1 lleva la deleción `del-1` (420..424) y su caso. Con los
+/// segmentos `[0, 424)`, `[420, 424)` y `[424, 600)` el tramo 420..424 está dos
+/// veces y la deleción quita una: la copia final es la referencia con su cambio
+/// en 49, y aun así el caso de la deleción la declara portadora. Hasta el
+/// 09/10/2026 lo aceptaban los dos lectores.
+#[test]
+fn a_duplicated_stretch_that_the_history_deletes_again_is_rejected() {
+    let mut all = lines();
+    let at = copy_line(&all, "I1", 1);
+    let segments = all[at]["segments"].as_array().expect("segmentos").clone();
+    assert_eq!(segments.len(), 1);
+    let mods = segments[0]["modifications"]
+        .as_array()
+        .expect("modificaciones")
+        .clone();
+    let pieces = all[at]["current_pieces"]
+        .as_array()
+        .expect("fragmentos")
+        .clone();
+    assert_eq!(
+        (
+            pieces[0]["source"]["end"].as_u64(),
+            pieces[1]["source"]["start"].as_u64()
+        ),
+        (Some(420), Some(424)),
+        "la deleción del-1 quita 420..424"
+    );
+    let snps = pieces[0]["snps"].as_array().expect("cambios").clone();
+    let history = all[at]["history"].as_array().expect("historial").clone();
+    assert_eq!(history[1]["event_id"], "del-1");
+    set_copy(
+        &mut all,
+        "I1",
+        1,
+        vec![
+            segment(0, 424, mods),
+            segment(420, 424, vec![]),
+            segment(424, 600, vec![]),
+        ],
+        vec![
+            source_piece(0, 420, snps),
+            source_piece(420, 424, vec![]),
+            source_piece(424, 600, vec![]),
+        ],
+        history,
+    );
+    assert_both(
+        "tramo duplicado y borrado",
+        &bytes_of(&all),
+        &not_collinear("I1", 1, 424, 420),
+    );
+}
+
+/// Un solape parcial que la deleción del historial esconde: los segmentos
+/// `[0, 424)` y `[422, 600)` se solapan en 422..424, y `del-1` (420..424) quita
+/// justo el final del primero. Los fragmentos vigentes, `[0, 420)` y
+/// `[422, 600)`, ya no se solapan, de modo que la comprobación de fragmentos
+/// solapados no lo ve; la copia pierde 420..422 y el caso dice 420..424. Hasta
+/// el 09/10/2026 lo aceptaban los dos lectores.
+#[test]
+fn a_partial_overlap_hidden_by_a_deletion_is_rejected() {
+    let mut all = lines();
+    let at = copy_line(&all, "I1", 1);
+    let mods = all[at]["segments"][0]["modifications"]
+        .as_array()
+        .expect("modificaciones")
+        .clone();
+    let pieces = all[at]["current_pieces"]
+        .as_array()
+        .expect("fragmentos")
+        .clone();
+    let snps = pieces[0]["snps"].as_array().expect("cambios").clone();
+    let history = all[at]["history"].as_array().expect("historial").clone();
+    set_copy(
+        &mut all,
+        "I1",
+        1,
+        vec![segment(0, 424, mods), segment(422, 600, vec![])],
+        vec![source_piece(0, 420, snps), source_piece(422, 600, vec![])],
+        history,
+    );
+    assert_both(
+        "solape parcial escondido",
+        &bytes_of(&all),
+        &not_collinear("I1", 1, 424, 422),
+    );
+}
+
+/// Un hueco entre dos segmentos (`[0, 300)` y `[310, 600)`): la copia pierde
+/// 300..310 sin deleción ni caso. Hasta el 09/10/2026 lo rechazaba el conjunto
+/// de casos (bases de referencia que faltan en el estado heredado); ahora lo
+/// rechaza la réplica, con dónde se rompe el recorrido.
+#[test]
+fn a_gap_between_segments_is_rejected() {
+    let mut all = lines();
+    let at = copy_line(&all, "I3", 1);
+    let mods = all[at]["segments"][0]["modifications"]
+        .as_array()
+        .expect("modificaciones")
+        .clone();
+    let pieces = all[at]["current_pieces"]
+        .as_array()
+        .expect("fragmentos")
+        .clone();
+    let snps = pieces[0]["snps"].as_array().expect("cambios").clone();
+    let history = all[at]["history"].as_array().expect("historial").clone();
+    set_copy(
+        &mut all,
+        "I3",
+        1,
+        vec![
+            segment(0, 300, vec![mods[0].clone()]),
+            segment(310, 600, vec![mods[1].clone()]),
+        ],
+        vec![
+            source_piece(0, 300, vec![snps[0].clone()]),
+            source_piece(310, 600, vec![snps[1].clone()]),
+        ],
+        history,
+    );
+    assert_both("hueco", &bytes_of(&all), &not_collinear("I3", 1, 300, 310));
+}
+
+/// Tres segmentos que cubren la secuencia entera sin solaparse pero fuera de
+/// orden, en la **segunda** secuencia (`chr2`): `[0, 100)`, `[200, 400)` y
+/// `[100, 200)`. Hasta el 09/10/2026 lo aceptaban los dos lectores (la
+/// búsqueda de huecos ordenaba los segmentos antes de mirarlos).
+#[test]
+fn segments_out_of_order_on_another_sequence_are_rejected() {
+    let mut all = lines();
+    let at = all
+        .iter()
+        .position(|line| {
+            line["record_type"] == "haplotype_copy"
+                && line["identity"]["individual_id"] == "I2"
+                && line["identity"]["sequence_id"] == "chr2"
+                && line["identity"]["copy_index"] == 1
+        })
+        .expect("la copia 1 de I2 en chr2");
+    assert_eq!(all[at]["segments"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        all[at]["segments"][0]["modifications"],
+        json!([]),
+        "sin cambios heredados"
+    );
+    assert_eq!(all[at]["history"], json!([]), "sin historial");
+    let piece = |start: u64, end: u64| json!({"kind": "source", "source": reference_object_on("chr2", start, end, 400), "snps": []});
+    let segment_on = |start: u64, end: u64| json!({"source": reference_object_on("chr2", start, end, 400), "modifications": []});
+    all[at]["segments"] = json!([
+        segment_on(0, 100),
+        segment_on(200, 400),
+        segment_on(100, 200)
+    ]);
+    all[at]["current_pieces"] = json!([piece(0, 100), piece(200, 400), piece(100, 200)]);
+    let mut expected_identity = identity("I2", 1);
+    expected_identity.sequence_id = "chr2".to_owned();
+    assert_both(
+        "desorden en chr2",
+        &bytes_of(&all),
+        &TruthValidationError::SegmentsNotCollinear {
+            identity: expected_identity,
+            reached: 100,
+            next_start: 200,
+        },
+    );
+}
+
+fn reference_object_on(sequence: &str, start: u64, end: u64, length: u64) -> Value {
+    let mut object = reference_object(start, end, length);
+    object["sequence_id"] = json!(sequence);
+    object
+}
+
+/// En memoria (sin el contrato, que exige segmentos): una copia sin ningún
+/// segmento no recorre nada, y el recorrido se rompe en la longitud de la
+/// secuencia. Si además su secuencia no está en la referencia, el rechazo es el
+/// de la secuencia ausente: sin ningún fragmento, la materialización no llegó
+/// a mirarla.
+#[test]
+fn a_copy_without_segments_does_not_walk_the_reference() {
+    let mut all = document(&lines());
+    let copy = copy_of(&mut all, "I3", 1);
+    copy.segments.clear();
+    copy.current_pieces.clear();
+    copy.history.clear();
+    assert_eq!(judge(&all).err(), Some(not_collinear("I3", 1, 0, 600)));
+
+    let mut all = document(&lines());
+    let copy = copy_of(&mut all, "I3", 1);
+    copy.segments.clear();
+    copy.current_pieces.clear();
+    copy.history.clear();
+    copy.identity.sequence_id = "chr9".to_owned();
+    assert_eq!(
+        judge(&all).err(),
+        Some(TruthValidationError::MissingReferenceSequence {
+            sequence_id: "chr9".to_owned(),
+        })
+    );
+}
+
+/// Parte en dos el fragmento de fuente que contiene `point` (sin tocar sus
+/// extremos), con cada cambio de base en su mitad. Devuelve también el índice
+/// del fragmento partido.
+fn split_source_piece_at(pieces: &[Value], point: u64) -> (Vec<Value>, u64) {
+    let mut split = Vec::new();
+    let mut found = Vec::new();
+    for (index, piece) in pieces.iter().enumerate() {
+        let start = piece["source"]["start"].as_u64();
+        let end = piece["source"]["end"].as_u64();
+        match (piece["kind"].as_str(), start, end) {
+            (Some("source"), Some(start), Some(end)) if start < point && point < end => {
+                found.push(u64::try_from(index).expect("índice"));
+                let snps = piece["snps"].as_array().expect("cambios");
+                let side = |left: bool| {
+                    snps.iter()
+                        .filter(|snp| (snp["position"].as_u64().expect("posición") < point) == left)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                };
+                let mut left = piece.clone();
+                left["source"]["end"] = json!(point);
+                left["snps"] = Value::Array(side(true));
+                let mut right = piece.clone();
+                right["source"]["start"] = json!(point);
+                right["snps"] = Value::Array(side(false));
+                split.push(left);
+                split.push(right);
+            }
+            _ => split.push(piece.clone()),
+        }
+    }
+    assert_eq!(
+        found.len(),
+        1,
+        "un único fragmento de fuente contiene {point}"
+    );
+    (split, found[0])
+}
+
+/// Tras partir el fragmento `split` de la copia, los enlaces de las inserciones
+/// que lleva esa copia a fragmentos posteriores avanzan un puesto. Devuelve
+/// cuántos enlaces movió.
+fn shift_piece_links(all: &mut [Value], individual: &str, copy_index: u8, split: u64) -> usize {
+    let mut moved = 0;
+    for line in all.iter_mut() {
+        if line["record_type"] != "genotype" {
+            continue;
+        }
+        let carried = line["carriers"]
+            .as_array()
+            .expect("portadores")
+            .iter()
+            .filter(|carrier| {
+                carrier["copy"]["individual_id"] == individual
+                    && carrier["copy"]["sequence_id"] == "chr1"
+                    && carrier["copy"]["copy_index"] == copy_index
+            })
+            .map(|carrier| carrier["allele_index"].as_u64().expect("alelo"))
+            .collect::<Vec<_>>();
+        for allele_index in carried {
+            let carriers_of_allele = line["carriers"]
+                .as_array()
+                .expect("portadores")
+                .iter()
+                .filter(|carrier| carrier["allele_index"] == allele_index)
+                .count();
+            let allele = &mut line["alleles"][usize::try_from(allele_index).expect("índice")];
+            let Some(links) = allele.get_mut("piece_links").and_then(Value::as_array_mut) else {
+                continue;
+            };
+            if links.is_empty() {
+                continue;
+            }
+            assert_eq!(
+                carriers_of_allele, 1,
+                "una inserción del escenario la lleva una copia"
+            );
+            for link in links {
+                let index = link["piece_index"].as_u64().expect("índice");
+                if index > split {
+                    link["piece_index"] = json!(index + 1);
+                    moved += 1;
+                }
+            }
+        }
+    }
+    moved
+}
+
+/// El lado aceptado: segmentos colineales partidos en tres, sobre copias con
+/// cambios de base heredados y del historial, inserciones, deleciones (también
+/// una que se come bases insertadas y de referencia) y, en la versión 5, el
+/// tracto. Cada copia de `chr1` pasa a los segmentos
+/// `[0, 150)`, `[150, 375)` y `[375, 600)`, con sus modificaciones repartidas,
+/// los fragmentos vigentes partidos en los mismos puntos y los enlaces de sus
+/// inserciones renumerados. Los dos lectores (el completo en la versión 5) los
+/// aceptan.
+#[test]
+fn collinear_segments_cut_anywhere_are_accepted() {
+    let cut = |all: &mut Vec<Value>, individual: &str, copy_index: u8| -> usize {
+        let at = copy_line(all, individual, copy_index);
+        let mods = all[at]["segments"][0]["modifications"]
+            .as_array()
+            .expect("modificaciones")
+            .clone();
+        let in_range = |low: u64, high: u64| {
+            mods.iter()
+                .filter(|m| {
+                    let place = m["position"]
+                        .as_u64()
+                        .or_else(|| m["point"].as_u64())
+                        .or_else(|| m["start"].as_u64())
+                        .expect("lugar");
+                    low <= place && place < high
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let pieces = all[at]["current_pieces"]
+            .as_array()
+            .expect("fragmentos")
+            .clone();
+        let (pieces, first) = split_source_piece_at(&pieces, 150);
+        let (pieces, second) = split_source_piece_at(&pieces, 375);
+        all[at]["segments"] = json!([
+            segment(0, 150, in_range(0, 150)),
+            segment(150, 375, in_range(150, 375)),
+            segment(375, 600, in_range(375, 600)),
+        ]);
+        all[at]["current_pieces"] = Value::Array(pieces);
+        shift_piece_links(all, individual, copy_index, first)
+            + shift_piece_links(all, individual, copy_index, second)
+    };
+    let copies = [
+        ("I1", 0),
+        ("I1", 1),
+        ("I2", 0),
+        ("I2", 1),
+        ("I3", 0),
+        ("I3", 1),
+    ];
+    for (version, published) in [("4", lines()), ("5", lines_v5())] {
+        let mut all = published.clone();
+        let moved: usize = copies
+            .iter()
+            .map(|(individual, copy_index)| cut(&mut all, individual, *copy_index))
+            .sum();
+        assert!(
+            moved > 0,
+            "versión {version}: algún enlace de inserción se movió"
+        );
+        assert_ne!(all, published, "versión {version}: la alteración alteró");
+        let whole = full(jsonl(&all).as_bytes());
+        whole.unwrap_or_else(|error| panic!("versión {version}: {error:?}"));
+        if version == "4" {
+            for result in both(&bytes_of(&all)) {
+                result.expect("segmentos colineales partidos");
+            }
+        }
+    }
+}
+
+/// La copia de ese individuo en `chr2`, del documento en memoria.
+fn chr2_copy_of<'a>(
+    document: &'a mut genome_population_simulator::truth_schema::TruthDocument,
+    individual: &str,
+    copy_index: u8,
+) -> &'a mut genome_population_simulator::truth_schema::HaplotypeCopyRecord {
+    document
+        .records
+        .iter_mut()
+        .find_map(|record| match record {
+            genome_population_simulator::truth_schema::TruthRecord::HaplotypeCopy(copy)
+                if copy.identity.individual_id == individual
+                    && copy.identity.sequence_id == "chr2"
+                    && copy.identity.copy_index == copy_index =>
+            {
+                Some(copy)
+            }
+            _ => None,
+        })
+        .expect("la copia en chr2")
+}
+
+fn chr2_identity(
+    individual: &str,
+    copy_index: u8,
+) -> genome_population_simulator::truth_schema::CopyIdentity {
+    let mut identity = identity(individual, copy_index);
+    identity.sequence_id = "chr2".to_owned();
+    identity
+}
+
+fn source_on(
+    sequence: &str,
+    start: u64,
+    end: u64,
+    length: u64,
+) -> genome_population_simulator::truth_schema::SegmentSource {
+    let mut source = typed_source(start, end, length);
+    sequence.clone_into(&mut source.sequence_id);
+    source
+}
+
+/// En memoria (el contrato lo rechaza por bytes): un segmento **invertido**,
+/// `[200, 100)`, entre `[0, 200)` y `[100, 400)` de la copia 1 de I2 en `chr2`,
+/// con dos deleciones de segmento (200..100 y 100..200) que reponen el cursor
+/// de la réplica, de modo que la réplica lo deja pasar con los fragmentos
+/// `[0, 200)` y `[200, 400)`. La regla lo rechaza en el segmento invertido
+/// aunque empiece donde iba el recorrido, sin depender de otra guarda. Antes de
+/// endurecerla, lo paraba el conjunto de casos (una deleción de segmento sin
+/// caso) o, en las fronteras del VCF, que no juzgan el conjunto, pasaba.
+#[test]
+fn an_inverted_segment_that_the_replay_lets_through_is_rejected() {
+    let mut all = document(&lines());
+    let copy = chr2_copy_of(&mut all, "I2", 1);
+    assert!(copy.history.is_empty(), "sin historial");
+    assert_eq!(copy.segments.len(), 1);
+    assert!(
+        copy.segments[0].modifications.is_empty(),
+        "sin cambios heredados"
+    );
+    let deletion = |event_id: &str, start: u64, end: u64| TruthModification::Deletion {
+        event_id: event_id.to_owned(),
+        start,
+        end,
+        provenance: typed_provenance("del-1"),
+    };
+    copy.segments = vec![
+        TruthSegment {
+            source: source_on("chr2", 0, 200, 400),
+            modifications: vec![],
+        },
+        TruthSegment {
+            source: source_on("chr2", 200, 100, 400),
+            modifications: vec![deletion("DEL_BACK", 200, 100)],
+        },
+        TruthSegment {
+            source: source_on("chr2", 100, 400, 400),
+            modifications: vec![deletion("DEL_FORWARD", 100, 200)],
+        },
+    ];
+    copy.current_pieces = [(0, 200), (200, 400)]
+        .into_iter()
+        .map(|(start, end)| TruthCurrentPiece::Source {
+            source: source_on("chr2", start, end, 400),
+            snps: vec![],
+        })
+        .collect();
+    assert_eq!(
+        judge(&all).err(),
+        Some(TruthValidationError::SegmentsNotCollinear {
+            identity: chr2_identity("I2", 1),
+            reached: 200,
+            next_start: 200,
+        })
+    );
+}
+
+/// En memoria (el contrato lo rechaza por bytes): un segmento **vacío**,
+/// `[300, 300)`, entre `[0, 300)` y `[300, 600)` de la copia 1 de I3. La
+/// réplica lo ignora y los fragmentos son los de cortar la copia en 300, así
+/// que solo la regla lo ve: un segmento que no avanza el recorrido no es un
+/// segmento del recorrido.
+#[test]
+fn an_empty_segment_is_rejected() {
+    let mut all = document(&lines());
+    let copy = copy_of(&mut all, "I3", 1);
+    let mods = copy.segments[0].modifications.clone();
+    assert_eq!(mods.len(), 2, "cambios heredados en 49 y 499");
+    let TruthCurrentPiece::Source { snps, .. } = copy.current_pieces[0].clone() else {
+        panic!("un fragmento de fuente");
+    };
+    assert_eq!(snps.len(), 2);
+    copy.segments = vec![
+        typed_segment(0, 300, vec![mods[0].clone()]),
+        typed_segment(300, 300, vec![]),
+        typed_segment(300, 600, vec![mods[1].clone()]),
+    ];
+    copy.current_pieces = vec![
+        typed_piece(0, 300, vec![snps[0].clone()]),
+        typed_piece(300, 600, vec![snps[1].clone()]),
+    ];
+    assert_eq!(judge(&all).err(), Some(not_collinear("I3", 1, 300, 300)));
+}
+
+/// En memoria (por bytes lo rechaza el contrato con `SegmentSourceMismatch`):
+/// una copia de `chr2` con un segmento de `chr1` en medio, `chr2[0, 100)`,
+/// `chr1[100, 300)`, `chr2[300, 400)`. Las coordenadas encajan, pero el
+/// segmento del medio no recorre la secuencia de la copia (DT-050): hasta el
+/// 09/10/2026 se aceptaba, y la copia reconstruida no era `chr2`.
+#[test]
+fn a_segment_of_another_sequence_is_rejected() {
+    let mut all = document(&lines());
+    let copy = chr2_copy_of(&mut all, "I2", 1);
+    assert!(copy.history.is_empty(), "sin historial");
+    let parts = [
+        ("chr2", 0, 100, 400),
+        ("chr1", 100, 300, 600),
+        ("chr2", 300, 400, 400),
+    ];
+    copy.segments = parts
+        .iter()
+        .map(|&(sequence, start, end, length)| TruthSegment {
+            source: source_on(sequence, start, end, length),
+            modifications: vec![],
+        })
+        .collect();
+    copy.current_pieces = parts
+        .iter()
+        .map(
+            |&(sequence, start, end, length)| TruthCurrentPiece::Source {
+                source: source_on(sequence, start, end, length),
+                snps: vec![],
+            },
+        )
+        .collect();
+    assert_eq!(
+        judge(&all).err(),
+        Some(TruthValidationError::SegmentsNotCollinear {
+            identity: chr2_identity("I2", 1),
+            reached: 100,
+            next_start: 100,
+        })
+    );
+}
+
+/// Un segmento que **vuelve a empezar en 0**: la copia 1 de I2 en `chr2` pasa a
+/// `[0, 50)` y `[0, 400)`, con una deleción del historial que quita el tramo
+/// repetido (vigentes 50..100). Los fragmentos vigentes, `[0, 50)` y
+/// `[50, 400)`, parecen la referencia entera. Distingue una regla que tolerara
+/// reiniciar el recorrido en 0.
+#[test]
+fn a_segment_restarting_at_zero_is_rejected() {
+    let mut all = lines();
+    let at = all
+        .iter()
+        .position(|line| {
+            line["record_type"] == "haplotype_copy"
+                && line["identity"]["individual_id"] == "I2"
+                && line["identity"]["sequence_id"] == "chr2"
+                && line["identity"]["copy_index"] == 1
+        })
+        .expect("la copia 1 de I2 en chr2");
+    assert_eq!(all[at]["history"], json!([]), "sin historial");
+    let on_chr2 = |start: u64, end: u64| reference_object_on("chr2", start, end, 400);
+    all[at]["segments"] = json!([
+        {"source": on_chr2(0, 50), "modifications": []},
+        {"source": on_chr2(0, 400), "modifications": []},
+    ]);
+    all[at]["current_pieces"] = json!([
+        {"kind": "source", "source": on_chr2(0, 50), "snps": []},
+        {"kind": "source", "source": on_chr2(50, 400), "snps": []},
+    ]);
+    all[at]["history"] = json!([{
+        "kind": "deletion", "event_id": "del-dup", "start": 50, "end": 100,
+        "provenance": explicit("del-1"),
+    }]);
+    assert_both(
+        "reinicio en 0",
+        &bytes_of(&all),
+        &TruthValidationError::SegmentsNotCollinear {
+            identity: chr2_identity("I2", 1),
+            reached: 50,
+            next_start: 0,
+        },
+    );
+}
+
+/// Una deleción de segmento que va **después** de otras modificaciones del
+/// mismo segmento: la copia 1 de I3 conserva sus dos cambios heredados (49 y
+/// 499) y añade la deleción de segmento 550..560, sin evento en el historial ni
+/// caso. Los dos lectores la rechazan como bases de referencia que faltan en el
+/// estado heredado. Distingue un juez que solo mirara la primera modificación de
+/// cada segmento.
+#[test]
+fn a_segment_deletion_after_other_inherited_changes_has_no_case() {
+    let mut all = lines();
+    let at = copy_line(&all, "I3", 1);
+    let mut mods = all[at]["segments"][0]["modifications"]
+        .as_array()
+        .expect("modificaciones")
+        .clone();
+    assert_eq!(mods.len(), 2, "cambios heredados en 49 y 499");
+    mods.push(
+        json!({"kind": "deletion", "event_id": "del-seg", "start": 550, "end": 560,
+                     "provenance": explicit("del-1")}),
+    );
+    let snps = all[at]["current_pieces"][0]["snps"]
+        .as_array()
+        .expect("cambios")
+        .clone();
+    let history = all[at]["history"].as_array().expect("historial").clone();
+    set_copy(
+        &mut all,
+        "I3",
+        1,
+        vec![segment(0, 600, mods)],
+        vec![source_piece(0, 550, snps), source_piece(560, 600, vec![])],
+        history,
+    );
+    assert_both(
+        "deleción de segmento tras otros cambios",
+        &bytes_of(&all),
+        &TruthValidationError::MissingCase {
+            individual_id: "I3".to_owned(),
+            sequence_id: "chr1".to_owned(),
+            start: 550,
+            end: 560,
+            detail: "faltan bases de referencia en el estado heredado de los segmentos, sin evento ni caso",
+        },
+    );
+}
+
+/// En memoria (por bytes el contrato exige que el final no pase de la
+/// longitud): el último segmento de la copia 1 de I3 acaba en 610, diez bases
+/// más allá de la secuencia, y una deleción de segmento 600..610 quita lo que
+/// sobra, de modo que ningún fragmento vigente sale de la referencia y la
+/// materialización no lo ve. El recorrido acaba **después** de la longitud y se
+/// rechaza ahí; distingue una regla que solo mirara si se queda corto.
+#[test]
+fn a_walk_past_the_end_of_the_sequence_is_rejected() {
+    let mut all = document(&lines());
+    let copy = copy_of(&mut all, "I3", 1);
+    let mut mods = copy.segments[0].modifications.clone();
+    assert_eq!(mods.len(), 2, "cambios heredados en 49 y 499");
+    mods.push(TruthModification::Deletion {
+        event_id: "DEL_OVERHANG".to_owned(),
+        start: 600,
+        end: 610,
+        provenance: typed_provenance("del-1"),
+    });
+    copy.segments = vec![typed_segment(0, 610, mods)];
+    assert_eq!(judge(&all).err(), Some(not_collinear("I3", 1, 610, 600)));
+}

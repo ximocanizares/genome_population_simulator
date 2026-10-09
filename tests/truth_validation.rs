@@ -788,13 +788,15 @@ fn both_readers_reject_a_base_change_without_its_case() {
     }
 }
 
-/// Un segmento recortado al principio o al final: la copia pierde bases de la
-/// referencia en su estado heredado, sin ninguna deleción del historial ni
-/// caso que lo explique. La copia 1 de la verdad de la deleción no lleva
-/// ningún cambio, de modo que nada más la toca.
+/// Un segmento recortado al principio o al final: el estado heredado de la
+/// copia no recorre la referencia entera (DT-048). Hasta el 09/10/2026 lo
+/// rechazaba el juez del conjunto de casos como bases que faltan sin caso;
+/// ahora lo rechaza la réplica, con dónde se rompe el recorrido. La copia 1 de
+/// la verdad de la deleción no lleva ningún cambio, de modo que nada más la
+/// toca.
 #[test]
 fn both_readers_reject_a_segment_trimmed_at_either_end() {
-    for (trim, expected) in [("head", (0, 2)), ("tail", (6, 8))] {
+    for (trim, reached, next_start) in [("head", 0, 2), ("tail", 6, 8)] {
         let mut lines = deletion_fixture()
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).expect("fixture JSON"))
@@ -806,8 +808,8 @@ fn both_readers_reject_a_segment_trimmed_at_either_end() {
         lines[2]["current_pieces"][0]["source"][field] = json!(value);
         for result in both_readers(&lines_to_jsonl(&lines)) {
             assert!(
-                matches!(result, Err(TruthValidationError::MissingCase { start, end, detail, .. })
-                    if (start, end) == expected && detail.contains("estado heredado")),
+                matches!(result, Err(TruthValidationError::SegmentsNotCollinear { ref identity, reached: found_reached, next_start: found_next })
+                    if identity.copy_index == 1 && (found_reached, found_next) == (reached, next_start)),
                 "{trim}: {result:?}"
             );
         }

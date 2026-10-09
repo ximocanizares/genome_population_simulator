@@ -131,6 +131,20 @@ pub enum TruthValidationError {
         identity: CopyIdentity,
         position: u64,
     },
+    /// El estado heredado de la copia —sus segmentos, antes del historial— no
+    /// recorre su secuencia de la referencia exactamente una vez y en orden
+    /// creciente (DT-048). El recorrido había llegado hasta `reached` y el
+    /// segmento siguiente empieza en `next_start`; tras el último segmento,
+    /// `next_start` es la longitud de la secuencia. Un hueco, un solape, una
+    /// duplicación, una rotación o un desorden lo rompen en el primer segmento
+    /// que no empieza donde iba el recorrido. Con `next_start == reached`, el
+    /// segmento empieza donde debía pero está vacío, invertido o es de otra
+    /// secuencia (DT-050).
+    SegmentsNotCollinear {
+        identity: CopyIdentity,
+        reached: u64,
+        next_start: u64,
+    },
     GenotypeMismatch {
         case_id: String,
         detail: &'static str,
@@ -828,8 +842,9 @@ struct ReconstructedCopy {
     event_loci: EventLoci,
     /// Primer tramo de la referencia que falta en el estado **heredado** de
     /// la copia —el de sus segmentos, antes del historial—: una deleción de
-    /// segmento o un tramo que ningún segmento cubre. Ningún caso puede
-    /// explicarlo, porque un caso *indel* exige su evento en el historial.
+    /// segmento (un tramo que ningún segmento cubre ya lo rechazó
+    /// `require_collinear_segments`). Ningún caso puede explicarlo, porque un
+    /// caso *indel* exige su evento en el historial.
     inherited_loss: Option<(u64, u64)>,
 }
 
@@ -1035,6 +1050,12 @@ fn replay_event(
                     identity: copy.identity.clone(),
                 }));
             };
+            // **Redundante para la seguridad desde DT-048**: con segmentos colineales los
+            // fragmentos de fuente no se solapan y ninguna posición cae en dos, así que
+            // solo llega aquí un documento que además incumple la colinealidad, y
+            // `require_collinear_segments` lo rechazaría igual después. Quitarla no
+            // dejaría pasar nada; se mantiene por el diagnóstico, más preciso
+            // (`a_base_change_covered_by_two_fragments_does_not_replay`).
             if !matching.is_empty() {
                 return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
@@ -1483,53 +1504,106 @@ fn reconstruct_copy(
         }));
     }
     let mut result = materialize_replayed_copy(copy, reference, &pieces)?;
+    require_collinear_segments(copy, reference)?;
     result.event_loci = event_loci;
-    result.inherited_loss = inherited_loss(copy, reference);
+    result.inherited_loss = inherited_loss(copy);
     Ok(result)
 }
 
-/// Primer tramo de la referencia que el estado heredado de la copia no
-/// conserva: una deleción de segmento, o un tramo entre segmentos o en un
-/// extremo que ninguno cubre.
+/// El estado heredado de la copia —sus segmentos, antes del historial— recorre
+/// su secuencia de la referencia **una sola vez y en orden creciente** (DT-048):
+/// cada segmento es de la secuencia de la copia y no está vacío ni invertido, el
+/// primero empieza en 0, cada uno empieza donde acaba el anterior y el último
+/// acaba en la longitud de la secuencia. Un hueco, un solape, una duplicación,
+/// una rotación o un desorden rompen el recorrido en el primer segmento que no
+/// empieza donde iba; un segmento vacío, invertido o de otra secuencia (DT-050),
+/// en ese mismo segmento aunque empiece donde iba.
 ///
-/// Con el estado heredado completo, cada base de referencia que falta en la
-/// copia final la quitó una deleción del historial, y esa deleción tiene su
-/// caso. Por eso basta con mirar los segmentos, y no los loci de las
-/// deleciones: el locus de una deleción va de la primera a la última base que
-/// elimina y puede abarcar un hueco anterior, de modo que una pérdida heredada
-/// escondida dentro de él pasaría por explicada.
-fn inherited_loss(copy: &HaplotypeCopyRecord, reference: &Reference) -> Option<(u64, u64)> {
-    let deleted = copy
-        .segments
+/// La regla no depende de ninguna otra guarda: el contrato ya rechaza por bytes
+/// un segmento vacío, invertido o de otra secuencia (`InvalidSegmentInterval`,
+/// `SegmentSourceMismatch`), pero un documento en memoria no pasa por él, y un
+/// segmento invertido acompañado de deleciones de segmento que reponen el cursor
+/// supera la réplica.
+///
+/// Las modificaciones de un segmento no cuentan aquí: un cambio de base y una
+/// inserción heredados no consumen referencia, y una deleción de segmento la
+/// rechaza el juez del conjunto de casos (ver `inherited_loss`).
+///
+/// Se exige **después** de replicar y materializar la copia, y no al formar la
+/// réplica inicial, a propósito: un documento que además incumple otra regla de
+/// la réplica —dos fragmentos que se solapan, longitudes que desbordan, un
+/// fragmento más allá del final, un cambio de base en la última posición
+/// representable— lo sigue parando la guarda de esa regla, con su motivo, y
+/// esas guardas siguen siendo alcanzables. Esta para lo que ninguna otra ve: el
+/// hueco, la rotación, el desorden y el tramo duplicado que una deleción del
+/// historial vuelve a quitar.
+fn require_collinear_segments(
+    copy: &HaplotypeCopyRecord,
+    reference: &Reference,
+) -> Result<(), TruthValidationError> {
+    // Si la copia conserva algún fragmento de fuente o tracto, la materialización
+    // ya ha rechazado una secuencia que la referencia no tiene (el contrato ata la
+    // secuencia de cada fragmento a la de la copia). Aquí solo llega sin ella un
+    // documento en memoria que no pasó el contrato, como una copia sin segmentos.
+    let length = reference
+        .sequences()
+        .iter()
+        .find(|sequence| sequence.id().as_str() == copy.identity.sequence_id)
+        .map(ReferenceSequence::length)
+        .ok_or_else(|| {
+            rejected(TruthValidationError::MissingReferenceSequence {
+                sequence_id: copy.identity.sequence_id.clone(),
+            })
+        })?;
+    let mut reached = 0;
+    for segment in &copy.segments {
+        let SegmentSource {
+            sequence_id,
+            start,
+            end,
+            ..
+        } = &segment.source;
+        if *start != reached || *end <= *start || *sequence_id != copy.identity.sequence_id {
+            return Err(rejected(TruthValidationError::SegmentsNotCollinear {
+                identity: copy.identity.clone(),
+                reached,
+                next_start: *start,
+            }));
+        }
+        // **Equivalente** (DT-048) `reached = reached.max(*end)`: la condición de
+        // arriba acaba de exigir `start == reached` y `end > start`, así que `end`
+        // es siempre mayor.
+        reached = *end;
+    }
+    if reached != length {
+        return Err(rejected(TruthValidationError::SegmentsNotCollinear {
+            identity: copy.identity.clone(),
+            reached,
+            next_start: length,
+        }));
+    }
+    Ok(())
+}
+
+/// Primera deleción de segmento de la copia: un tramo de la referencia que el
+/// estado heredado no conserva.
+///
+/// Con los segmentos recorriendo la referencia una vez y en orden (lo exige
+/// antes `require_collinear_segments`) y sin deleciones de segmento, cada base
+/// de referencia que falta en la copia final la quitó una deleción del
+/// historial, y esa deleción tiene su caso. Por eso basta con mirar los
+/// segmentos, y no los loci de las deleciones: el locus de una deleción va de
+/// la primera a la última base que elimina y puede abarcar un hueco anterior,
+/// de modo que una pérdida heredada escondida dentro de él pasaría por
+/// explicada.
+fn inherited_loss(copy: &HaplotypeCopyRecord) -> Option<(u64, u64)> {
+    copy.segments
         .iter()
         .flat_map(|segment| segment.modifications.iter())
         .find_map(|modification| match modification {
             TruthModification::Deletion { start, end, .. } => Some((*start, *end)),
             TruthModification::Snp { .. } | TruthModification::Insertion { .. } => None,
-        });
-    if deleted.is_some() {
-        return deleted;
-    }
-    let length = reference
-        .sequences()
-        .iter()
-        .find(|sequence| sequence.id().as_str() == copy.identity.sequence_id)
-        .map(ReferenceSequence::length)?;
-    let mut covered = copy
-        .segments
-        .iter()
-        .map(|segment| (segment.source.start, segment.source.end))
-        .collect::<Vec<_>>();
-    covered.sort_unstable();
-    covered.push((length, length));
-    let mut cursor = 0;
-    for (start, end) in covered {
-        if start > cursor {
-            return Some((cursor, start));
-        }
-        cursor = cursor.max(end);
-    }
-    None
+        })
 }
 
 fn history_event_id(event: &TruthHistoryEvent) -> &str {
@@ -1796,6 +1870,11 @@ fn materialize_replayed_copy(
                         }));
                     }
                 }
+                // **Redundante para la seguridad desde DT-048**: dos fragmentos que se
+                // solapan exigen segmentos que no recorren la referencia una vez y en
+                // orden, y `require_collinear_segments` los rechazaría igual después.
+                // Quitarla no dejaría pasar nada; se mantiene por el diagnóstico, que
+                // nombra la posición duplicada (`two_overlapping_source_fragments_are_rejected`).
                 for prior in &source_slices {
                     if prior.start < source.end && source.start < prior.end {
                         return Err(rejected(
@@ -1866,6 +1945,11 @@ fn materialize_replayed_copy(
                 // El tracto sustituye al intervalo, de modo que ese tramo de la
                 // referencia queda ocupado y ningún otro fragmento puede
                 // reclamarlo.
+                // **Redundante para la seguridad desde DT-048**: dos fragmentos que se
+                // solapan exigen segmentos que no recorren la referencia una vez y en
+                // orden, y `require_collinear_segments` los rechazaría igual después.
+                // Quitarla no dejaría pasar nada; se mantiene por el diagnóstico, que
+                // nombra la posición duplicada (`a_repeat_tract_over_an_occupied_stretch_is_rejected`).
                 for prior in &source_slices {
                     if prior.start < source.end && source.start < prior.end {
                         return Err(rejected(

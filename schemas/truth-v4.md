@@ -80,7 +80,19 @@ no vacíos.
 
 El validador semántico reconstruye cada copia **sin usar código del
 productor**: reproduce sus segmentos y su historial sobre la referencia y exige
-que el resultado coincida con sus `current_pieces`. Después exige, para cada
+que el resultado coincida con sus `current_pieces`.
+
+**Desde el 9 de octubre de 2026 la réplica exige además que los segmentos de
+cada copia recorran su secuencia de la referencia una sola vez y en orden**
+(DT-048): en el orden publicado, cada segmento es de la secuencia de la copia y
+no está vacío, el primero empieza en 0, cada uno empieza donde acaba el anterior
+y el último acaba en la longitud de la secuencia. Hasta esa fecha el juez solo
+buscaba tramos sin cubrir y aceptaba un cromosoma rotado o un tramo duplicado
+que una deleción del historial volvía a quitar. No cambia la versión: el
+productor nunca escribió segmentos no colineales (mismo criterio que DT-047).
+La regla rige en las versiones `"4"` y `"5"`; una versión futura con variantes
+estructurales (duplicaciones, inversiones, translocaciones; REQ-IND-46 a 49 y
+REQ-REC-20) tendrá que sustituirla. Después exige, para cada
 copia del individuo y la secuencia del caso, que sea portadora del alternativo
 si y solo si:
 
@@ -254,9 +266,10 @@ copias y sin usar código del productor:
   referencia solo pueden faltar porque las quitó una deleción del historial,
   y cada deleción del historial tiene su caso: el estado **heredado** de la
   copia —el de sus segmentos, antes del historial— tiene que conservar la
-  referencia entera, sin deleciones de segmento ni tramos que ningún segmento
-  cubra. El productor no escribe nunca un cambio estructural en los
-  segmentos. Cuando se conocen, cada fila de la matriz tiene el caso de cada
+  referencia entera: ningún segmento lleva una deleción, y los segmentos
+  recorren la referencia una sola vez y en orden (lo exige la réplica, ver «El
+  alelo estructural»). El productor no escribe nunca un cambio estructural en
+  los segmentos. Cuando se conocen, cada fila de la matriz tiene el caso de cada
   individuo de su población;
 - **del caso a su fuente.** Cada caso tiene que ser uno de los anteriores.
   Un caso *indel* o de repetición que no corresponde a ningún cambio ni

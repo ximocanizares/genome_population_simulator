@@ -374,13 +374,23 @@
 # detalla). Las 32 + 8 que quedan sin disparar son inalcanzables y cada una
 # lleva junto a la guarda el porqué; no se borró ninguna. Es lo medido por la
 # puerta, un suelo y no una prueba de que fallaría si estuviera mal escrita.
+# **El 09/10/2026 (DT-048 y DT-050) `src/truth_validation.rs` pasa de 118 a
+# 121 comprobaciones; las sin disparar siguen en 32.** Las tres nuevas son de
+# `require_collinear_segments`, que exige que los segmentos de cada copia
+# recorran la referencia una vez y en orden: su rechazo propio
+# (`SegmentsNotCollinear`) en dos sitios —un segmento que no empieza donde
+# debe, está vacío o invertido o es de otra secuencia, y un recorrido que no
+# acaba en la longitud— y el de la secuencia ausente que necesita para medirlo.
+# Las tres se disparan (`tests/truth_validation_guards.rs`, sección de DT-048)
+# y se verificaron mutando una copia. La búsqueda de huecos que sustituye no
+# tenía comprobación propia.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
 src/results.rs	779	618
 src/event_manifest.rs	147	8
-src/truth_validation.rs	118	32
+src/truth_validation.rs	121	32
 src/truth_schema.rs	69	8
 src/fastq_validation.rs	84	26
 src/population_snvs.rs	143	25
