@@ -163,6 +163,17 @@ impl std::fmt::Display for TruthValidationError {
 }
 
 /// Bases de una secuencia, o el error propio si no se materializaron.
+///
+/// **Inalcanzable** (DT-001, tanda 5): el rechazo de `BasesNotMaterialized` de esta función no lo
+/// alcanza ninguna entrada. Todos los llamantes públicos contrastan primero la
+/// huella de la referencia (`validate_reference_digest`), que se calcula sobre
+/// las bases de **cada** secuencia: con una sola sin bases ya devuelve
+/// `BasesNotMaterialized` desde allí, antes de reconstruir ninguna copia ni
+/// juzgar ningún caso. Con las bases materializadas, `as_bytes` no falla.
+/// Intento ejecutado: `a_reference_without_bases_is_rejected_before_any_copy_is_rebuilt`
+/// (no discrimina esta guarda; muestra que el rechazo es el de la huella). Lo
+/// mismo vale para los otros dos sitios que leen bases (la réplica de un cambio
+/// y la materialización).
 fn bases_of(sequence: &crate::reference::ReferenceSequence) -> Result<&[u8], TruthValidationError> {
     sequence
         .sequence()
@@ -210,6 +221,10 @@ pub fn read_truth_jsonl(reader: &mut impl BufRead) -> Result<TruthDocument, Trut
                 if line_number != 1 {
                     return Err(rejected(TruthValidationError::HeaderMustBeFirst));
                 }
+                // **Inalcanzable** (DT-001, tanda 5): una cabecera solo se acepta en la línea 1 (la guarda de
+                // arriba) y el número de línea crece en cada vuelta, de modo que `header`
+                // siempre está vacío aquí. Una segunda cabecera da `HeaderMustBeFirst`
+                // (`a_header_on_line_two_is_rejected_as_not_first`).
                 if header.replace(value.into()).is_some() {
                     return Err(rejected(TruthValidationError::DuplicateHeader));
                 }
@@ -605,6 +620,8 @@ pub fn validate_truth_jsonl_streaming(
                     }));
                 }
                 validate_reference_digest(&parsed, reference)?;
+                // **Inalcanzable** (DT-001, tanda 5): igual que en el lector completo; la cabecera solo se
+                // acepta en la línea 1 y `header` siempre está vacío aquí.
                 if header.replace(parsed).is_some() {
                     return Err(rejected(TruthValidationError::DuplicateHeader));
                 }
@@ -614,6 +631,12 @@ pub fn validate_truth_jsonl_streaming(
                     .as_ref()
                     .ok_or_else(|| rejected(TruthValidationError::HeaderMustBeFirst))?;
                 let copy: HaplotypeCopyRecord = value.into();
+                // **Equivalente** (DT-001, tanda 5) solo `summaries.contains_key`:
+                // `previous >= identity` ya rechaza toda identidad repetida (la anterior es
+                // siempre la mayor de las vistas, así que toda identidad ya vista es menor o
+                // igual que ella). `previous >= identity` **no** es redundante: anularla
+                // sola muere por `two_copies_in_decreasing_order_are_out_of_order`, y la
+                // repetida la cubre `a_repeated_copy_is_out_of_order_for_the_stream_and_duplicate_for_the_whole`.
                 if previous_genotype.is_some()
                     || previous_copy
                         .as_ref()
@@ -646,6 +669,8 @@ pub fn validate_truth_jsonl_streaming(
                 );
                 copy_identities.insert(copy_identity.clone());
                 previous_copy = Some(copy_identity);
+                // **Inalcanzable** (DT-001, tanda 5): el contador de copias es un `u64` y desbordarlo exige 2^64
+                // registros, que ningún fichero ni memoria alcanza.
                 copy_count = copy_count.checked_add(1).ok_or_else(|| {
                     rejected(TruthValidationError::Contract(
                         TruthContractError::CopyCountMismatch {
@@ -666,6 +691,10 @@ pub fn validate_truth_jsonl_streaming(
                     genotype.locus.clone(),
                     genotype.case_id.clone(),
                 );
+                // **Equivalente** (DT-001, tanda 5) solo `seen_genotypes.insert`, por la
+                // misma razón que `contains_key` en las copias: `previous >= key` ya rechaza
+                // todo caso repetido. `previous >= key` **no** es redundante: anularla sola
+                // muere por `two_genotypes_in_decreasing_order_are_out_of_order`.
                 if previous_genotype
                     .as_ref()
                     .is_some_and(|previous| previous >= &key)
@@ -691,6 +720,7 @@ pub fn validate_truth_jsonl_streaming(
                 }
                 individual_cases.push(genotype);
                 previous_genotype = Some(key);
+                // **Inalcanzable** (DT-001, tanda 5): igual que el de copias, exige 2^64 registros.
                 genotype_count = genotype_count.checked_add(1).ok_or_else(|| {
                     rejected(TruthValidationError::Contract(
                         TruthContractError::GenotypeCountMismatch {
@@ -934,10 +964,13 @@ impl ReplayPiece {
 /// insertadas.
 ///
 /// Los dos rechazos por no haber ninguna base de referencia delante son
-/// defensivos y **ninguna prueba los ejercita**: el productor nunca inserta ni
-/// elimina en el punto cero, y la réplica ya exige `point > 0` y `start > 0`,
-/// así que delante siempre queda al menos el primer fragmento de la copia.
-/// Solo los alcanzaría un documento cuya copia empezase por bases insertadas.
+/// defensivos: el productor nunca inserta ni elimina en el punto cero, y la
+/// réplica ya exige `point > 0` y `start > 0`, así que delante siempre queda al
+/// menos el primer fragmento de la copia. Solo los alcanza un documento cuya
+/// copia empieza por bases insertadas (un segmento con una inserción en su
+/// primer punto), que ejercitan
+/// `an_insertion_with_no_reference_base_before_it_does_not_replay` y
+/// `a_deletion_of_inserted_bases_with_no_reference_base_before_it_does_not_replay`.
 fn replay_event(
     copy: &HaplotypeCopyRecord,
     reference: &Reference,
@@ -950,6 +983,13 @@ fn replay_event(
             position,
             provenance,
         } => {
+            // **Equivalentes** (DT-001, tanda 5) las igualdades de posición y de
+            // procedencia de este filtro: un cambio con el mismo identificador y otra
+            // posición o procedencia ya lo ha rechazado `validate_structural_event_ids`;
+            // y la de identificador, porque una modificación con otro identificador pero
+            // la misma posición y procedencia ya está como cambio heredado en el fragmento
+            // y el evento chocaría con él en la comprobación de «un cambio ya en esa
+            // posición», con el mismo error.
             let mut modifications = copy
                 .segments
                 .iter()
@@ -968,6 +1008,12 @@ fn replay_event(
                     identity: copy.identity.clone(),
                 }));
             };
+            // **Inalcanzable** (DT-001, tanda 5): dos modificaciones de segmento para el mismo evento exigen
+            // el mismo identificador repetido, y `validate_structural_event_ids` (que
+            // `reconstruct_copy` ejecuta antes que ninguna réplica) rechaza todo
+            // identificador heredado repetido. Intento ejecutado:
+            // `unreachable_guards_are_shadowed_by_other_checks` (da el mismo error, pero de
+            // aquella comprobación).
             if modifications.next().is_some() {
                 return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
@@ -995,11 +1041,14 @@ fn replay_event(
                 }));
             }
             let sequence = validated_source(copy, source, reference)?;
+            // **Inalcanzable** (DT-001, tanda 5) en el objetivo x86_64 (`usize` y `u64` tienen el mismo
+            // ancho): la conversión no falla. En un objetivo de 32 bits sería alcanzable.
             let index = usize::try_from(*position).map_err(|_| {
                 rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
                 })
             })?;
+            // **Inalcanzable** (DT-001, tanda 5): ver `bases_of`; la huella de la referencia falla antes.
             let bases = sequence
                 .sequence()
                 .as_bytes()
@@ -1010,11 +1059,15 @@ fn replay_event(
                     position: *position,
                 }));
             }
-            // Guarda defensiva que ninguna prueba ejercita: un documento con
-            // dos cambios en la misma posición lo rechaza antes la lectura
-            // estructural (`ModificationsNotOrdered`), de modo que desde un
-            // documento válido no se llega aquí. Sin esta guarda, o con la rama
-            // «idéntico» rechazando, la batería entera sigue pasando.
+            // Guarda defensiva. Un documento con dos cambios en la misma posición lo
+            // rechaza el contrato (`ModificationsNotOrdered` dentro de un segmento;
+            // los segmentos solapados que lo evitarían con una deleción que salta el
+            // cambio, `OverlappingModifications`), así que solo se llega aquí con un
+            // documento en memoria que no pasó el contrato:
+            // `two_base_changes_at_one_position_do_not_replay` lo ejercita y su
+            // mutante muere. La rama «idéntico» (`Ok(None)`) es
+            // inalcanzable: exigiría el mismo identificador dos veces, que
+            // `validate_structural_event_ids` rechaza antes.
             if let Some(existing) = snps.iter().find(|snp| snp.position == *position) {
                 if existing.event_id == *event_id
                     && existing.reference == *expected
@@ -1050,6 +1103,8 @@ fn replay_event(
             ..
         } => {
             let length = replay_length(copy, pieces)?;
+            // **Equivalente** (DT-001, tanda 5) la mitad `*point == 0`: sin ella, el punto cero deja
+            // vacío lo de delante y rechaza el ancla de más abajo con el mismo error.
             if *point == 0 || *point >= length {
                 return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
@@ -1073,6 +1128,12 @@ fn replay_event(
         }
         TruthHistoryEvent::Deletion { start, end, .. } => {
             let length = replay_length(copy, pieces)?;
+            // **Equivalente** (DT-001, tanda 5) la mitad `start >= end`: con ella ignorada no se quita
+            // ningún fragmento (tras partir en los dos extremos no hay fragmento que
+            // empiece antes del final y acabe después del inicio) y el `match` de
+            // abajo rechaza con el mismo error. `*start == 0` y `*end >= length`
+            // sí se distinguen (`a_deletion_may_not_reach_the_end_of_the_copy` y
+            // `a_deletion_from_the_first_base_does_not_replay`).
             if *start == 0 || start >= end || *end >= length {
                 return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
@@ -1084,6 +1145,12 @@ fn replay_event(
             let mut retained = Vec::with_capacity(pieces.len());
             let mut anchor = None;
             let mut removed: Option<(u64, u64)> = None;
+            // **Inalcanzable** (DT-001, tanda 5) los dos rechazos de `piece.len()` y de la suma: ningún
+            // fragmento de fuente tiene el final por detrás del inicio (los iniciales se
+            // forman con `push_initial_source`, que ignora los vacíos y rechaza los
+            // invertidos, y los que parte la réplica lo hacen dentro de su intervalo) y
+            // `replay_length`, en esta misma rama, ya sumó las longitudes de todos sin
+            // desbordar.
             for piece in pieces.drain(..) {
                 let next = cursor
                     .checked_add(piece.len().ok_or_else(|| {
@@ -1158,6 +1225,8 @@ fn replay_event(
                         identity: copy.identity.clone(),
                     })
                 })?;
+            // **Inalcanzable** (DT-001, tanda 5): `index` salió de buscar un fragmento de fuente, de modo
+            // que este fragmento lo es siempre.
             let ReplayPiece::Source { source, snps } = pieces[index].clone() else {
                 return Err(rejected(TruthValidationError::HistoryDoesNotReplay {
                     identity: copy.identity.clone(),
@@ -1222,6 +1291,10 @@ fn replay_reference_interval(piece: &ReplayPiece) -> Option<(u64, u64)> {
     }
 }
 
+/// Longitud actual de la copia. De los dos rechazos, el de la suma que desborda
+/// es alcanzable (dos segmentos de casi 2^64 bases; lo ejercita
+/// `lengths_that_overflow_do_not_replay`); el de `piece.len()` (**Inalcanzable** (DT-001, tanda 5))
+/// no, porque ningún fragmento de fuente tiene el final por detrás del inicio.
 fn replay_length(
     copy: &HaplotypeCopyRecord,
     pieces: &[ReplayPiece],
@@ -1241,6 +1314,13 @@ fn replay_length(
     })
 }
 
+/// Índice del fragmento que empieza en `point`.
+///
+/// **Inalcanzable** (DT-001, tanda 5) los tres rechazos: `piece.len()` y la suma ya los validó
+/// `replay_length` en la misma rama sobre los mismos fragmentos, y el rechazo
+/// final exigiría que no hubiera frontera en `point`, cuando
+/// `split_replay_at(point)` acaba de crearla (el punto es menor que la
+/// longitud: lo exigen las dos ramas que llaman, antes de partir).
 fn piece_boundary_index(
     copy: &HaplotypeCopyRecord,
     pieces: &[ReplayPiece],
@@ -1266,12 +1346,23 @@ fn piece_boundary_index(
     if cursor == point {
         Ok(pieces.len())
     } else {
+        // **Inalcanzable** (DT-001, tanda 5): la frontera existe siempre; ver la nota de la función.
         Err(rejected(TruthValidationError::HistoryDoesNotReplay {
             identity: copy.identity.clone(),
         }))
     }
 }
 
+/// Parte la réplica en `point`.
+///
+/// **Inalcanzable** (DT-001, tanda 5) `piece.len()` y la suma de las longitudes (ya validadas por
+/// `replay_length` en la rama que llama), la suma de `source.start + split`
+/// (menor que el final del fragmento, que cabe), la conversión a `usize`
+/// (x86_64) y el rechazo de después del bucle (los dos llamantes rechazan
+/// antes un punto que no sea menor que la longitud, y todo punto menor cae en
+/// algún fragmento). Las mitades `point == cursor` y `point == end` de la
+/// primera comprobación son **equivalentes** entre sí: la frontera se ve desde
+/// los dos lados.
 fn split_replay_at(
     copy: &HaplotypeCopyRecord,
     pieces: &mut Vec<ReplayPiece>,
@@ -1297,6 +1388,7 @@ fn split_replay_at(
                 ReplayPiece::Source { source, snps } => {
                     let split = point - cursor;
                     let source_point = source.start.checked_add(split).ok_or_else(|| {
+                        // **Inalcanzable** (DT-001, tanda 5): `source.start + split` no desborda; ver la nota de la función.
                         rejected(TruthValidationError::HistoryDoesNotReplay {
                             identity: copy.identity.clone(),
                         })
@@ -1331,6 +1423,7 @@ fn split_replay_at(
                 }
                 ReplayPiece::Inserted { bases, provenance } => {
                     let split = usize::try_from(point - cursor).map_err(|_| {
+                        // **Inalcanzable** (DT-001, tanda 5): `usize` y `u64` del mismo ancho; ver la nota de la función.
                         rejected(TruthValidationError::HistoryDoesNotReplay {
                             identity: copy.identity.clone(),
                         })
@@ -1352,6 +1445,7 @@ fn split_replay_at(
         }
         cursor = end;
     }
+    // **Inalcanzable** (DT-001, tanda 5): todo punto menor que la longitud cae en un fragmento; ver la nota de la función.
     Err(rejected(TruthValidationError::HistoryDoesNotReplay {
         identity: copy.identity.clone(),
     }))
@@ -1470,6 +1564,9 @@ fn initial_replay_from_segments(
                     // el mismo SNP al historial activo. En ese caso el
                     // historial es quien lo aplica; un SNP heredado sin tal
                     // evento sí forma parte del estado inicial.
+                    // **Equivalente** (DT-001, tanda 5) `historical_position == position`:
+                    // un evento del historial con el mismo identificador y otra posición lo
+                    // rechaza antes `validate_structural_event_ids`.
                     if copy.history.iter().any(|event| {
                         matches!(event, TruthHistoryEvent::Snp { event_id: historical_id, position: historical_position, provenance: historical_provenance }
                             if historical_id == event_id
@@ -1593,6 +1690,15 @@ fn validate_structural_event_ids(copy: &HaplotypeCopyRecord) -> Result<(), Truth
         let Some(class) = inherited.get(event_id) else {
             continue;
         };
+        // **Equivalentes** (DT-001, tanda 5): de las tres condiciones solo decide la
+        // tercera. `segment_snp_matches_history` exige una modificación de
+        // **cambio de base** con ese identificador, posición y procedencia, de modo
+        // que ya es falsa si la clase heredada es estructural o si el evento no es
+        // un cambio; y las tres igualdades que contiene son las mismas que usa el
+        // filtro de la réplica de un cambio de base, que rechazaría igual con el
+        // mismo error. Quitar cualquier condición sola sobrevive; no hay entrada
+        // que las distinga (`a_history_event_sharing_an_inherited_identifier_must_be_the_same_base_change`
+        // prueba las cuatro formas y todas dan el mismo rechazo).
         let permitted_snp_duplicate = *class == SegmentEventClass::Snp
             && matches!(event, TruthHistoryEvent::Snp { .. })
             && segment_snp_matches_history(copy, event);
@@ -1655,6 +1761,12 @@ fn materialize_replayed_copy(
     reference: &Reference,
     pieces: &[ReplayPiece],
 ) -> Result<ReconstructedCopy, TruthValidationError> {
+    // **Inalcanzable** (DT-001, tanda 5) las conversiones `usize` a `u64` y de `u64` a `usize`
+    // de esta función: x86_64 tiene los dos del mismo ancho. El rechazo de la suma
+    // `snp.position + 1` tampoco se alcanza: la posición de todo cambio es menor que
+    // el final de su fragmento (la de un cambio heredado en `u64::MAX` ya la rechazó
+    // `initial_replay_from_segments`) y el final cabe. Y `BasesNotMaterialized`,
+    // como en `bases_of`.
     let mut bases = Vec::new();
     let mut source_slices = Vec::<SourceSlice>::new();
     let mut layouts = Vec::with_capacity(pieces.len());
@@ -1697,11 +1809,13 @@ fn materialize_replayed_copy(
                 let mut cursor = source.start;
                 for snp in snps {
                     let position = usize::try_from(snp.position).map_err(|_| {
+                        // **Inalcanzable** (DT-001, tanda 5): conversión de ancho; ver `materialize_replayed_copy`.
                         rejected(TruthValidationError::SourceIntervalOutOfBounds {
                             identity: copy.identity.clone(),
                         })
                     })?;
                     let start_index = usize::try_from(cursor).map_err(|_| {
+                        // **Inalcanzable** (DT-001, tanda 5): conversión de ancho; ver `materialize_replayed_copy`.
                         rejected(TruthValidationError::SourceIntervalOutOfBounds {
                             identity: copy.identity.clone(),
                         })
@@ -1709,17 +1823,20 @@ fn materialize_replayed_copy(
                     bases.extend_from_slice(&bases_of(sequence)?[start_index..position]);
                     bases.push(snp.alternate.as_bytes()[0]);
                     cursor = snp.position.checked_add(1).ok_or_else(|| {
+                        // **Inalcanzable** (DT-001, tanda 5): `snp.position + 1` no desborda; ver `materialize_replayed_copy`.
                         rejected(TruthValidationError::HistoryDoesNotReplay {
                             identity: copy.identity.clone(),
                         })
                     })?;
                 }
                 let start_index = usize::try_from(cursor).map_err(|_| {
+                    // **Inalcanzable** (DT-001, tanda 5): conversión de ancho; ver `materialize_replayed_copy`.
                     rejected(TruthValidationError::SourceIntervalOutOfBounds {
                         identity: copy.identity.clone(),
                     })
                 })?;
                 let end_index = usize::try_from(source.end).map_err(|_| {
+                    // **Inalcanzable** (DT-001, tanda 5): conversión de ancho; ver `materialize_replayed_copy`.
                     rejected(TruthValidationError::SourceIntervalOutOfBounds {
                         identity: copy.identity.clone(),
                     })
@@ -1771,6 +1888,7 @@ fn materialize_replayed_copy(
             }
         };
         let end = u64::try_from(bases.len()).map_err(|_| {
+            // **Inalcanzable** (DT-001, tanda 5): conversión de ancho; ver `materialize_replayed_copy`.
             rejected(TruthValidationError::SourceIntervalOutOfBounds {
                 identity: copy.identity.clone(),
             })
@@ -1820,6 +1938,12 @@ fn validated_source<'a>(
             actual: sequence.length(),
         }));
     }
+    // **Equivalente** (DT-001, tanda 5) la mitad `source.start >= source.end`: todo fragmento que llega
+    // aquí tiene el inicio por delante del final (los iniciales los forma
+    // `push_initial_source` y los de un tracto los exige la guarda de
+    // `replay_event`). `source.end > sequence.length()` solo se alcanza con un
+    // documento en memoria (el contrato exige el final menor o igual que la
+    // longitud declarada, y la comprobación de arriba que esta sea la real).
     if source.start >= source.end || source.end > sequence.length() {
         return Err(rejected(TruthValidationError::SourceIntervalOutOfBounds {
             identity: copy.identity.clone(),
@@ -1939,6 +2063,7 @@ fn validate_repeat_genotype(
         .iter()
         .find(|sequence| sequence.id().as_str() == genotype.locus.sequence_id)
         .ok_or_else(|| mismatch(genotype, "la secuencia del locus no existe"))?;
+    // **Inalcanzable** (DT-001, tanda 5) en x86_64: `usize` y `u64` tienen el mismo ancho.
     let start = usize::try_from(genotype.locus.start)
         .map_err(|_| mismatch(genotype, "el locus de repetición sale de la referencia"))?;
     let end = usize::try_from(genotype.locus.end)
@@ -2847,6 +2972,7 @@ impl<'de> Deserialize<'de> for WireRepeatBlock {
             .units
             .as_f64()
             .ok_or_else(|| rejected(D::Error::custom("el número de unidades no es un decimal")))?;
+        // **Inalcanzable** (DT-001, tanda 5): `usize` a `u64` no falla en x86_64.
         let observed = u64::try_from(raw.motif.len())
             .map_err(|_| rejected(D::Error::custom("el motivo del bloque es inabarcable")))?;
         if observed == 0 || raw.motif_length != observed {
@@ -3196,6 +3322,7 @@ where
     D: Deserializer<'de>,
 {
     let value = deserialize_u64(deserializer)?;
+    // **Inalcanzable** (DT-001, tanda 5) en x86_64: `usize` y `u64` tienen el mismo ancho.
     usize::try_from(value).map_err(|_| rejected(D::Error::custom("entero fuera de usize")))
 }
 
@@ -3669,6 +3796,118 @@ mod tests {
     use super::TRUTH_LIST_FIELDS;
     use serde_json::Value;
     use std::collections::BTreeSet;
+
+    use super::{
+        CaseSetCheck, InspectedValidationError, MatrixCaseLoci, TruthValidationError,
+        read_truth_jsonl, reference_content_sha256, validate_published_truth,
+        validate_truth_for_vcf, validate_truth_with_copy_inspection,
+    };
+    use crate::identity::{ReferenceId, SequenceId};
+    use crate::reference::{
+        DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
+    };
+    use crate::truth_schema::TruthDocument;
+
+    /// Referencia de ocho bases con el identificador dado, con las bases
+    /// materializadas o solo su ficha.
+    fn reference_named(id: &str, bases: &[u8], materialized: bool) -> Reference {
+        let dna = if materialized {
+            DnaSequence::try_from_bytes(bases).expect("DNA")
+        } else {
+            DnaSequence::summary(u64::try_from(bases.len()).expect("longitud"), 0)
+                .expect("ficha sin bases")
+        };
+        let sequence = ReferenceSequence::new(
+            SequenceId::parse("chr1", "truth guards").expect("sequence ID"),
+            FastaHeader::parse(b"chr1").expect("FASTA header"),
+            SequenceClass::Chromosome,
+            &dna,
+        )
+        .expect("reference sequence");
+        Reference::new(
+            ReferenceId::parse(id, "truth guards").expect("reference ID"),
+            ReferenceOrigin::Generated,
+            vec![sequence],
+        )
+        .expect("reference")
+    }
+
+    /// La verdad mínima de `tests/fixtures/truth-v4`, con la huella de la
+    /// referencia `REF_main` de ocho `A`.
+    fn minimal_truth() -> (TruthDocument, Reference) {
+        let reference = reference_named("REF_main", b"AAAAAAAA", true);
+        let text = include_str!("../tests/fixtures/truth-v4/valid.jsonl").replacen(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            &reference_content_sha256(&reference).expect("huella"),
+            1,
+        );
+        (
+            read_truth_jsonl(&mut std::io::Cursor::new(text)).expect("verdad mínima"),
+            reference,
+        )
+    }
+
+    /// Una vista validada contra una referencia no se reutiliza contra otra:
+    /// con otro identificador, o con el mismo identificador y una referencia
+    /// cuyas bases no se conservaron (no se puede calcular su huella).
+    ///
+    /// Los consumidores de la vista (la proyección y el agrupador del VCF)
+    /// reciben siempre la misma referencia con que se validó, de modo que
+    /// ninguna ejecución llega aquí: se ejercita la guarda directamente.
+    #[test]
+    fn a_validated_view_is_not_reused_against_another_reference() {
+        let (document, reference) = minimal_truth();
+        let view = validate_truth_for_vcf(&document, &reference).expect("verdad válida");
+        view.validate_reference(&reference)
+            .expect("la misma referencia");
+        assert_eq!(
+            view.validate_reference(&reference_named("REF_other", b"AAAAAAAA", true))
+                .err(),
+            Some(TruthValidationError::ReferenceIdMismatch {
+                declared: "REF_main".to_owned(),
+                actual: "REF_other".to_owned(),
+            })
+        );
+        assert_eq!(
+            view.validate_reference(&reference_named("REF_main", b"AAAAAAAA", false))
+                .err(),
+            Some(TruthValidationError::BasesNotMaterialized)
+        );
+        assert_eq!(
+            view.validate_reference(&reference_named("REF_main", b"AAAAAAAC", true))
+                .err(),
+            Some(TruthValidationError::ReferenceDigestMismatch)
+        );
+    }
+
+    /// El juez completo de una verdad ya escrita, y el que inspecciona cada
+    /// copia, rechazan una referencia de otro identificador. En el paquete
+    /// publicado, la referencia sale de la configuración efectiva y la verdad
+    /// de un fichero, de modo que pueden diferir.
+    #[test]
+    fn the_judges_reject_a_reference_of_another_identifier() {
+        let (document, _) = minimal_truth();
+        let other = reference_named("REF_other", b"AAAAAAAA", true);
+        let expected = TruthValidationError::ReferenceIdMismatch {
+            declared: "REF_main".to_owned(),
+            actual: "REF_other".to_owned(),
+        };
+        assert_eq!(
+            validate_published_truth(&document, &other, &MatrixCaseLoci::default()).err(),
+            Some(expected.clone())
+        );
+        let inspected =
+            validate_truth_with_copy_inspection(&document, &other, CaseSetCheck::Skip, |_, _| {
+                Ok::<(), std::convert::Infallible>(())
+            });
+        assert!(
+            matches!(
+                inspected,
+                Err(InspectedValidationError::Semantics(ref error)) if **error == expected
+            ),
+            "se esperaba la semántica con el identificador, y se obtuvo {inspected:?}"
+        );
+    }
 
     /// Si el valor de una propiedad es una lista, siguiendo `#/$defs/..`,
     /// `type` como cadena o como lista de tipos y las ramas de

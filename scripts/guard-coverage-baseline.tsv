@@ -360,14 +360,28 @@
 # registro lo detalla). Las 8 que quedan son inalcanzables y cada una lleva
 # junto a la guarda el porqué; no se borró ninguna. Es lo medido por la puerta,
 # un suelo y no una prueba de que fallaría si estuviera mal escrita.
+# **El 09/10/2026 (DT-001, tanda 5) `src/truth_validation.rs` baja de 93 a 32
+# sin disparar y `src/truth_schema.rs` de 44 a 8; las comprobaciones siguen
+# en 118 y 69.** Lo cubren `tests/truth_validation_guards.rs` y
+# `tests/truth_schema_guards.rs`, que parten de una verdad **publicada de
+# verdad** por el programa (dos secuencias, tres individuos de dos poblaciones,
+# matriz con un locus multialélico, cambios directos, inserciones y deleciones
+# compuestas, un tracto simple y uno compuesto; módulo compartido
+# `tests/truth_guard_scenario/`), la alteran en un solo punto y exigen el motivo
+# exacto, más dos pruebas en línea para las fronteras internas del juez. Se
+# verificó mutando cada guarda, cada mitad, cada motivo y las derivaciones que
+# las alimentan, un mutante por ejecución en copias (DT-001 en el registro lo
+# detalla). Las 32 + 8 que quedan sin disparar son inalcanzables y cada una
+# lleva junto a la guarda el porqué; no se borró ninguna. Es lo medido por la
+# puerta, un suelo y no una prueba de que fallaría si estuviera mal escrita.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
 src/results.rs	779	618
 src/event_manifest.rs	147	8
-src/truth_validation.rs	118	93
-src/truth_schema.rs	69	44
+src/truth_validation.rs	118	32
+src/truth_schema.rs	69	8
 src/fastq_validation.rs	84	26
 src/population_snvs.rs	143	25
 src/f5_publication.rs	53	10

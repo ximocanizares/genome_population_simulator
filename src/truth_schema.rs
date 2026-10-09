@@ -511,6 +511,7 @@ impl TruthDocument {
                             identity: copy.identity.clone(),
                         }));
                     }
+                    // **Inalcanzable** (DT-001, tanda 5): desbordar el contador de copias exige 2^64 registros.
                     copy_count = copy_count.checked_add(1).ok_or_else(|| {
                         rejected(TruthContractError::ArithmeticOverflow {
                             field: "copy_count",
@@ -529,6 +530,7 @@ impl TruthDocument {
                             case_id: genotype.case_id.clone(),
                         }));
                     }
+                    // **Inalcanzable** (DT-001, tanda 5): desbordar el contador de casos exige 2^64 registros.
                     genotype_count = genotype_count.checked_add(1).ok_or_else(|| {
                         rejected(TruthContractError::ArithmeticOverflow {
                             field: "genotype_count",
@@ -796,11 +798,14 @@ fn valid_repeat_blocks(blocks: &[TruthRepeatBlock], bases: &str) -> Result<(), T
     let mut total = 0_u64;
     for block in blocks {
         valid_bases("repeat_block_motif", &block.motif)?;
+        // **Inalcanzable** (DT-001, tanda 5) en x86_64: `usize` a `u64` no falla.
         let motif_length = u64::try_from(block.motif.len()).map_err(|_| {
             rejected(TruthContractError::ArithmeticOverflow {
                 field: "repeat_block_motif_length",
             })
         })?;
+        // La mitad `motif_length == 0` es **equivalente** (DT-001, tanda 5): un motivo
+        // vacío ya lo rechazó `valid_bases` en la línea de arriba.
         if block.bases == 0 || motif_length == 0 {
             return Err(rejected(TruthContractError::InvalidLexicalField {
                 field: "repeat_block_bases",
@@ -813,6 +818,7 @@ fn valid_repeat_blocks(blocks: &[TruthRepeatBlock], bases: &str) -> Result<(), T
             })
         })?;
     }
+    // **Inalcanzable** (DT-001, tanda 5) en x86_64: `usize` a `u64` no falla.
     let observed = u64::try_from(bases.len()).map_err(|_| {
         rejected(TruthContractError::ArithmeticOverflow {
             field: "repeat_allele_bases_length",
@@ -871,6 +877,9 @@ fn valid_allele_lexical(allele: &TruthAllele) -> Result<(), TruthContractError> 
         } => {
             valid_id("indel_event_id", event_id)?;
             if *start >= 1 && *end >= 2 && start < end {
+                // **Equivalente** (DT-001, tanda 5) `*source_start >= 1 && *source_end >= 2` (y el `*end >= 2` de la
+                // condición de arriba): el evento tiene los mismos extremos que el alelo,
+                // que ya cumple `start >= 1` y `start < end`.
                 if !matches!(source_event, TruthStructuralEvent::Deletion { start: source_start, end: source_end, .. } if source_start == start && source_end == end && *source_start >= 1 && *source_end >= 2)
                 {
                     return Err(rejected(TruthContractError::InvalidGenotypeAllele {
@@ -898,6 +907,10 @@ fn validate_structural_event(
             point,
             bases,
         } => {
+            // **Inalcanzable** (DT-001, tanda 5): el único llamante con un evento de inserción es el alelo
+            // de inserción, que ya exigió `point > 0` y las mismas bases (y por eso
+            // `valid_bases` de más abajo tampoco puede fallar). Intento ejecutado:
+            // `unreachable_guards_are_shadowed_by_earlier_checks`.
             if *point == 0 {
                 return Err(rejected(TruthContractError::InvalidLexicalField {
                     field: "source_event_insertion_point",
@@ -912,6 +925,10 @@ fn validate_structural_event(
             start,
             end,
         } => {
+            // **Inalcanzable** (DT-001, tanda 5): el único llamante con un evento de deleción es el alelo
+            // de deleción, que ya exigió `start >= 1 && end >= 2 && start < end` y que el
+            // evento tuviera los mismos extremos. Intento ejecutado:
+            // `unreachable_guards_are_shadowed_by_earlier_checks`.
             if *start == 0 || *end < 2 || start >= end {
                 return Err(rejected(TruthContractError::InvalidLexicalField {
                     field: "source_event_deletion_interval",
@@ -1063,17 +1080,15 @@ fn validate_copy(
                 }));
             }
             if let Some(prior) = previous {
-                let deletion_covers_snp = prior.deletion != extent.deletion
-                    && ((prior.deletion && prior.start <= extent.start && extent.end <= prior.end)
-                        || (extent.deletion
-                            && extent.start <= prior.start
-                            && prior.end <= extent.end));
-                if prior.sort_key() >= extent.sort_key() && !deletion_covers_snp {
+                // La etiqueta de punto de `sort_key` es **equivalente** (DT-001, tanda 5): dos
+                // extensiones con el mismo inicio y el mismo final y distinta etiqueta no
+                // existen (un punto tiene inicio igual al final y lo demás no).
+                if prior.sort_key() >= extent.sort_key() {
                     return Err(rejected(TruthContractError::ModificationsNotOrdered {
                         event_id: extent.event_id.clone(),
                     }));
                 }
-                if prior.overlaps(extent.clone()) && !deletion_covers_snp {
+                if prior.overlaps(extent.clone()) {
                     return Err(rejected(TruthContractError::OverlappingModifications {
                         event_id: extent.event_id.clone(),
                     }));
@@ -1144,6 +1159,10 @@ fn validate_current_state(
                 }
             }
             TruthCurrentPiece::Inserted { bases, provenance } => {
+                // **Inalcanzable** (DT-001, tanda 5): unas bases vacías o con un carácter fuera de `ACGTN` ya las
+                // rechazó `valid_bases("current_inserted_bases", ..)` del paso léxico, que
+                // `validate_structure` ejecuta antes que ninguna comprobación de estado.
+                // Intento ejecutado: `unreachable_guards_are_shadowed_by_earlier_checks`.
                 if bases.is_empty()
                     || !bases
                         .bytes()
@@ -1161,6 +1180,8 @@ fn validate_current_state(
                 provenance,
                 ..
             } => {
+                // La mitad `bases.is_empty()` es **equivalente** (DT-001, tanda 5): unas
+                // bases vacías ya las rechazó `valid_bases("repeat_allele_bases", ..)`.
                 if bases.is_empty()
                     || source.start >= source.end
                     || source.end > source.sequence_length
@@ -1263,6 +1284,8 @@ fn validate_modification(
             bases,
             provenance,
         } => {
+            // **Equivalente** (DT-001, tanda 5) las dos últimas mitades: unas bases vacías o con un
+            // carácter fuera de `ACGTN` ya las rechazó el paso léxico.
             if *point == 0
                 || *point >= sequence_length
                 || bases.is_empty()
@@ -1282,6 +1305,8 @@ fn validate_modification(
             end,
             provenance,
         } => {
+            // **Equivalente** (DT-001, tanda 5) la mitad `*start >= *end`: una deleción vacía o invertida ya
+            // la rechazó `ModificationExtent::contained` (`ModificationOutsideSegment`).
             if *start == 0 || *start >= *end || *end >= sequence_length {
                 return Err(rejected(TruthContractError::InvalidDeletion {
                     event_id: event_id.clone(),
@@ -1314,6 +1339,8 @@ fn validate_modification_provenance(
             },
         ));
     }
+    // **Equivalentes** (DT-001, tanda 5) `population_id.is_empty()` y
+    // `variant_id.is_empty()`: los rechaza antes `valid_id` (que exige no vacío).
     if let Some(matrix) = &provenance.matrix
         && (matrix.matrix_source_id != provenance.source.source_id
             || matrix.population_id.is_empty()
@@ -1367,6 +1394,8 @@ impl ModificationExtent {
                 start: *point,
                 end: *point,
                 point: true,
+                // **Equivalente** (DT-001, tanda 5): `deletion` solo se lee en `overlaps`,
+                // y para un punto siempre decide antes la rama `point && point`.
                 deletion: false,
             },
             TruthModification::Deletion {
@@ -1396,6 +1425,18 @@ impl ModificationExtent {
     const fn sort_key(&self) -> (u64, u64, bool) {
         (self.start, self.end, self.point)
     }
+    /// Si dos modificaciones se solapan. Sin ninguna excepción (DT-047, cerrada): ni un
+    /// cambio de base ni una inserción pueden quedar dentro de una deleción o en su
+    /// final. Deciden las comparaciones de `deletion && point` (`<` frente a `>`, y
+    /// `<=` frente a `>=`) y las de `deletion && deletion`, y lo prueba
+    /// `modifications_of_a_segment_are_ordered_and_never_overlap`. **Equivalentes**
+    /// (DT-001, tanda 5), porque `validate_copy` entrega las parejas ya ordenadas:
+    /// la rama `point && deletion` es siempre falsa (el punto va antes o en el
+    /// inicio de la deleción, así que `other.start < self.start` no se cumple) y por
+    /// eso sus comparaciones no deciden; `self.start < other.start` de
+    /// `deletion && point` es siempre cierta (un punto en el inicio de la deleción
+    /// ya lo rechaza el orden); y en `deletion && deletion` ninguna pareja ordenada
+    /// tiene el inicio de una en el final de la otra.
     fn overlaps(&self, other: Self) -> bool {
         if self.point && other.point {
             self.start == other.start
@@ -1519,6 +1560,10 @@ pub(crate) fn validate_genotype(
                 copy: c.copy.clone(),
             }));
         }
+        // **Inalcanzable** (DT-001, tanda 5): un caso solo puede tener portadores de copias distintas de su
+        // individuo y su secuencia, con índice de copia de 0 a 9 (el paso léxico lo
+        // exige), de modo que un alelo no pasa de diez portadores y un `u8` no
+        // desborda.
         observed[c.allele_index] = observed[c.allele_index].checked_add(1).ok_or_else(|| {
             rejected(TruthContractError::ArithmeticOverflow {
                 field: "observed_allele_dosage",

@@ -34,7 +34,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026); tanda 3, matriz de SNV (08/10/2026); tanda 4, manifiesto de evento (08/10/2026) |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026); tanda 3, matriz de SNV (08/10/2026); tanda 4, manifiesto de evento (08/10/2026); tanda 5, verdad (09/10/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | **Cerrada (06/10/2026)**, borradas; los dos huecos que dejaban, cubiertos con pruebas nuevas de la vía de parejas |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | **Cerrada (06/10/2026)** |
@@ -80,6 +80,9 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-044 | REQ-CONF-134 a 138, REQ-DAT-81 a 85 y REQ-MAN-94 no tienen fila en la matriz de trazabilidad | Baja | 08/10/2026 | Abierta |
 | DT-046 | Referencias cruzadas internas del manifiesto de evento no atadas por su propio juez (`id_catalog`, bibliotecas repetidas, receptora y donantes ajenos, UDI repetidos, esquema v2 en los hechos del escritor) | Baja | 08/10/2026 | Abierta |
 | DT-045 | El juez de la matriz de SNV tiene catorce comprobaciones de código muerto y un conjunto redundante, porque repite lo que `parse_metadata_json` ya exige | Baja | 08/10/2026 | Abierta; encargo aparte |
+| DT-047 | El contrato de la verdad admite un cambio de base de segmento cubierto por una deleción del mismo segmento y la réplica del juez lo rechaza como «no se reproduce» | Baja | 09/10/2026 | **Cerrada (09/10/2026)**: el error estaba en el contrato |
+| DT-048 | El juez no exige que el estado heredado de una copia recorra la referencia una vez y en orden creciente (colinealidad): acepta rotaciones y duplicaciones | Media | 09/10/2026 | Abierta; se arregla en un cambio aparte |
+| DT-049 | El lector por flujo de la verdad no aplica a los casos genotípicos el paso léxico del contrato | Media-baja | 09/10/2026 | Abierta (junto a DT-015) |
 
 ---
 
@@ -493,6 +496,8 @@ SHA antes, mutada y restaurada. Una línea por tanda:
 | 2 | 08/10/2026 | `src/f5_publication.rs` | 53 / 36 | 53 / **10** |
 | 3 | 08/10/2026 | `src/population_snvs.rs` | 143 / 123 | 143 / **25** |
 | 4 | 08/10/2026 | `src/event_manifest.rs` | 147 / 117 | 147 / **8** |
+| 5 | 09/10/2026 | `src/truth_validation.rs` | 118 / 93 | 118 / **32** |
+| 5 | 09/10/2026 | `src/truth_schema.rs` | 69 / 44 | 69 / **8** |
 
 **Tanda 1 (08/10/2026): 65 sin disparar menos (de 89 a 24; ninguna guarda
 borrada, el número de comprobaciones no cambia).** Las 24 que quedan (5 + 7 + 12) están todas anotadas en el código
@@ -863,6 +868,155 @@ amplificación) y DT-036 (evento fallido sin estado en el manifiesto general) no
 se tocan: los documentos de evento fallido que aquí se juzgan se derivan del
 completo alterándolo, porque el programa no publica hoy ese documento por la vía
 del ensamblado.
+
+**Tanda 5 (09/10/2026): 61 sin disparar menos (de 93 a 32) en el juez semántico de
+la verdad, `src/truth_validation.rs`, y 36 menos (de 44 a 8) en su contrato,
+`src/truth_schema.rs`; ninguna guarda borrada, las comprobaciones siguen siendo
+118 y 69.** Las 40 que quedan están todas anotadas junto a la guarda como
+inalcanzables, con su porqué real.
+
+| Módulo | Comprobaciones | Sin disparar antes | Sin disparar hoy |
+|---|---|---|---|
+| `src/truth_validation.rs` | 118 | 93 | **32** |
+| `src/truth_schema.rs` | 69 | 44 | **8** |
+
+- *Cubiertas con prueba y motivo exacto (97).* `tests/truth_validation_guards.rs`
+  (84 pruebas) y `tests/truth_schema_guards.rs` (45) parten de una verdad **publicada
+  de verdad** por el programa y la alteran en un solo punto. El escenario
+  compartido (`tests/truth_guard_scenario/`) lleva dos secuencias (600 y 400
+  bases), tres individuos de dos poblaciones, una matriz con un locus
+  multialélico, cambios de base directos, inserciones y deleciones directas (una
+  inserción en el punto uno, una deleción desde la base uno, una deleción que
+  se come bases insertadas y de referencia, otra que solo se come insertadas, una
+  inserción que sigue a otra), un tracto simple `(CA)50` y uno **compuesto**
+  `(CAG)4(CA)9`. Se publica en versión 4 (sin repeticiones: la leen los dos
+  lectores) y en versión 5 (con ellas: solo el lector completo, ver DT-015). Cada
+  prueba exige el error exacto (variante, identidad, campo y valor); las del juez
+  semántico, con **los dos lectores** cuando los dos pueden verlo (las tablas
+  léxicas del contrato se probaron solo sobre el documento en memoria: el lector por
+  flujo no aplica ese paso a los casos, ver DT-049), con control positivo y comprobación de
+  que la alteración alteró. Las comprobaciones que el contrato adelanta
+  (rechazos que el lector por bytes nunca ve porque `validate_structure` corre
+  antes) se ejercitan con el documento **en memoria**, que es lo que recibe
+  `validate_and_reconstruct_truth`; los documentos que armó a mano la prueba van
+  con el fragmento vigente que resultaría de **ignorar la guarda**, para que sin
+  ella no los pare un rechazo posterior con el mismo error. Dos pruebas en línea
+  (`src/truth_validation.rs`) cubren las comprobaciones `pub(crate)`: una vista
+  validada que se reutiliza contra otra referencia, y los jueces ante una
+  referencia de otro identificador. Tablas por llamante para los ayudantes
+  léxicos del contrato (`valid_id`: cada uno de sus llamantes, con el límite de 64
+  y el de 65;
+  `valid_sha`; `valid_base`; `valid_bases`; `valid_repeat_blocks`, los tres sitios
+  donde se publica un bloque; `validate_modification_provenance`, ocho sitios).
+- *Inalcanzables (40; 32 + 8).* Ningún `truth.jsonl` publicado y manipulado, ni
+  documento en memoria, llega a ellas. Por clases:
+  - *Conversiones de ancho* (`usize` y `u64` tienen el mismo ancho en x86_64):
+    doce en el juez (réplica, materialización, locus de repetición, bloques,
+    entero fuera de `usize`) y dos en el contrato. En un objetivo de 32 bits
+    serían alcanzables.
+  - *Desbordes de contador* que exigen 2^64 registros (copias y casos, lector
+    completo y por flujo; 2 en el contrato) o un alelo con más de diez
+    portadores (el paso léxico limita el índice de copia a 0..9).
+  - *Sombreadas por otra comprobación anterior*: `BasesNotMaterialized` en
+    `bases_of`, la réplica y la materialización (la huella de la referencia
+    falla antes: `a_reference_without_bases_is_rejected_before_any_copy_is_rebuilt`);
+    `DuplicateHeader` (la cabecera solo se acepta en la línea 1); dos
+    modificaciones de segmento con el mismo evento (las rechaza
+    `validate_structural_event_ids` antes); la longitud de un fragmento y la suma de longitudes dentro de
+    `piece_boundary_index`, `split_replay_at` y el bucle de la deleción (las
+    validó `replay_length` en la misma rama), el rechazo final de ambas funciones
+    (el punto siempre cae en un fragmento) y el `else` de `let ... Source`;
+    en el contrato, las bases vacías de un fragmento vigente o de un tracto (el
+    paso léxico), el punto cero del evento fuente de una inserción y los
+    extremos del evento fuente de una deleción (el alelo ya los exigió).
+  La prueba `unreachable_guards_are_shadowed_by_other_checks` de cada fichero
+  ejecuta el intento donde cabe y **no discrimina** esas guardas.
+- *Pendientes: ninguno.* Ninguna guarda exigía cambiar código de producción
+  (solo comentarios).
+
+**Defectos encontrados.** **DT-047** (baja, **cerrada en la ronda 2**): el contrato
+admitía un cambio de base de segmento cubierto por una deleción del mismo
+segmento y la réplica lo rechazaba. El error estaba en el contrato
+(`Segment::new` rechaza todo solape y `schemas/truth-v1.md` exige modificaciones
+«ordenadas y no solapadas»): se quitó la excepción `deletion_covers_snp`; ahora
+el contrato rechaza ese documento, en los dos órdenes y con su motivo exacto
+(`ModificationsNotOrdered` y `OverlappingModifications`), y la guarda de la
+réplica solo se alcanza con un documento en memoria. **DT-048** (media, nueva): el
+juez no exige que el estado heredado recorra la referencia una vez y en orden
+(rotaciones y duplicaciones se aceptan); se quitaron las dos pruebas que lo
+consagraban. **DT-049** (media-baja, nueva): el lector por flujo no aplica a los
+casos el paso léxico del contrato. Y se **reconfirma DT-015**: el lector por flujo
+rechaza toda verdad de versión 5, de modo que ninguna prueba de esta tanda con
+repeticiones lo usa.
+
+**Verificación por mutación.** Sobre cinco copias fuera del repositorio (el arnés
+se niega a trabajar bajo `/home/ximo/devel`, cada una con su directorio de
+compilación y sus copias de seguridad fuera de git), **un mutante por ejecución**,
+con la huella SHA antes, mutada y restaurada de cada una (todas coincidieron
+entre «antes» y «restaurada», con `touch` tras restaurar). La pasada final sobre
+el árbol de la ronda 2 fue de **746 ejecuciones** (la de la ronda 1 había sido de 752): cada motivo de los 187 rechazos,
+cada guarda entera, cada mitad de cada disyunción o conjunción (también las
+anidadas), cada operador de comparación y cada literal entero de las condiciones
+(247 + 296 mutantes generados) y 186 escritos a mano para las **derivaciones**
+que alimentan guardas (ancla de la inserción y su `.rev()`, `min`/`max` del
+intervalo de una deleción, reparto de cambios al partir un fragmento, límites de
+`<`/`<=` en la búsqueda del fragmento, filtros de copias por referencia,
+individuo y secuencia, tolerancia del número de unidades, cada letra de los
+alfabetos, `contained`, `overlaps`, `deletion_covers_snp`, `sort_key`). Resultado:
+**595 mueren** (588 con las pruebas de integración, 7 con las en línea), **29 no
+compilan** (se reescribieron conservando el efecto lateral, como en la ronda 1) y
+**122 sobreviven**; tras añadir una prueba (tracto al final de su fragmento) mueren
+dos más y quedan **120**, demostrados:
+  - 54 son mutantes de los sitios inalcanzables de arriba.
+  - 10 los mueren con la **batería entera** y no con estas pruebas (la rama de la
+    matriz de `validate_individual_case_set`: población de las copias, alelos
+    exactos de un caso SNP y de repetición, identificador del caso, filtros por
+    secuencia de `expected_snp_alleles` y `expected_repeat_alleles`; las
+    ejercita `tests/published_resource_validation.rs` y las pruebas de
+    `execution`), y 1 con la prueba en línea que faltaba en la lista del arnés.
+  - 55 son **equivalentes**, con su motivo anotado junto al código: solo
+    `summaries.contains_key` y `seen_genotypes.insert` del orden del lector por
+    flujo (`previous >= identidad` y `previous >= clave` **no** lo son: anular
+    cada una sola muere por `two_copies_in_decreasing_order_are_out_of_order` y
+    `two_genotypes_in_decreasing_order_are_out_of_order`); `population_id.is_empty()`
+    y `variant_id.is_empty()` de la procedencia (los caza antes `valid_id`) y
+    `historical_position == position` de la réplica inicial (lo caza antes
+    `validate_structural_event_ids`); las tres igualdades de
+    `segment_snp_matches_history` y la clase y el tipo del evento, que repiten
+    el filtro de la réplica o la guarda previa con el **mismo error**;
+    `*point == 0` y `start >= end` de la réplica (el siguiente rechazo da el
+    mismo error); `<` frente a `<=` en `split_replay_at`, porque la frontera se
+    ve desde los dos lados; `start >= end` de `validated_source`; el
+    `motif_length == 0` de los bloques; `source_start >= 1`/`source_end >= 2`
+    en el alelo de deleción; las bases vacías de `InvalidInsertion` y el
+    `start >= end` de `InvalidDeletion` (el paso léxico y `contained` los
+    rechazan antes); y las comparaciones de `overlaps`, `contained`, `sort_key` y
+    la etiqueta de deleción de un punto que ninguna pareja ordenada distingue.
+    Los dos que la revisión dio por equivalentes sin serlo
+    (`other.start < self.start` y `other.start <= self.end` de `overlaps`)
+    **mueren** con dos filas aceptadas nuevas (inserción estrictamente antes de
+    una deleción, y deleción seguida de una inserción tras su final). La comparación `>` frente
+    a `>=` de la tolerancia del número de unidades es equivalente **en la
+    práctica** (no hay entrada de coma flotante en la que la diferencia sea
+    exactamente la tolerancia).
+
+**Lecciones aplicadas.** Una primera encuesta con un solo `chr1` dejó vivas las
+mitades de `identity.sequence_id` de los tres filtros de copias: **se añadió una
+segunda secuencia** al escenario. Otra, con tractos simples, dejó sin probar el
+reparto de bloques: se añadió el tracto compuesto. Los mutantes de `.rev()`
+del ancla, `min`/`max` del intervalo y el reparto de cambios al partir
+exigieron **eventos directos nuevos** en el escenario (inserción tras otra
+inserción, deleción que cruza una inserción, deleción solo de bases
+insertadas, cambio de base justo en la frontera de una inserción). Cuatro
+documentos armados a mano pasaban por la guarda y por el mutante con el mismo
+error (el fragmento vigente que armé no era el que resultaba): se corrigieron
+hasta que el mutante daba **otro** error. Y la comparación de ese día con los
+supervivientes de la batería entera evitó dar por sin cubrir 10 guardas que
+cubren pruebas de otros módulos.
+
+Tras la pasada final se amplió una prueba (`an_inherited_base_change_covered_by_a_segment_deletion_does_not_replay`,
+con el orden inverso): solo añade una aserción, así que no puede restar
+discriminación.
 
 ---
 
@@ -3471,3 +3625,69 @@ de redondeo, conversiones, invariantes entre recorridos) no se eliminan así.
    con el mismo par de UDI. **No verificado por ejecución:** por lectura, el
    juez del paquete completo (`src/results.rs`, hacia las líneas 3281 y 3399)
    los cazaría al comparar `selected_individuals` con el plan rederivado.
+
+## DT-047. El contrato admitía un cambio de base de segmento cubierto por una deleción del mismo segmento y la réplica lo rechazaba
+
+**Gravedad: baja. Cerrada (09/10/2026, ronda 2 de la tanda 5 de DT-001).** El
+contrato (`validate_structure`) admitía, en la lista de modificaciones de un
+segmento, un cambio de base y una deleción que lo cubre, en los dos órdenes
+(`deletion_covers_snp`), y la réplica del juez lo rechazaba como «el historial
+no se reproduce». **El error estaba en el contrato**: `Segment::new`
+(`src/segments.rs`) rechaza cualquier solape y `schemas/truth-v1.md` exige
+modificaciones «ordenadas y no solapadas». Se eliminó la excepción; ahora el
+contrato rechaza el documento con `ModificationsNotOrdered` (el cambio y después
+la deleción) u `OverlappingModifications` (la deleción y después el cambio, o una
+inserción dentro o al final de la deleción). Las pruebas
+`modifications_of_a_segment_are_ordered_and_never_overlap` y
+`an_inherited_base_change_covered_by_a_segment_deletion_is_rejected` exigen el
+motivo exacto, y los mutantes que anulan el orden o el solape mueren. La
+guarda de la réplica (`push_initial_source` con un inicio por detrás del cursor)
+solo se alcanza ya con un documento en memoria que no pasó el contrato
+(`the_replay_rejects_a_covered_change_in_a_document_that_skipped_the_contract`).
+Cambio de producción: una condición menos en `validate_copy`; el número de
+comprobaciones no cambia (69).
+
+## DT-048. El juez no exige que el estado heredado de una copia recorra la referencia una vez y en orden creciente
+
+**Gravedad: media.** Hallada por la revisión adversarial de la tanda 5 de DT-001
+(09/10/2026) y confirmada por el responsable: **el estado heredado debe cubrir la
+referencia exactamente una vez y en orden creciente**. **Sin arreglar** en la
+tanda 5; el arreglo se hará en un cambio aparte, justo después.
+
+`inherited_loss` (`src/truth_validation.rs`) solo busca bases que **faltan**: no
+detecta duplicaciones ni reordenaciones. Reproducido sobre la verdad publicada por
+el programa:
+
+1. La copia 1 de I3 con los segmentos `[300, 600)` y después `[0, 300)` (el
+   cromosoma rotado) se acepta con los dos lectores.
+2. La copia 1 de I1 en `chr1` con los segmentos `[0, 424)`, `[420, 424)` y
+   `[424, 600)` más la deleción del historial `del-1` (420..424) se acepta: la
+   copia es la referencia más su cambio en 49 y, aun así, el caso de deleción la
+   declara portadora.
+
+*Referencia normativa:* `design/especificaciones-0.1.md` (línea ~367, «intervalos
+colineales») y `schemas/truth-v4.md` (exige «conservar la referencia entera»).
+
+*Corrección propuesta* (no hecha): al formar la réplica inicial, exigir segmentos
+**ordenados, sin solaparse y sin huecos**, y convertir en rechazos las dos pruebas
+que se quitaron de la tanda 5 (`touching_source_fragments_in_reverse_order_are_accepted`
+y `a_repeat_tract_touching_the_previous_fragment_is_accepted`, que daban por
+válida la rotación).
+
+*Mutante relacionado:* `cursor = cursor.max(end)` por `cursor = end` en
+`inherited_loss` **sobrevive y no es equivalente**: solo lo distinguen documentos
+con segmentos solapados.
+
+## DT-049. El lector por flujo de la verdad no aplica a los casos genotípicos el paso léxico del contrato
+
+**Gravedad: media-baja.** Hallada por la revisión adversarial de la tanda 5 de
+DT-001 (09/10/2026). **Sin arreglar** (decisión del responsable: registrar, junto a
+DT-015). Solo afecta a la vía por flujo, que hoy solo usan las pruebas.
+
+`validate_truth_jsonl_streaming` comprueba cada caso genotípico con
+`validate_genotype` pero **no** con el paso léxico de `validate_structure`
+(`validate_lexical_document`). Reproducido: acepta un `case_id` con un espacio o de
+más de 64 caracteres, y un alelo de deleción cuyo evento fuente empieza en 421 en
+vez de 420, que el lector completo rechaza. Las tablas léxicas de
+`tests/truth_schema_guards.rs` se prueban por eso sobre el documento en memoria, no
+con los dos lectores.
