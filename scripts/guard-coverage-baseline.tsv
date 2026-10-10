@@ -398,10 +398,17 @@
 # porqué; no se borró ninguna. Las 498 restantes son de otras partes del juez,
 # para las siguientes tandas. Es lo medido por la puerta, un suelo y no una
 # prueba de que fallaría si estuviera mal escrita.
+# **El 10/10/2026 (DT-051) `src/results.rs` pasa de 779 a 783 comprobaciones; las
+# sin disparar siguen en 498.** Son las cuatro de `validate_published_repeat_loci`,
+# que ata los loci publicados al TOML copiado y a la verdad: los loci y los mínimos
+# de admisión de la configuración efectiva, la sección de loci del manifiesto y las
+# copias realizadas de cada alelo. Las cuatro las dispara
+# `tests/results_repeat_guards.rs` (sección DT-051) con su motivo exacto, y cada
+# una murió al anularla en una copia.
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
-src/results.rs	779	498
+src/results.rs	783	498
 src/event_manifest.rs	147	8
 src/truth_validation.rs	121	32
 src/truth_schema.rs	69	8

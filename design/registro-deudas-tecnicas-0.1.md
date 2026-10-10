@@ -84,7 +84,9 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-048 | El juez no exige que el estado heredado de una copia recorra la referencia una vez y en orden creciente (colinealidad): acepta rotaciones y duplicaciones | Media | 09/10/2026 | **Cerrada (09/10/2026)**: el juez exige que los segmentos recorran la referencia una vez y en orden |
 | DT-049 | El lector por flujo de la verdad no aplica a los casos genotípicos el paso léxico del contrato | Media-baja | 09/10/2026 | Abierta (junto a DT-015) |
 | DT-050 | En memoria, el juez de la verdad aceptaba una copia con un segmento de otra secuencia en medio | Baja | 09/10/2026 | **Cerrada (09/10/2026)**, en el mismo cambio que DT-048 |
-| DT-051 | El juez de los recursos publicados no ata los loci de repetición publicados (manifiesto y configuración efectiva) al TOML copiado: acepta alterar secuencias, frecuencias, pureza, intervalos, topes y mínimos | Media | 10/10/2026 | Abierta; se arreglará en un cambio aparte tras la tanda 6 |
+| DT-051 | El juez de los recursos publicados no ata los loci de repetición publicados (manifiesto y configuración efectiva) al TOML copiado: acepta alterar secuencias, frecuencias, pureza, intervalos, topes y mínimos | Media | 10/10/2026 | **Cerrada (10/10/2026)**, en un cambio propio tras la tanda 6 |
+| DT-052 | La contabilidad de bases de tracto no la juzga nadie al publicar: su juez no está cableado y, aunque lo estuviera, no ata las cotas al TOML | Media | 10/10/2026 | Abierta; se arreglará en un cambio propio justo después de DT-051 |
+| DT-053 | Las copias realizadas de cada alelo no se atan al sorteo rehecho con la semilla | Baja | 10/10/2026 | Abierta; decidido no arreglarla por ahora |
 
 ---
 
@@ -1109,7 +1111,8 @@ y 498 son las de la puerta sobre todo el módulo.)
 - *Pendientes: ninguno.* Ninguna guarda exigía cambiar código de producción (solo
   comentarios).
 
-**Defecto encontrado: DT-051** (media, sin arreglar). Al preguntarse qué cambiaría
+**Defecto encontrado: DT-051** (media; sin arreglar en esta tanda, cerrada el
+10/10/2026 en un cambio propio). Al preguntarse qué cambiaría
 alguien para que el juez completo aceptara un manifiesto falso, se ejecutó y el
 juez **acepta** alterar la sección de loci del manifiesto (secuencias, frecuencias,
 pureza, unidades, intervalos, topes, mínimos, procedencia de la referencia,
@@ -3982,10 +3985,11 @@ quitar esa condición.
 
 ## DT-051. El juez de los recursos publicados no ata los loci de repetición publicados al TOML copiado
 
-**Gravedad: media.** Hallada el 10/10/2026 en la tanda 6 de DT-001, **reproducida
-ejecutando** sobre un paquete publicado de verdad (un locus declarado con un alelo
-interrumpido y uno generado, cinco individuos). **Sin arreglar** (el encargo era
-registrarla): ninguna prueba nueva da por válido ese comportamiento.
+**Gravedad: media. Cerrada (10/10/2026)**; ver «Cómo se cerró» al final. Hallada el
+10/10/2026 en la tanda 6 de DT-001, **reproducida ejecutando** sobre un paquete
+publicado de verdad (un locus declarado con un alelo interrumpido y uno generado,
+cinco individuos). El encargo de la tanda era registrarla; ninguna prueba de la
+tanda daba por válido ese comportamiento.
 
 `validate_published_resources` **acepta** estas alteraciones:
 
@@ -3995,8 +3999,10 @@ registrarla): ninguna prueba nueva da por válido ese comportamiento.
   su identificador, su inicio, sus motivos; la procedencia de la referencia; la
   frecuencia de un alelo generado y la media de pasos de su bloque del generador.
   Solo lo comprueba la coherencia interna de la sección (forma, aritmética,
-  identificador único), el identificador de la referencia y la contabilidad de
-  tracto;
+  identificador único) y el identificador de la referencia. (El texto original
+  decía que también la contabilidad de tracto; **no era así**: su juez,
+  `validate_published_tract_output_accounting`, no lo llama nadie al publicar.
+  Corregido el 10/10/2026; ver DT-052);
 - en la **configuración efectiva**, `repeat_loci`: para un locus declarado, cualquiera
   de sus campos (secuencia del alelo, frecuencia, pureza, inicio, tope, mínimos); para
   uno generado, la pureza y la frecuencia efectiva (su juez, `REQ-VAL-60`, solo
@@ -4037,3 +4043,154 @@ justo después de la tanda 6; aquí solo se registra). Tras
 La comparación va **después** del juez del abanico para conservar su independencia
 (REQ-VAL-60): el abanico se rehace de lo publicado, y solo después se ata lo
 publicado al TOML.
+
+### Cómo se cerró (10/10/2026)
+
+Decisión del responsable del 10/10/2026: arreglarlo ya, en un cambio propio, con
+el precedente de REQ-VAL-61 (el juez reconstruye el bloque del tartamudeo clonal
+desde el TOML y exige que los documentos lo repitan idéntico). Los tres pasos
+propuestos se hicieron, en una función nueva de `src/results.rs`,
+`validate_published_repeat_loci`, que el juez completo llama **después** del juez
+del abanico, del de la referencia final y del de la referencia simulada, de modo
+que cada uno conserva su motivo y el abanico se sigue rehaciendo desde lo
+publicado (REQ-VAL-60). Con la configuración reconstruida desde el TOML copiado y
+los alelos generados desde la referencia publicada, exige:
+
+1. **Configuración efectiva.** `repeat_loci` idéntico al que publica esa
+   configuración (`repeat_loci_json`), y `repeat_admission` con los mínimos del
+   TOML. Cierra las alteraciones de los loci declarados y generados y el punto
+   (a): el trasplante del abanico con sus parámetros ya no cuadra con el TOML.
+2. **Manifiesto general.** La sección de loci idéntica a la que publica esa
+   configuración (`repeat_loci_manifest_json`), salvo lo que solo sale del
+   sorteo —copias sorteadas, copias y frecuencia realizadas— y la contabilidad de
+   bases de tracto, que se ponen a cero en los dos lados antes de comparar. Ata
+   `reference_source`, `admission_defaults`, cada campo de cada locus y alelo, y
+   el número de loci y alelos (punto (c)).
+3. **Copias realizadas (punto (b)).** Se cuentan **desde la verdad ya juzgada**
+   (`truth_repeat_tally`, que devuelve ahora `validate_physical_truth`): por
+   locus, cuántas copias llevan cada tracto según los casos genotípicos de
+   repetición; una copia sin caso lleva el tracto de la referencia, porque el
+   productor no aplica nada cuando el alelo sorteado es ese tracto. La verdad no
+   publica qué índice de alelo le tocó a cada copia, así que dos alelos con las
+   mismas bases y los mismos bloques son el mismo para ella: el juez compara la
+   suma de las copias realizadas de cada grupo de alelos indistinguibles. Las
+   copias sorteadas y la frecuencia realizada quedan atadas con eso, porque el
+   lector del manifiesto ya exige que la frecuencia sea copias entre sorteadas,
+   bit a bit, y que las copias realizadas sumen las sorteadas.
+
+El comentario junto a `validate_published_slippage_fans` se corrigió: el juez del
+abanico caza otros alelos **con los mismos parámetros**; lo que ata los parámetros
+al TOML es la comparación nueva.
+
+**Pruebas** (`tests/results_repeat_guards.rs`, sección DT-051), todas con motivo
+exacto y control positivo, y todas **fallan contra el código anterior**
+(ejecutado sobre una copia del commit anterior; la sonda de la revisión de la
+tanda 6 dio «aceptado» en cada una de las alteraciones):
+
+- `the_effective_repeat_loci_are_the_ones_the_toml_produces`: las dieciocho
+  alteraciones de la efectiva (diecisiete de loci y la de `repeat_admission`);
+- `the_repeat_section_of_the_manifest_is_the_one_the_toml_produces`: doce
+  alteraciones del manifiesto, incluida la de quitar un alelo generado sin copias;
+- `the_realized_copies_are_the_ones_the_truth_carries`: el intercambio de copias
+  entre los alelos declarados, entre dos generados, y la copia del alelo igual a
+  la referencia dada a otro (discrimina que una copia sin caso cuente como ese
+  alelo);
+- `a_fan_transplanted_with_its_parameters_is_rejected`: el trasplante en la
+  efectiva, en el manifiesto y en los dos;
+- `alleles_the_truth_cannot_tell_apart_are_compared_by_their_sum`: lado
+  aceptado de dos alelos gemelos (repartir sus copias de otra forma se acepta) y
+  lado rechazado (dar una copia de un gemelo al alelo distinto).
+
+El lado aceptado lo da además toda la batería: cada paquete que el programa
+publica pasa por el juez completo al publicar (loci declarados, generados,
+compuestos, tractos insertados, ploidía 4, amplificado con y sin multiplicador
+de los homopolímeros, referencia simulada), y ninguno cambió de resultado.
+
+**Verificación por mutación** (copia fuera del repositorio, con su propio
+directorio de compilación, un mutante por ejecución, huella antes, mutada y
+restaurada, y `touch` tras restaurar): diecinueve mutantes. Murieron dieciocho:
+anular cada una de las cuatro comprobaciones nuevas, invertir la condición de
+versión, no tratar como referencia el alelo igual al tracto de la referencia,
+ignorar los bloques del alelo o los de la verdad, quitar cada una de las cuatro
+neutralizaciones del sorteo, no quitar los grupos sin copias, sumar mal un grupo
+de gemelos (solo lo caza la prueba de los gemelos), no reconocer ninguna copia
+en un caso, leer un alelo de repetición como referencia, no reconocer el caso por
+su intervalo, y no filtrar las copias por secuencia (lo caza una publicación con
+un locus en otro cromosoma, `repeat_slippage.rs`). Sobrevivió a esa pasada
+quitar el inicio de la identificación del caso por intervalo, y se declaró
+equivalente («como dos loci no se solapan, el final basta»). **No lo era**: la
+segunda revisión adversarial lo mató con cinco pruebas de
+`tests/vcf_overlap_fusion.rs`, que ejecutan la batería entera y no solo el
+fichero de la sección. Una inserción directa en el borde derecho del tracto
+publica en la verdad un caso de intervalo vacío `[final, final)` que comparte el
+final con el locus y va después del caso de repetición; sin el inicio, se tomaría
+por el caso del locus. Hace falta el intervalo entero. Quitar el final sobrevive
+solo porque la verdad ordena la inserción del borde izquierdo `[inicio, inicio)`
+**antes** del caso del locus y este la sobrescribe: es frágil si cambia ese orden,
+y está anotado junto al código.
+
+La regla queda fijada en REQ-VAL-62 (`design/especificaciones-0.1.md`), que
+remite a DT-052 para la parte de la contabilidad de bases de tracto.
+
+La puerta de cobertura de los jueces: `src/results.rs` pasa de 779 a 783
+comprobaciones y sigue con 498 sin disparar; las cuatro nuevas se disparan.
+
+La segunda revisión halló además un hueco de prueba: comparar en la efectiva solo
+la pureza de los mínimos de admisión, y no la tirada mínima, sobrevivía a toda la
+batería. Se añadió el caso «mínimos de admisión: tirada» a
+`the_effective_repeat_loci_are_the_ones_the_toml_produces`, y ese mutante muere.
+
+**Limitación, por diseño.** Las copias realizadas se atan a la verdad, y la verdad
+no distingue dos alelos con las mismas bases y los mismos bloques. Con dos `(GT)24`
+declarados a 0,85 y 0,05, pasar al de 0,05 las catorce copias del de 0,85 **se
+acepta** (lo reprodujo la segunda revisión). Lo cerraría atar las copias al
+sorteo rehecho con la semilla: DT-053.
+
+**No se cubre aquí** (fuera del alcance de DT-051): la contabilidad de bases de
+tracto (DT-052) y las copias realizadas frente al sorteo rehecho (DT-053).
+
+## DT-052. La contabilidad de bases de tracto no la juzga nadie al publicar
+
+**Gravedad: media.** Hallada el 10/10/2026 por la segunda revisión adversarial de
+DT-051, que la **reprodujo ejecutando**. **Sin arreglar**: decisión del responsable
+del 10/10/2026, se arregla en un cambio propio justo después de DT-051.
+
+`validate_published_tract_output_accounting` (`src/results.rs`), el juez que
+recuenta las bases de tracto releyendo la verdad y el VCF, **no lo llama nadie en
+`src/`** desde que entró (commit 12fd93c, 23/09/2026); solo lo llaman pruebas. El
+juez completo (`validate_published_resources`), que es el que corre al publicar,
+**acepta**:
+
+- en el manifiesto general, la cota de bases de tracto de la verdad aumentada en
+  1000 (con su total), las bases realizadas de la verdad disminuidas en 2 y, con
+  VCF, las del VCF disminuidas en 1;
+- en la configuración efectiva, la cota de la verdad aumentada en 1000, una cota
+  por locus aumentada en 5 y `declared_max_tract_output_bases = 7` con 3814 bases
+  realizadas.
+
+Aunque se cablease tal como está, esa función solo ata el manifiesto y la efectiva
+entre sí y con lo recontado, **no al TOML**.
+
+**Corrección propuesta** (la probó la revisión en una copia, con la batería en
+verde): llamar a esa función desde el juez completo; comparar la cota de la verdad
+del manifiesto con la que resuelve el TOML (poniendo a cero solo lo medido), y la
+cota de la efectiva (`repeat_output_budget`) con la que resuelve el TOML salvo las
+partes del VCF, que se miden al publicar (DTC-097). REQ-VAL-62 remite a esta deuda
+hasta que se cierre.
+
+## DT-053. Las copias realizadas de cada alelo no se atan al sorteo rehecho con la semilla
+
+**Gravedad: baja.** Hallada el 10/10/2026 por la segunda revisión adversarial de
+DT-051, que la **reprodujo ejecutando**. **Sin arreglar** (decisión del
+responsable: no arreglarla por ahora).
+
+Desde DT-051 las copias realizadas del manifiesto se atan a lo que la verdad
+lleva, no al sorteo. Con un TOML copiado falsificado de forma coherente
+—frecuencias 0,6/0,4 cambiadas a 0,9/0,1, con su huella, el identificador de
+ejecución y los documentos rehechos— el juez acepta las copias 4/6 que el paquete
+publica, cuando el sorteo verdadero con esas frecuencias da 10/0. Tampoco
+distingue el reparto entre dos alelos gemelos (la limitación anotada en DT-051).
+
+**Corrección posible:** rehacer el sorteo con la semilla y comparar las copias por
+índice de alelo. El juez ya lo rehace para las estadísticas de la población
+inicial y lo descarta; aprovecharlo cerraría también el caso de los gemelos.

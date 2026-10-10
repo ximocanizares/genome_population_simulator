@@ -33,6 +33,16 @@
 //! **la alteración alteró**, y los casos «aceptado» fijan el lado aceptado de
 //! los límites y de las listas cerradas.
 //!
+//! # DT-051: los loci publicados, atados al TOML y a la verdad
+//!
+//! La última sección comprueba que el juez completo ata los loci publicados
+//! —los de la configuración efectiva, sus mínimos de admisión y la sección de
+//! loci del manifiesto general— a lo que el TOML copiado produce, y las copias
+//! realizadas de cada alelo a lo que la verdad lleva. Son las alteraciones que
+//! la revisión adversarial de la tanda 6 reprodujo, aceptadas todas hasta el
+//! 10/10/2026, el trasplante de un abanico con sus parámetros y el lado
+//! aceptado de dos alelos que la verdad no distingue.
+//!
 //! # Lo que este fichero no es
 //!
 //! Las guardas que ningún paquete publicado y manipulado puede alcanzar están
@@ -144,6 +154,12 @@ fn publish_mixed(individuals: usize) -> Package {
 /// Lo mismo con la ploidía de la población que se pida (los linajes del
 /// generador son individuos por ploidía).
 fn publish_mixed_with_ploidy(individuals: usize, ploidy: u32) -> Package {
+    publish_mixed_with(individuals, ploidy, "3.0")
+}
+
+/// Lo mismo con la media de pasos del generador que se pida (DT-051: el
+/// trasplante de un abanico con otros parámetros).
+fn publish_mixed_with(individuals: usize, ploidy: u32, mean_events: &str) -> Package {
     let ids = (1..=individuals)
         .map(|index| format!("\"I{index:03}\""))
         .collect::<Vec<_>>()
@@ -212,7 +228,7 @@ max_units = 90
 
 [reference.repeat_loci.slippage]
 model = "stepwise"
-mean_events = 3.0
+mean_events = {mean_events}
 expansion_bias = 0.5
 
 [[initial_populations]]
@@ -3385,5 +3401,469 @@ fn a_package_forged_without_populations_reaches_the_unmaterialized_reference() {
     assert_eq!(
         detail(judge(&effective, &manifest)),
         fan("las bases de la referencia publicada no están materializadas")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// DT-051: los loci publicados, atados al TOML copiado y a la verdad
+// ---------------------------------------------------------------------------
+
+const EFFECTIVE_LOCI: &str =
+    "los loci de repetición efectivos no son los que el TOML y la referencia producen";
+const EFFECTIVE_ADMISSION: &str = "los mínimos de admisión efectivos no son los del TOML";
+const MANIFEST_SECTION: &str =
+    "la sección de loci del manifiesto no es la que el TOML y la referencia producen";
+const REALIZED_LEFT: &str =
+    "las copias realizadas de los alelos de STR-LEFT no son las que la verdad lleva";
+const REALIZED_RIGHT: &str =
+    "las copias realizadas de los alelos de STR-RIGHT no son las que la verdad lleva";
+
+/// El juez completo con la configuración efectiva y el manifiesto que se den.
+fn judge_both(package: &Package, effective: &Value, manifest: &Value) -> Result<(), Diagnostic> {
+    validate_published_resources(
+        &package.destination,
+        &package.effective_path(),
+        &serde_json::to_vec_pretty(effective).expect("JSON"),
+        &package.manifest_path(),
+        &serde_json::to_vec_pretty(manifest).expect("JSON"),
+        None,
+    )
+}
+
+/// El juez completo con el manifiesto alterado y la efectiva intacta.
+fn assert_manifest_cases_against_the_toml(package: &Package, cases: &[Case]) {
+    let effective = package.json("effective-config.json");
+    let original = package.json("manifest.json");
+    judge_both(package, &effective, &original)
+        .expect("control positivo: el paquete intacto se acepta");
+    for case in cases {
+        let document = altered(&original, &case.label, case.mutate.as_ref());
+        assert_eq!(
+            detail(judge_both(package, &effective, &document)),
+            case.expected,
+            "«{}» se rechazó por otra razón",
+            case.label
+        );
+    }
+}
+
+/// **Cada campo de los loci de la configuración efectiva, y sus mínimos de
+/// admisión, tienen que ser los que el TOML produce** (DT-051).
+///
+/// Son las dieciocho alteraciones que la revisión adversarial de la tanda 6
+/// reprodujo, más la tirada mínima de admisión (la segunda revisión de DT-051
+/// comprobó que comparar solo la pureza sobrevivía a toda la batería): hasta el 10/10/2026 el juez completo las **aceptaba** todas
+/// (comprobado ejecutando contra el código anterior). En el locus generado,
+/// las que tocan lo que el juez del abanico rehace (la media y el sesgo
+/// cambiados en un ulp, las unidades) no cambian el abanico rehecho, así que
+/// ese juez no las ve y llegan a la comparación con el TOML.
+#[test]
+fn the_effective_repeat_loci_are_the_ones_the_toml_produces() {
+    let package = publish_mixed(5);
+    let declared_sequence = "GTGTAAGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGT";
+    assert_eq!(declared_sequence.len(), INTERRUPTED_ALLELE.len());
+    assert_effective_cases(
+        &package,
+        &[
+            case("alelo declarado: secuencia", EFFECTIVE_LOCI, move |d| {
+                d["repeat_loci"][0]["alleles"][0]["sequence"] = json!(declared_sequence);
+            }),
+            case(
+                "alelo declarado: frecuencia declarada",
+                EFFECTIVE_LOCI,
+                |d| {
+                    d["repeat_loci"][0]["alleles"][0]["declared_frequency"] = json!(0.5);
+                },
+            ),
+            case(
+                "alelo declarado: frecuencia efectiva",
+                EFFECTIVE_LOCI,
+                |d| {
+                    d["repeat_loci"][0]["alleles"][0]["effective_frequency"] = json!(0.5);
+                },
+            ),
+            case("alelo declarado: pureza", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][0]["alleles"][0]["purity"] = json!(0.5);
+            }),
+            case("alelo declarado: unidades", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][0]["alleles"][0]["units"] = json!(30.0);
+            }),
+            case("locus declarado: inicio", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][0]["start"] = json!(52);
+            }),
+            case("locus declarado: motivos", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][0]["motifs"] = json!(["TG"]);
+            }),
+            case("locus declarado: tope", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][0]["max_units"] = json!(3);
+            }),
+            case("locus declarado: pureza mínima", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][0]["admission"]["min_purity"] = json!(0.1);
+            }),
+            case("locus declarado: identificador", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][0]["id"] = json!("STR-FAKE");
+            }),
+            case(
+                "locus generado: tope que el abanico no alcanza",
+                EFFECTIVE_LOCI,
+                |d| d["repeat_loci"][1]["max_units"] = json!(60),
+            ),
+            case("locus generado: media un ulp más", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][1]["slippage"]["mean_events"] = json!(next_up(3.0));
+            }),
+            case("locus generado: sesgo un ulp más", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][1]["slippage"]["expansion_bias"] = json!(next_up(0.5));
+            }),
+            case("alelo generado: pureza", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][1]["alleles"][0]["purity"] = json!(0.9);
+            }),
+            case("alelo generado: frecuencia efectiva", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][1]["alleles"][0]["effective_frequency"] = json!(0.2);
+            }),
+            case("alelo generado: unidades", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][1]["alleles"][0]["units"] = json!(46.0);
+            }),
+            case("alelo generado: tirada más larga", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][1]["alleles"][0]["longest_run_units"] = json!(3);
+            }),
+            case("mínimos de admisión: pureza", EFFECTIVE_ADMISSION, |d| {
+                d["repeat_admission"]["min_purity"] = json!(0.1);
+            }),
+            case("mínimos de admisión: tirada", EFFECTIVE_ADMISSION, |d| {
+                let run = d["repeat_admission"]["min_longest_run_units"]
+                    .as_u64()
+                    .expect("tirada mínima");
+                d["repeat_admission"]["min_longest_run_units"] = json!(run + 1);
+            }),
+        ],
+    );
+}
+
+/// **La sección de loci del manifiesto general tiene que ser la que el TOML
+/// produce** (DT-051), salvo lo que sale del sorteo, que se juzga contra la
+/// verdad en la prueba siguiente.
+///
+/// Son las alteraciones del manifiesto que la revisión adversarial de la tanda
+/// 6 reprodujo, todas **aceptadas** hasta el 10/10/2026 (comprobado
+/// ejecutando contra el código anterior): la procedencia de la referencia, los
+/// mínimos de omisión, campos de un alelo y de un locus declarados, la
+/// frecuencia declarada y los parámetros de un generado, y quitar un alelo
+/// generado sin copias dándole su frecuencia a otro (punto (c): el manifiesto y
+/// la efectiva no se comparaban entre sí).
+#[test]
+fn the_repeat_section_of_the_manifest_is_the_one_the_toml_produces() {
+    let package = publish_mixed(5);
+    let declared_sequence = "GTGTAAGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGT";
+    assert_manifest_cases_against_the_toml(
+        &package,
+        &[
+            case("procedencia de la referencia", MANIFEST_SECTION, |d| {
+                section(d)["reference_source"] = json!("simulated");
+            }),
+            case("mínimos de omisión: pureza", MANIFEST_SECTION, |d| {
+                section(d)["admission_defaults"]["min_purity"] = json!(0.1);
+            }),
+            case("alelo declarado: secuencia", MANIFEST_SECTION, move |d| {
+                allele0(d)["sequence"] = json!(declared_sequence);
+            }),
+            case("alelo declarado: pureza", MANIFEST_SECTION, |d| {
+                allele0(d)["purity"] = json!(0.5);
+            }),
+            case(
+                "alelo declarado: frecuencia declarada",
+                MANIFEST_SECTION,
+                |d| {
+                    allele0(d)["declared_frequency"] = json!(0.9);
+                },
+            ),
+            case(
+                "alelos generados: frecuencias declaradas intercambiadas",
+                MANIFEST_SECTION,
+                |d| {
+                    let alleles = &mut generated(d)["alleles"];
+                    let first = alleles[0]["declared_frequency"].clone();
+                    let fourth = alleles[3]["declared_frequency"].clone();
+                    assert_ne!(first, fourth, "el fixture: frecuencias distintas");
+                    alleles[0]["declared_frequency"] = fourth;
+                    alleles[3]["declared_frequency"] = first;
+                },
+            ),
+            case("locus generado: media", MANIFEST_SECTION, |d| {
+                generated(d)["slippage"]["mean_events"] = json!(1.0);
+            }),
+            case("locus generado: tope", MANIFEST_SECTION, |d| {
+                generated(d)["max_units"] = json!(1000);
+            }),
+            case("locus declarado: inicio", MANIFEST_SECTION, |d| {
+                declared(d)["start"] = json!(1);
+            }),
+            case("locus declarado: identificador", MANIFEST_SECTION, |d| {
+                declared(d)["id"] = json!("STR-FAKE");
+            }),
+            case("alelo generado: otra secuencia", MANIFEST_SECTION, |d| {
+                let allele = &mut generated(d)["alleles"][0];
+                allele["sequence"] = json!("CA".repeat(46));
+                allele["units"] = json!(46.0);
+                allele["block_bases"] = json!([92]);
+                allele["block_unit_counts"] = json!([46.0]);
+                allele["longest_run_units"] = json!(46);
+            }),
+            case(
+                "alelo generado sin copias quitado y su frecuencia dada a otro",
+                MANIFEST_SECTION,
+                |d| {
+                    let alleles = generated(d)["alleles"].as_array_mut().expect("alelos");
+                    assert_eq!(alleles[2]["realized_copies"], 0, "el fixture");
+                    alleles.remove(2);
+                    alleles[1]["declared_frequency"] = json!(0.6);
+                    alleles[1]["effective_frequency"] = json!(0.6);
+                },
+            ),
+        ],
+    );
+}
+
+/// **Las copias realizadas de cada alelo son las que la verdad lleva**
+/// (DT-051, punto (b)).
+///
+/// Intercambiar las copias realizadas (y con ellas la frecuencia realizada)
+/// entre dos alelos conserva la suma y la aritmética que el lector del
+/// manifiesto comprueba; hasta el 10/10/2026 el juez completo lo **aceptaba**
+/// (comprobado ejecutando contra el código anterior). El tercer caso mueve la
+/// copia que lleva el alelo **igual a la referencia** (cien bases de `CA`, sin
+/// caso en la verdad) a otro alelo: discrimina que una copia sin caso cuente
+/// como el alelo de la referencia.
+#[test]
+fn the_realized_copies_are_the_ones_the_truth_carries() {
+    let package = publish_mixed(5);
+    let manifest = package.json("manifest.json");
+    let copies = |locus: usize| -> Vec<u64> {
+        manifest["repeat_loci"]["loci"][locus]["alleles"]
+            .as_array()
+            .expect("alelos")
+            .iter()
+            .map(|allele| allele["realized_copies"].as_u64().expect("copias"))
+            .collect()
+    };
+    assert_eq!(copies(0), [4, 6], "el fixture del locus declarado");
+    assert_eq!(copies(1), [0, 7, 0, 1, 2], "el fixture del locus generado");
+    assert_eq!(
+        manifest["repeat_loci"]["loci"][1]["alleles"][3]["sequence"],
+        json!("CA".repeat(50)),
+        "el fixture: el cuarto alelo generado es el tracto de la referencia"
+    );
+    let set = |allele: &mut Value, copies: u64, drawn: u64| {
+        allele["realized_copies"] = json!(copies);
+        allele["realized_frequency"] = json!(copies as f64 / drawn as f64);
+    };
+    assert_manifest_cases_against_the_toml(
+        &package,
+        &[
+            case(
+                "alelos declarados: copias intercambiadas",
+                REALIZED_LEFT,
+                move |d| {
+                    set(allele0(d), 6, 10);
+                    set(allele1(d), 4, 10);
+                },
+            ),
+            case(
+                "alelos generados: copias intercambiadas",
+                REALIZED_RIGHT,
+                move |d| {
+                    set(&mut generated(d)["alleles"][1], 0, 10);
+                    set(&mut generated(d)["alleles"][2], 7, 10);
+                },
+            ),
+            case(
+                "la copia del alelo de la referencia, dada a otro",
+                REALIZED_RIGHT,
+                move |d| {
+                    set(&mut generated(d)["alleles"][2], 1, 10);
+                    set(&mut generated(d)["alleles"][3], 0, 10);
+                },
+            ),
+        ],
+    );
+}
+
+/// **El trasplante de un abanico con sus parámetros se rechaza** (DT-051,
+/// punto (a)).
+///
+/// Se publica el mismo escenario con `mean_events = 1.0` y su locus generado
+/// (parámetros y abanico) se lleva al paquete original (3.0). El juez del
+/// abanico lo rehace desde los parámetros **publicados** y lo acepta, como
+/// debe; hasta el 10/10/2026 nada más lo miraba y el juez completo aceptaba
+/// los tres trasplantes (comprobado ejecutando contra el código anterior).
+/// Ahora la comparación con el TOML, que corre después, los rechaza.
+#[test]
+fn a_fan_transplanted_with_its_parameters_is_rejected() {
+    let original = publish_mixed(5);
+    let donor = publish_mixed_with(5, 2, "1.0");
+    let effective = original.json("effective-config.json");
+    let manifest = original.json("manifest.json");
+    let mut forged_effective = effective.clone();
+    forged_effective["repeat_loci"][1] =
+        donor.json("effective-config.json")["repeat_loci"][1].clone();
+    let mut forged_manifest = manifest.clone();
+    forged_manifest["repeat_loci"]["loci"][1] =
+        donor.json("manifest.json")["repeat_loci"]["loci"][1].clone();
+    assert_ne!(
+        forged_effective, effective,
+        "el trasplante alteró la efectiva"
+    );
+    assert_ne!(
+        forged_manifest, manifest,
+        "el trasplante alteró el manifiesto"
+    );
+    assert_eq!(
+        forged_effective["repeat_loci"][1]["slippage"]["mean_events"],
+        json!(1.0)
+    );
+    judge_both(&original, &effective, &manifest).expect("control positivo");
+    judge_both(
+        &donor,
+        &donor.json("effective-config.json"),
+        &donor.json("manifest.json"),
+    )
+    .expect("control positivo del donante");
+    assert_eq!(
+        detail(judge_both(&original, &forged_effective, &manifest)),
+        EFFECTIVE_LOCI,
+        "solo la efectiva"
+    );
+    assert_eq!(
+        detail(judge_both(&original, &effective, &forged_manifest)),
+        MANIFEST_SECTION,
+        "solo el manifiesto"
+    );
+    assert_eq!(
+        detail(judge_both(&original, &forged_effective, &forged_manifest)),
+        EFFECTIVE_LOCI,
+        "los dos"
+    );
+}
+
+/// Un locus declarado con **dos alelos iguales** (`(GT)24` dos veces, mitad y
+/// mitad) y uno distinto, sobre la referencia del escenario `mixed`.
+fn publish_twin_alleles() -> Package {
+    let reference = mixed_reference();
+    let length = reference.trim_end().lines().nth(1).expect("bases").len();
+    let config = format!(
+        r#"config_kind = "general"
+schema_version = "4"
+seed = "{SEED}"
+
+[population_snvs]
+mode = "generate"
+
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "weighted_regions"
+outside_weight = 0.0
+substitution_profile = "uniform_snv12_v1"
+
+[[population_snvs.generate.regions]]
+contig = "chr1"
+start = 1
+end = 50
+weight = 1.0
+
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = {length}
+
+[[reference.repeat_loci]]
+id = "STR-LEFT"
+sequence = "chr1"
+start = 51
+end = 100
+motif = "GT"
+
+[[reference.repeat_loci.alleles]]
+units = 24
+frequency = 0.4
+
+[[reference.repeat_loci.alleles]]
+units = 24
+frequency = 0.4
+
+[[reference.repeat_loci.alleles]]
+units = 26
+frequency = 0.2
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 6
+individual_ids = ["I1", "I2", "I3", "I4", "I5", "I6"]
+ploidy = 2
+genotype_model = "hwe"
+"#
+    );
+    publish(&[("general.toml", &config), ("reference.fa", &reference)])
+}
+
+/// **Dos alelos que la verdad no distingue se comparan por su suma** (DT-051,
+/// punto (b)).
+///
+/// La verdad publica de cada copia las bases y los bloques del tracto, no el
+/// índice del alelo que le tocó: con dos alelos iguales, repartir sus copias
+/// de otra forma es indistinguible, y el juez no puede exigir más de lo que la
+/// verdad dice. Lado aceptado: el reparto cambiado se acepta. Lado rechazado:
+/// darle una copia de los gemelos al alelo distinto se rechaza.
+#[test]
+fn alleles_the_truth_cannot_tell_apart_are_compared_by_their_sum() {
+    let package = publish_twin_alleles();
+    let effective = package.json("effective-config.json");
+    let manifest = package.json("manifest.json");
+    judge_both(&package, &effective, &manifest).expect("control positivo");
+    let alleles = &manifest["repeat_loci"]["loci"][0]["alleles"];
+    let copies: [u64; 3] =
+        std::array::from_fn(|index| alleles[index]["realized_copies"].as_u64().expect("copias"));
+    assert_eq!(
+        alleles[0]["sequence"], alleles[1]["sequence"],
+        "el fixture: gemelos"
+    );
+    assert!(
+        copies[0] > 0 && copies[1] > 0,
+        "el fixture: los dos gemelos tienen copias: {copies:?}"
+    );
+    let set = |allele: &mut Value, copies: u64| {
+        allele["realized_copies"] = json!(copies);
+        allele["realized_frequency"] = json!(copies as f64 / 12.0);
+    };
+    let shifted = altered(&manifest, "reparto entre gemelos", &move |d| {
+        set(allele0(d), copies[0] - 1);
+        set(allele1(d), copies[1] + 1);
+    });
+    judge_both(&package, &effective, &shifted)
+        .expect("un reparto distinto entre alelos indistinguibles se acepta");
+    let leaked = altered(
+        &manifest,
+        "copia de un gemelo dada al distinto",
+        &move |d| {
+            set(allele0(d), copies[0] - 1);
+            set(
+                &mut d["repeat_loci"]["loci"][0]["alleles"][2],
+                copies[2] + 1,
+            );
+        },
+    );
+    assert_eq!(
+        detail(judge_both(&package, &effective, &leaked)),
+        REALIZED_LEFT
     );
 }

@@ -1019,6 +1019,22 @@ su asignación por fase está en la matriz de trazabilidad.
   ser **idéntico** al de la configuración efectiva. No basta con comprobar que
   la probabilidad publicada sale de las fracciones publicadas: eso deja pasar
   unas fracciones cambiadas junto con su probabilidad.
+- **REQ-VAL-62.** Al publicar, el juez de los recursos publicados debe atar los
+  loci de repetición publicados al TOML copiado en el paquete y a la verdad
+  publicada. En la configuración efectiva, los loci —con sus alelos, declarados
+  o generados— y los mínimos de admisión deben coincidir **exactamente** con los
+  que resuelve el TOML copiado sobre la referencia publicada. En el manifiesto
+  general, la sección de loci debe coincidir exactamente con la que resuelve el
+  TOML **salvo lo medido**: lo que solo sale del sorteo —copias sorteadas, copias
+  realizadas y frecuencia realizada— y las bases de tracto **medidas** en la
+  verdad y en el VCF; la cota declarada de bases de tracto de la verdad debe
+  coincidir con la del TOML. Las copias realizadas de cada alelo deben ser las
+  que lleva la verdad publicada, sumadas sobre los alelos que la verdad no
+  distingue (mismas bases y mismos bloques). Esta comparación va **después** del
+  juez de REQ-VAL-60, que sigue rehaciendo el abanico desde lo publicado. **La
+  parte de la contabilidad de bases de tracto —la cota declarada y las bases
+  medidas— todavía no la comprueba el juez: queda pendiente de DT-052** del
+  registro de deudas técnicas, hasta que se cierre.
 - **REQ-UI-16.** La interfaz debe ofrecer un **control para elegir** entre
   declarar los alelos de un locus y generarlos, y **enseñar solo la tabla que
   corresponda**: con «declarar», las de alelos e interrupciones; con «generar»,

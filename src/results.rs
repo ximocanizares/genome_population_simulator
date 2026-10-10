@@ -2351,7 +2351,10 @@ fn validate_published_resources_v3(
     //
     // Y es la comparación correcta por sí misma: el abanico se rehace desde la
     // **referencia publicada** y la semilla publicada, de modo que un productor
-    // que hubiera escrito otros alelos en el documento muere aquí.
+    // que hubiera escrito otros alelos **con los mismos parámetros** muere aquí.
+    // Si cambian también los parámetros, el abanico rehecho cuadra con ellos:
+    // lo que ata los parámetros publicados al TOML es
+    // `validate_published_repeat_loci`, más abajo (DT-051).
     // **Primero el juez, y después la reconstrucción.** El orden importa: la
     // reconstrucción llama al productor, de modo que si fuera lo único que hay
     // el abanico se estaría comparando consigo mismo. El juez de abajo rehace
@@ -2402,7 +2405,7 @@ fn validate_published_resources_v3(
         matrix.as_ref(),
         effective_path,
     )?;
-    validate_physical_truth(
+    let truth_tally = validate_physical_truth(
         root,
         &artifacts,
         &physical_config,
@@ -2427,6 +2430,20 @@ fn validate_published_resources_v3(
             )
         })?;
     }
+    // **Los loci publicados son los del TOML** (DT-051). Va después de todo lo
+    // que lee los loci publicados —el juez del abanico, el de la referencia
+    // final y el de la referencia simulada— para que cada uno conserve su
+    // motivo y su independencia: el abanico se rehace desde lo publicado, y
+    // solo después se ata lo publicado al TOML.
+    validate_published_repeat_loci(
+        effective,
+        manifest_bytes,
+        &physical_config,
+        source_reference,
+        &truth_tally,
+        effective_path,
+        manifest_path,
+    )?;
     drop(inserted_reference);
     let mut references = BTreeMap::from([(
         declared_reference.id().as_str().to_owned(),
@@ -4216,6 +4233,154 @@ fn validate_physical_initial_population_statistics(
     Ok(())
 }
 
+/// **Ata los loci de repetición publicados al TOML copiado y a la verdad**
+/// (DT-051).
+///
+/// Hasta el 10/10/2026 el juez completo solo comprobaba la coherencia interna
+/// de los loci publicados —forma, aritmética, identificador— y el abanico
+/// generado, que rehace **desde los parámetros publicados**. Nada ataba esos
+/// parámetros, ni los loci declarados, ni los mínimos de admisión, al TOML: los
+/// documentos podían describir otros microsatélites que los simulados, y el
+/// trasplante de un abanico entero con sus parámetros se aceptaba.
+///
+/// Con la configuración ya reconstruida desde el TOML y con los alelos
+/// generados desde la referencia publicada, exige, igual que REQ-VAL-61 con el
+/// bloque del tartamudeo clonal:
+///
+/// 1. que los loci y los mínimos de admisión de la configuración efectiva sean
+///    **exactamente** los que esa configuración publica;
+/// 2. que la sección de loci del manifiesto general sea **exactamente** la que
+///    esa configuración publica, salvo lo que solo sale del sorteo —las copias
+///    sorteadas y realizadas y la frecuencia realizada— y la contabilidad de
+///    bases de tracto, que se mide al publicar;
+/// 3. que las copias realizadas de cada alelo sean las que **la verdad**
+///    lleva, sumando los alelos que la verdad no distingue (mismas bases y
+///    mismos bloques; ver [`truth_repeat_tally`]). La frecuencia realizada y
+///    las copias sorteadas quedan atadas con eso: el lector del manifiesto ya
+///    exige que la frecuencia sea copias entre sorteadas, bit a bit, y que las
+///    copias realizadas sumen las sorteadas.
+///
+/// Las comparaciones 1 y 2 usan las funciones del productor: lo que se juzga
+/// aquí es que los documentos digan lo que la configuración dice, no cómo se
+/// construyó; el abanico, que sí es una afirmación del modelo, lo rehace por su
+/// cuenta [`validate_published_slippage_fans`] antes de llegar aquí.
+fn validate_published_repeat_loci(
+    effective: &serde_json::Map<String, Value>,
+    manifest_bytes: &[u8],
+    physical_config: &EffectiveConfig,
+    reference: &Reference,
+    truth_tally: &TruthRepeatTally,
+    effective_path: &Path,
+    manifest_path: &Path,
+) -> Result<(), Diagnostic> {
+    if physical_config.document_version() == DeclaredDocumentVersion::V4 {
+        if effective.get("repeat_loci") != Some(&repeat_loci_json(physical_config)?) {
+            return Err(effective_error(
+                effective_path,
+                "los loci de repetición efectivos no son los que el TOML y la referencia producen",
+            ));
+        }
+        let admission = physical_config.repeat_admission();
+        if effective.get("repeat_admission")
+            != Some(&json!({
+                "min_purity": admission.min_purity(),
+                "min_longest_run_units": admission.min_longest_run_units(),
+            }))
+        {
+            return Err(effective_error(
+                effective_path,
+                "los mínimos de admisión efectivos no son los del TOML",
+            ));
+        }
+    }
+    // El manifiesto ya lo leyeron, como JSON, los jueces de antes; si no se
+    // pudiera leer, la sección ausente no coincidiría con la esperada.
+    let manifest: Value = serde_json::from_slice(manifest_bytes).unwrap_or(Value::Null);
+    // Lo que solo sale del sorteo y de la medición se pone a cero en los dos
+    // lados; las copias se juzgan abajo contra la verdad.
+    let without_draws = |section: Option<Value>| {
+        section.map(|mut section| {
+            section["tract_output"] = Value::Null;
+            for locus in section["loci"].as_array_mut().into_iter().flatten() {
+                locus["drawn_copies"] = json!(0);
+                for allele in locus["alleles"].as_array_mut().into_iter().flatten() {
+                    allele["realized_copies"] = json!(0);
+                    allele["realized_frequency"] = Value::Null;
+                }
+            }
+            section
+        })
+    };
+    let published = manifest.get("repeat_loci");
+    if without_draws(published.cloned())
+        != without_draws(repeat_loci_manifest_json(
+            physical_config,
+            &[],
+            &RealizedTractOutput::default(),
+        )?)
+    {
+        return Err(repeat_section_error(
+            manifest_path,
+            "la sección de loci del manifiesto no es la que el TOML y la referencia producen",
+        ));
+    }
+    let published_loci = published
+        .and_then(|section| section.get("loci"))
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    for (locus, published_locus) in physical_config.repeat_loci().iter().zip(published_loci) {
+        // Sin copias no hay bases que leer: una referencia leída sin bases solo
+        // ocurre sin poblaciones, y entonces la verdad no lleva copias y el
+        // recuento esperado es vacío sea cual sea la clave de cada alelo.
+        let reference_tract = crate::repeat_genotypes::reference_tract(reference, locus).ok();
+        let mut claimed = BTreeMap::<TruthTractKey, Option<u64>>::new();
+        let published_alleles = published_locus
+            .get("alleles")
+            .and_then(Value::as_array)
+            .map_or(&[][..], Vec::as_slice);
+        for (allele, published_allele) in locus.alleles().iter().zip(published_alleles) {
+            let tract = allele.tract();
+            let key = (reference_tract.as_deref() != Some(tract.bases())).then(|| {
+                (
+                    String::from_utf8_lossy(tract.bases()).into_owned(),
+                    tract
+                        .blocks()
+                        .iter()
+                        .map(|block| crate::truth_schema::TruthRepeatBlock {
+                            motif: block.motif().as_text(),
+                            bases: block.length(),
+                        })
+                        .collect(),
+                )
+            });
+            let copies = published_allele
+                .get("realized_copies")
+                .and_then(Value::as_u64);
+            let total = claimed.entry(key).or_insert(Some(0));
+            *total = total
+                .zip(copies)
+                .and_then(|(sum, copies)| sum.checked_add(copies));
+        }
+        claimed.retain(|_, copies| *copies != Some(0));
+        let observed = truth_tally
+            .get(locus.id())
+            .into_iter()
+            .flatten()
+            .map(|(key, copies)| (key.clone(), Some(*copies)))
+            .collect::<BTreeMap<_, _>>();
+        if claimed != observed {
+            return Err(repeat_section_error(
+                manifest_path,
+                &format!(
+                    "las copias realizadas de los alelos de {} no son las que la verdad lleva",
+                    locus.id()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// **El juez completo de la verdad sobre los bytes publicados** (DT-020 y
 /// DT-021), con la matriz publicada y la población de cada individuo según la
 /// configuración efectiva: cada caso contra las copias que reconstruye por su
@@ -4231,7 +4396,7 @@ fn validate_physical_truth(
     reference: &Reference,
     matrix: Option<&PreparedPopulationSnvs>,
     effective_path: &Path,
-) -> Result<(), Diagnostic> {
+) -> Result<TruthRepeatTally, Diagnostic> {
     // **Sin poblaciones iniciales** la verdad no lleva copias ni casos, pero su
     // cabecera sigue siendo contrato (DT-027): el lector de la verdad la
     // juzga siempre. El juez semántico completo, que solo añade algo con
@@ -4242,7 +4407,7 @@ fn validate_physical_truth(
         .iter()
         .find(|artifact| artifact.id == "truth-jsonl")
     else {
-        return Ok(());
+        return Ok(TruthRepeatTally::new());
     };
     let judge_semantics = !physical_config.initial_populations().is_empty();
     let populations = physical_config
@@ -4332,7 +4497,98 @@ fn validate_physical_truth(
             format!("la verdad publicada trae una copia que la simulación no tiene: {extra:?}"),
         ));
     }
-    Ok(())
+    Ok(truth_repeat_tally(&document, physical_config))
+}
+
+/// El tracto que una copia lleva en un locus, tal como la verdad lo publica:
+/// sus bases y sus bloques, o `None` para el alelo de referencia, que la verdad
+/// publica sin estructura en bloques ([`crate::truth_schema::TruthAllele`]).
+type TruthTractKey = Option<(String, Vec<crate::truth_schema::TruthRepeatBlock>)>;
+
+/// Por locus, cuántas copias de la verdad llevan cada tracto.
+type TruthRepeatTally = BTreeMap<String, BTreeMap<TruthTractKey, u64>>;
+
+/// Cuenta, **desde la verdad ya juzgada**, cuántas copias llevan cada tracto en
+/// cada locus (DT-051).
+///
+/// Lee los casos genotípicos de repetición: cada uno nombra el locus por su
+/// intervalo y, por portadora, el alelo del caso que lleva. Una copia que no
+/// aparece en ningún caso del locus lleva el tracto de la referencia: el
+/// productor no aplica nada cuando el alelo sorteado es byte a byte ese tracto
+/// (`apply_repeat_alleles`), y entonces no hay variante ni caso. Las copias son
+/// las de la verdad, que `validate_physical_truth` acaba de exigir que sean
+/// exactamente las de la simulación.
+///
+/// Lo que la verdad no lleva es **qué índice** de la lista de alelos le tocó a
+/// cada copia: dos alelos con las mismas bases y los mismos bloques son, en la
+/// verdad, el mismo. Por eso el recuento es por tracto y no por índice, y la
+/// comparación con el manifiesto suma los alelos indistinguibles.
+fn truth_repeat_tally(
+    document: &crate::truth_schema::TruthDocument,
+    config: &EffectiveConfig,
+) -> TruthRepeatTally {
+    use crate::truth_schema::{TruthAllele, TruthRecord};
+    let mut carried = BTreeMap::new();
+    for record in &document.records {
+        let TruthRecord::Genotype(genotype) = record else {
+            continue;
+        };
+        // El caso se reconoce por el intervalo **entero** del locus. No hace
+        // falta mirar además su clase: un SNV o un indel no pueden invadir un
+        // locus (S-32), así que solo un caso de repetición tiene exactamente
+        // ese intervalo. Pero **sí pueden compartir un extremo**: una inserción
+        // directa en el borde publica un caso de intervalo vacío. Si es en el
+        // borde derecho, `[final, final)` comparte el final con el locus y va
+        // después del caso de repetición: sin el inicio se tomaría por el del
+        // locus y sobrescribiría sus portadoras (lo cazan varias pruebas de
+        // `tests/vcf_overlap_fusion.rs`). En el borde izquierdo, `[inicio,
+        // inicio)` comparte el inicio; quitar el final hoy no se nota solo
+        // porque la verdad ordena esa inserción **antes** del caso del locus y
+        // este la sobrescribe. Es frágil: si cambiara ese orden, el final haría
+        // falta igual que el inicio.
+        let Some(locus) = config.repeat_loci().iter().find(|locus| {
+            let interval = locus.declaration().interval();
+            interval.sequence_id().as_str() == genotype.locus.sequence_id
+                && interval.start() == genotype.locus.start
+                && interval.end() == genotype.locus.end
+        }) else {
+            continue;
+        };
+        for carrier in &genotype.carriers {
+            // El contrato de la verdad ya exige que el índice exista y que un
+            // caso de repetición solo lleve la referencia y alelos de
+            // repetición; lo que no es un alelo de repetición es la referencia.
+            let key: TruthTractKey = match genotype.alleles.get(carrier.allele_index) {
+                Some(TruthAllele::Repeat { bases, blocks, .. }) => {
+                    Some((bases.clone(), blocks.clone()))
+                }
+                _ => None,
+            };
+            carried.insert((locus.id(), &carrier.copy), key);
+        }
+    }
+    config
+        .repeat_loci()
+        .iter()
+        .map(|locus| {
+            let sequence = locus.declaration().interval().sequence_id().as_str();
+            let mut tally = BTreeMap::<TruthTractKey, u64>::new();
+            for record in &document.records {
+                let TruthRecord::HaplotypeCopy(copy) = record else {
+                    continue;
+                };
+                if copy.identity.sequence_id != sequence {
+                    continue;
+                }
+                let key = carried
+                    .get(&(locus.id(), &copy.identity))
+                    .cloned()
+                    .flatten();
+                *tally.entry(key).or_default() += 1;
+            }
+            (locus.id().to_owned(), tally)
+        })
+        .collect()
 }
 
 fn read_verified_artifact_bytes(
