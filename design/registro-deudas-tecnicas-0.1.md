@@ -34,7 +34,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026); tanda 3, matriz de SNV (08/10/2026); tanda 4, manifiesto de evento (08/10/2026); tanda 5, verdad (09/10/2026) |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026); tanda 3, matriz de SNV (08/10/2026); tanda 4, manifiesto de evento (08/10/2026); tanda 5, verdad (09/10/2026); tanda 6, primera parte de `results.rs`: microsatélites, tartamudeo y PCR (10/10/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | **Cerrada (06/10/2026)**, borradas; los dos huecos que dejaban, cubiertos con pruebas nuevas de la vía de parejas |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | **Cerrada (06/10/2026)** |
@@ -84,6 +84,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-048 | El juez no exige que el estado heredado de una copia recorra la referencia una vez y en orden creciente (colinealidad): acepta rotaciones y duplicaciones | Media | 09/10/2026 | **Cerrada (09/10/2026)**: el juez exige que los segmentos recorran la referencia una vez y en orden |
 | DT-049 | El lector por flujo de la verdad no aplica a los casos genotípicos el paso léxico del contrato | Media-baja | 09/10/2026 | Abierta (junto a DT-015) |
 | DT-050 | En memoria, el juez de la verdad aceptaba una copia con un segmento de otra secuencia en medio | Baja | 09/10/2026 | **Cerrada (09/10/2026)**, en el mismo cambio que DT-048 |
+| DT-051 | El juez de los recursos publicados no ata los loci de repetición publicados (manifiesto y configuración efectiva) al TOML copiado: acepta alterar secuencias, frecuencias, pureza, intervalos, topes y mínimos | Media | 10/10/2026 | Abierta; se arreglará en un cambio aparte tras la tanda 6 |
 
 ---
 
@@ -1018,6 +1019,139 @@ cubren pruebas de otros módulos.
 Tras la pasada final se amplió una prueba (`an_inherited_base_change_covered_by_a_segment_deletion_does_not_replay`,
 con el orden inverso): solo añade una aserción, así que no puede restar
 discriminación.
+
+
+**Tanda 6, primera parte (10/10/2026): 120 sin disparar menos (de 618 a 498) en
+`src/results.rs`, con microsatélites, tartamudeo y PCR; ninguna guarda borrada,
+las comprobaciones siguen en 779.** `results.rs` es el juez de los recursos
+publicados, de la configuración efectiva y del manifiesto general; es el
+módulo con más guardas sin disparar y se cubre por temas en varias tandas. Esta
+toca diez funciones y sus ayudantes privados exclusivos: 130 guardas sin
+disparar al empezar (113 en las diez funciones y 17 en los ayudantes); quedan
+**12**, todas anotadas junto a la guarda como inalcanzables, con su porqué.
+
+| Función | Sin disparar antes | Hoy |
+|---|---|---|
+| `validate_repeat_loci_section` (sección de loci del manifiesto) | 17 | 4 |
+| `validate_published_slippage_fans` | 7 | 2 |
+| `published_ancestral_tract` | 13 | 2 |
+| `compare_published_fan_against_oracle` | 6 | 0 |
+| `validate_repeat_slippage` (bloque del generador) | 7 | 0 |
+| `validate_repeat_allele` | 21 | 1 |
+| `validate_effective_stutter` | 8 | 0 |
+| `validate_effective_tract_length_dependence` | 11 | 0 |
+| `validate_effective_clonal_stutter` | 12 | 0 |
+| `validate_effective_pcr` | 11 | 0 |
+| ayudantes: `recompute_slippage_fan`, `validate_repeat_tract_output`, `validate_repeat_admission`, `repeat_motif_list`, `repeat_u64_list` | 17 | 3 |
+| **Total del alcance** | **130** | **12** |
+
+(La tabla cuenta guardas con la numeración de la medición del 10/10/2026; las 618
+y 498 son las de la puerta sobre todo el módulo.)
+
+- *Cubiertas con prueba y motivo exacto (118).* `tests/results_repeat_guards.rs`
+  (24 pruebas) parte de paquetes **publicados de verdad** por el programa y los
+  altera en un solo punto: `mixed` (un locus declarado con un alelo interrumpido
+  y otro puro, y uno generado por deslizamiento), `edges` (cuatro loci generados
+  cuyos linajes llegan a los bordes: tirada agotada, tope, expansión que ya no
+  cabe y un tracto interrumpido), `inserting` (inserción de un tracto en la
+  referencia y un locus generado sobre la final), la ploidía 4, y el escenario
+  amplificado con microsatélites (tartamudeo de base y clonal, con y sin
+  multiplicador de los homopolímeros) y sin ellos. El lector del manifiesto
+  juzga la sección de loci (`validate_general_manifest_bytes`); el juez completo
+  (`validate_published_resources`), el abanico; y la estructura de las
+  secciones efectivas, `validate_effective_config_against_manifest_bytes` con la
+  efectiva alterada y el manifiesto intacto (corre antes de todo lo que ata la
+  efectiva al TOML). Cada tabla lleva control positivo, comprueba que **la
+  alteración alteró** y fija el lado aceptado de los límites (inicio uno, final
+  igual al inicio, extremos cerrados de pureza y sesgo, cuatro clases de
+  eficiencia, tres nudos, mínimo de ciclos de 32 bits justo) y de las listas
+  cerradas; las frecuencias y las fracciones se comparan al bit con el decimal
+  siguiente, y un cero negativo se rechaza donde la frecuencia realizada es
+  cero. Ayudantes compartidos con casos por llamante (`validate_repeat_admission`,
+  dos; `repeat_motif_list` y `repeat_u64_list`, locus y alelo).
+- *Inalcanzables (12).* Ningún paquete publicado y manipulado llega a ellas:
+  - *Sombreadas por una comprobación anterior (5):* los `ok_or_else` de los
+    mínimos de omisión, de la contabilidad de tracto, de los mínimos del locus y
+    de la frecuencia realizada del alelo (el cierre exige las claves exactas, de
+    modo que ninguna falta), y el origen del alelo (lo exige antes
+    `validate_repeat_allele`). Intento ejecutado:
+    `unreachable_guards_are_shadowed_by_other_checks`.
+  - *Sombreada por la lectura de la referencia (1):* el identificador de la
+    referencia (lo exigen `read_physical_reference` y `judge_inserted_reference`).
+    Intento ejecutado: `unreachable_fan_guards_are_shadowed_by_other_checks`.
+    **Las bases no materializadas sí se alcanzan** (corrección de la revisión
+    adversarial): con un paquete rehecho entero sin poblaciones ni matriz (copia
+    del TOML, su huella y el identificador de ejecución, efectiva, manifiesto, dos
+    roles y dos artefactos) el juez completo rechaza con ese motivo exacto; lo
+    cubre `a_package_forged_without_populations_reaches_the_unmaterialized_reference`
+    y su mutante muere.
+  - *Conversiones de ancho (2):* `u64` a `usize`, iguales en x86_64.
+  - *Imposibles en la práctica (4):* el recuento de Poisson fallido (la media está
+    acotada a [0, 1000] y el error exige 2^64 iteraciones o un sorteo a menos de
+    2^-52 del extremo, sobre una semilla atada al TOML), el desborde de la suma de
+    pasos y el paso de tracto fallido (el filtro de viabilidad exige una tirada de
+    al menos dos unidades); y, además, la derivación de la subsemilla, que solo falla con
+    un identificador de locus de más de 4 GiB (**no es imposible en lógica**, no
+    cabe en una prueba).
+- *Mitades equivalentes demostradas.* Los dos atajos de sesgo 1 y sesgo 0 de
+  `recompute_slippage_fan` (`f4_bernoulli` ya devuelve sin consumir azar con
+  probabilidad 1 o 0: quitar cada uno, o los dos, da el mismo recorrido; anotados
+  junto al código y conservados). Las seis mitades `!x.is_finite()` de los
+  decimales del generador, de los mínimos, del alelo y del recuento de copias por
+  bloque: con `serde_json` y `arbitrary_precision`, `as_f64` devuelve `None` para
+  un número que no cabe en un `f64` finito, así que un decimal no finito no llega
+  a la comprobación; lo que rechaza `1e999` es la lectura, y tiene caso en cada
+  sitio. Además: la rama nula de `reference_tract_bases` (`null` da `None` con
+  `as_u64`), `>` frente a `>=` de la tolerancia de las copias por bloque (no hay
+  decimal de entrada con diferencia exactamente igual a la tolerancia) y
+  `stopped = true` del recorrido (el filtro de viabilidad es idempotente sobre un
+  estado que no cambia).
+- *Pendientes: ninguno.* Ninguna guarda exigía cambiar código de producción (solo
+  comentarios).
+
+**Defecto encontrado: DT-051** (media, sin arreglar). Al preguntarse qué cambiaría
+alguien para que el juez completo aceptara un manifiesto falso, se ejecutó y el
+juez **acepta** alterar la sección de loci del manifiesto (secuencias, frecuencias,
+pureza, unidades, intervalos, topes, mínimos, procedencia de la referencia,
+parámetros del generador) y, en la efectiva, los loci declarados y los campos de los
+generados que su juez no lee. Ver DT-051.
+
+**Verificación por mutación.** Sobre cuatro copias fuera del repositorio (el arnés
+se niega a trabajar bajo `/home/ximo/devel`, cada una con su directorio de
+compilación y sus copias de seguridad fuera de git), **un mutante por ejecución**,
+con la huella SHA antes (`1ffd7ba82c…`), mutada y restaurada de cada una (todas
+coincidieron entre «antes» y «restaurada», con `touch` tras restaurar y comprobación
+final contra el árbol real). La pasada final fue de **623 ejecuciones** sobre el árbol
+final: el motivo de cada rechazo, cada guarda entera, cada mitad de cada
+disyunción o conjunción (también las anidadas), cada operador de comparación y cada
+literal entero de las condiciones, los cierres `filter`/`is_some_and`/`is_none_or`
+y 184 mutantes a mano de derivaciones y límites (catálogo derivado de la presencia
+del tartamudeo clonal, iteraciones de la inversión, longitud de la tabla de factores,
+suelo de la tolerancia, aritmética comprobada frente a la que da la vuelta,
+viabilidad del paso, sentido del sesgo, orden canónico de los alelos, ploidía de los
+linajes, identificador de la referencia final). Resultado: **588 mueren**, **8 no
+compilan** (se reescribieron a mano conservando el efecto y mueren) y **27
+sobreviven**, todos demostrados: 12 son los rechazos de los sitios inalcanzables, 6
+las mitades `is_finite`, 5 mutan texto de un comentario que quedó dentro de la
+condición, y 4 equivalentes (`>=` de la tolerancia, la rama nula, `stopped = true` y
+una mutación mía que era la identidad). La primera pasada (606 mutantes) dejó 74
+vivos; la mayoría eran guardas que solo cubrían pruebas de otros ficheros, o a las
+que les faltaba un lado del límite, y se añadieron casos (linajes distintos de
+las copias, tope de media por los dos lados, inicio uno, lista de loci vacía,
+procedencia de la referencia, listas de bloque más largas y más cortas que el
+recuento, bases de bloque por encima y por debajo, tolerancia con suelo uno,
+marcas de tosquedad que no son booleanos, fracción y `m` negativas con fracción
+cero) y los tres escenarios que alcanzan los bordes del recorrido, la inserción y la
+ploidía 4.
+
+**Ronda 2 (revisión adversarial).** Se corrigió la inalcanzable de las bases no
+materializadas (ver arriba) y se anotaron los dos atajos de sesgo como
+equivalentes. Cinco mutantes sobre el árbol corregido, huella `e3e9182a69…` antes y
+restaurada: el motivo de las bases no materializadas y su guarda neutralizada
+**mueren** con la prueba nueva; los tres de los atajos de sesgo (los dos, solo el
+de 1, solo el de 0) **sobreviven**, equivalentes. La revisión confirmó además que
+los cinco supervivientes «de comentario» eran ruido del generador (repetían las
+mitades reales de la condición, que mueren).
 
 ---
 
@@ -3845,3 +3979,61 @@ que las demás vías en memoria que saltan el contrato.
 cada segmento sea de la secuencia de la copia; si no, `SegmentsNotCollinear` en ese
 segmento. Lo prueba `a_segment_of_another_sequence_is_rejected`, que falla al
 quitar esa condición.
+
+## DT-051. El juez de los recursos publicados no ata los loci de repetición publicados al TOML copiado
+
+**Gravedad: media.** Hallada el 10/10/2026 en la tanda 6 de DT-001, **reproducida
+ejecutando** sobre un paquete publicado de verdad (un locus declarado con un alelo
+interrumpido y uno generado, cinco individuos). **Sin arreglar** (el encargo era
+registrarla): ninguna prueba nueva da por válido ese comportamiento.
+
+`validate_published_resources` **acepta** estas alteraciones:
+
+- en el **manifiesto general**, sección `repeat_loci`: la pureza, las unidades, la
+  secuencia, la frecuencia declarada y las copias sorteadas de un alelo declarado;
+  el tope y los mínimos de admisión de un locus y los de omisión; la secuencia de
+  su identificador, su inicio, sus motivos; la procedencia de la referencia; la
+  frecuencia de un alelo generado y la media de pasos de su bloque del generador.
+  Solo lo comprueba la coherencia interna de la sección (forma, aritmética,
+  identificador único), el identificador de la referencia y la contabilidad de
+  tracto;
+- en la **configuración efectiva**, `repeat_loci`: para un locus declarado, cualquiera
+  de sus campos (secuencia del alelo, frecuencia, pureza, inicio, tope, mínimos); para
+  uno generado, la pureza y la frecuencia efectiva (su juez, `REQ-VAL-60`, solo
+  rehace la secuencia, la frecuencia declarada, la contabilidad, los linajes, la
+  media, el sesgo y el intervalo).
+
+Reproducido además por la revisión adversarial:
+
+- **(a) Trasplante del abanico.** El mismo escenario publicado con
+  `mean_events = 1.0`, llevando su locus generado (parámetros y abanico) a la
+  efectiva y al manifiesto del paquete original (3.0), lo aceptan el juez completo
+  y `validate_published_tract_output_accounting`: los documentos afirman un abanico
+  (47, 48, 50, 51, 52) que no es el de la verdad. El juez del abanico (REQ-VAL-60)
+  lo rehace desde los parámetros **publicados**, que nada ata al TOML; el comentario
+  de `results.rs` junto a `validate_published_slippage_fans` no se cumple si cambian
+  también los parámetros.
+- **(b)** `realized_copies` y `realized_frequency` del manifiesto no se comparan con
+  la verdad: intercambiarlos entre alelos conservando la suma se acepta.
+- **(c)** Manifiesto y efectiva no se comparan entre sí: quitar un alelo generado del
+  manifiesto se acepta.
+
+Es decir, los documentos pueden mentir sobre los microsatélites que describen sin
+que el juez lo note; las lecturas, la verdad y el VCF se juzgan contra el TOML y no
+se ven afectados. Se parece a DT-043 (la sección de amplificación del manifiesto de
+evento).
+
+**Corrección propuesta** (decisión del responsable: se hará en un cambio **aparte**
+justo después de la tanda 6; aquí solo se registra). Tras
+`validate_published_slippage_fans` y `with_generated_repeat_alleles`:
+
+1. exigir `effective["repeat_loci"] == repeat_loci_json(&physical_config)`;
+2. exigir que cada locus del manifiesto (sin `drawn_copies` ni `realized_*`) coincida
+   con el de la efectiva, y que `reference_id`, `reference_source` y
+   `admission_defaults` coincidan;
+3. como segundo paso, contar las copias realizadas desde la verdad y compararlas con
+   `drawn_copies` y `realized_*`.
+
+La comparación va **después** del juez del abanico para conservar su independencia
+(REQ-VAL-60): el abanico se rehace de lo publicado, y solo después se ata lo
+publicado al TOML.

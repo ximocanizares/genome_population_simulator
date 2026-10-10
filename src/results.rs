@@ -5396,6 +5396,12 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
             "la procedencia de la referencia no es simulada ni suministrada",
         ));
     }
+    // **Inalcanzables** (DT-001, tanda 6): los dos `ok_or_else` de abajo (mínimos de omisión y
+    // contabilidad de tracto). El cierre de campos de arriba exige que la
+    // sección tenga **exactamente** cinco claves de esa lista, de modo que
+    // ninguna puede faltar sin que ese cierre rechace antes. Intento ejecutado:
+    // `unreachable_guards_are_shadowed_by_other_checks` en
+    // `tests/results_repeat_guards.rs` (no discrimina estas guardas).
     validate_repeat_admission(
         section
             .get("admission_defaults")
@@ -5471,6 +5477,9 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
         if locus.get("max_units").and_then(Value::as_u64).unwrap_or(0) == 0 {
             return Err(reason("el tope del locus no es un entero positivo"));
         }
+        // **Inalcanzable** (DT-001, tanda 6): `admission` figura en `LOCUS_FIELDS`, y el
+        // cierre de campos de más arriba exige las diez claves obligatorias,
+        // de modo que no puede faltar sin que ese cierre rechace antes.
         validate_repeat_admission(
             locus
                 .get("admission")
@@ -5523,6 +5532,9 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
             // **El origen del alelo y el del locus tienen que concordar.** Un
             // locus con generador no puede publicar alelos «declarados», ni al
             // revés: sería una procedencia inventada sobre datos reales.
+            // **Inalcanzable** (DT-001, tanda 6): `validate_repeat_allele`, que corre justo
+            // antes sobre este mismo alelo, ya exige que `origin` sea una de las
+            // dos palabras `declared` o `generated`; con eso, `as_str` no falla.
             let origin = allele
                 .get("origin")
                 .and_then(Value::as_str)
@@ -5589,6 +5601,11 @@ fn validate_published_slippage_fans(
         .and_then(Value::as_object)
         .and_then(|reference| reference.get("id"))
         .and_then(Value::as_str)
+        // **Inalcanzable** (DT-001, tanda 6): antes de este juez, `read_physical_reference`
+        // exige que `reference.id` sea texto no vacío y, con inserción,
+        // `judge_inserted_reference` lo exige de `inserted_reference.id`; el
+        // objeto que se lee aquí es uno de los dos. Intento ejecutado:
+        // `unreachable_fan_guards_are_shadowed_by_other_checks` (no discrimina).
         .ok_or_else(|| effective_error(effective_path, "la referencia publicada no tiene id"))?;
     for locus in loci {
         let Some(slippage) = locus.get("slippage") else {
@@ -5647,6 +5664,13 @@ fn validate_published_slippage_fans(
                 "la media de pasos rebasa el tope que el generador admite",
             )));
         }
+        // **Inalcanzable en la práctica** (DT-001, tanda 6): `slippage_subseed` solo falla si
+        // algún componente del material de derivación no cabe en un prefijo de
+        // longitud `u32` (4 GiB). Aquí los componentes son el ámbito, el
+        // identificador de la referencia (texto de identificador, ya validado)
+        // y el del locus: provocarlo exigiría un identificador de locus de más
+        // de 4 GiB en un documento publicado. No es imposible en lógica; no hay
+        // forma de ejercitarlo en una prueba.
         let mut rng = crate::repeat_slippage::slippage_subseed(root_seed, reference_id, locus_id)
             .map_err(|error| reject(&reason(error.detail())))?
             .local_rng();
@@ -5726,6 +5750,9 @@ fn published_ancestral_tract(
     })?;
     // El intervalo publicado es de base uno cerrada; el corte, de base cero
     // semiabierta. La conversión se escribe aquí una sola vez y a la vista.
+    // **Inalcanzables** (DT-001, tanda 6): las dos conversiones son de `u64` a `usize`, que
+    // tienen el mismo ancho en x86_64 y no fallan. En un objetivo de 32 bits
+    // serían alcanzables (inicio o final por encima de 2^32).
     let from = usize::try_from(start - 1).map_err(|_| reject(reason("el inicio desborda")))?;
     let to = usize::try_from(end).map_err(|_| reject(reason("el final desborda")))?;
     let slice = bases
@@ -5753,6 +5780,16 @@ fn recompute_slippage_fan(
     let mut applied = 0_u64;
     let mut unapplied = 0_u64;
     for _ in 0..lineages {
+        // **Inalcanzables** (DT-001, tanda 6): los dos rechazos de abajo.
+        // - `poisson_count` solo falla con una media fuera de
+        //   `[0, POISSON_COUNT_MAX_LAMBDA]` (el único llamante ya acotó la media
+        //   a `[0, 1000]`), con un desborde del contador, que exige 2^64
+        //   iteraciones, o con un candidato no numérico o por encima de 2^53 que
+        //   exigiría un sorteo uniforme a menos de 2^-52 del extremo, sobre una
+        //   semilla que está atada al TOML copiado.
+        // - La suma de pasos sorteados desborda solo con más de 2^64 pasos, y con
+        //   media a lo sumo 1000 haría falta del orden de 2^54 linajes, que están
+        //   atados a las copias haplotípicas del TOML.
         let events = crate::randomness::poisson_count(rng, mean_events)
             .map_err(|error| reason(format!("el recuento de pasos falló: {error:?}")))?;
         drawn = drawn
@@ -5775,6 +5812,10 @@ fn recompute_slippage_fan(
                 unapplied += 1;
                 continue;
             }
+            // **Los dos atajos de abajo (sesgo 1 y sesgo 0) son equivalentes**
+            // (DT-001, tanda 6): `f4_bernoulli` ya devuelve `true` o `false` sin
+            // consumir azar con probabilidad 1 o 0, de modo que quitarlos da el
+            // mismo recorrido y los mismos alelos. Se conservan por claridad.
             let step = if expansion_bias == 1.0 {
                 1
             } else if expansion_bias == 0.0 {
@@ -5786,6 +5827,13 @@ fn recompute_slippage_fan(
             } else {
                 -1
             };
+            // **Inalcanzable** (DT-001, tanda 6): `apply_unit_step` con un paso de ±1 solo falla
+            // si el tracto no tiene ninguna copia completa o si la contracción
+            // vaciaría su tirada más larga, y el filtro de viabilidad de arriba
+            // ya exigió una tirada de al menos dos unidades; la expansión cabe
+            // bajo el tope por ese mismo filtro. Los otros rechazos
+            // (`TractTooLong`, `ZeroStep`) exigen longitudes de 2^64 bases o un
+            // paso cero.
             current = current
                 .apply_unit_step(step)
                 .map_err(|error| reason(format!("el paso falló: {}", error.detail())))?;
@@ -5930,6 +5978,11 @@ fn validate_repeat_slippage(value: &Value) -> Result<(), &'static str> {
         .get("mean_events")
         .and_then(Value::as_f64)
         .ok_or_else(|| reason("la media de pasos no es un decimal"))?;
+    // **Mitad equivalente** (DT-001, tanda 6): `!mean.is_finite()` no decide nunca. Con
+    // `serde_json` y `arbitrary_precision`, `as_f64` devuelve `None` para un número
+    // que no cabe en un `f64` finito (`1e999`), así que un decimal no finito no
+    // llega aquí: lo rechaza antes la lectura del decimal (caso «no cabe en un
+    // decimal finito» de `tests/results_repeat_guards.rs`).
     if !mean.is_finite() || mean < 0.0 {
         return Err(reason("la media de pasos no es un decimal no negativo"));
     }
@@ -5937,6 +5990,11 @@ fn validate_repeat_slippage(value: &Value) -> Result<(), &'static str> {
         .get("expansion_bias")
         .and_then(Value::as_f64)
         .ok_or_else(|| reason("el sesgo de expansión no es un decimal"))?;
+    // **Mitad equivalente** (DT-001, tanda 6): `!bias.is_finite()` no decide nunca. Con
+    // `serde_json` y `arbitrary_precision`, `as_f64` devuelve `None` para un número
+    // que no cabe en un `f64` finito (`1e999`), así que un decimal no finito no
+    // llega aquí: lo rechaza antes la lectura del decimal (caso «no cabe en un
+    // decimal finito» de `tests/results_repeat_guards.rs`).
     if !bias.is_finite() || !(0.0..=1.0).contains(&bias) {
         return Err(reason("el sesgo de expansión no pertenece a [0,1]"));
     }
@@ -6073,6 +6131,11 @@ fn validate_repeat_admission(value: &Value) -> Result<(), &'static str> {
         .get("min_purity")
         .and_then(Value::as_f64)
         .ok_or_else(|| reason("la pureza mínima no es un decimal"))?;
+    // **Mitad equivalente** (DT-001, tanda 6): `!purity.is_finite()` no decide nunca. Con
+    // `serde_json` y `arbitrary_precision`, `as_f64` devuelve `None` para un número
+    // que no cabe en un `f64` finito (`1e999`), así que un decimal no finito no
+    // llega aquí: lo rechaza antes la lectura del decimal (caso «no cabe en un
+    // decimal finito» de `tests/results_repeat_guards.rs`).
     if !purity.is_finite() || !(0.0..=1.0).contains(&purity) {
         return Err(reason("la pureza mínima no es finita ni pertenece a [0,1]"));
     }
@@ -6130,6 +6193,11 @@ fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str
             .get(field)
             .and_then(Value::as_f64)
             .ok_or_else(|| reason("una proporción del alelo no es un decimal"))?;
+        // **Mitad equivalente** (DT-001, tanda 6): `!value.is_finite()` no decide nunca. Con
+        // `serde_json` y `arbitrary_precision`, `as_f64` devuelve `None` para un número
+        // que no cabe en un `f64` finito (`1e999`), así que un decimal no finito no
+        // llega aquí: lo rechaza antes la lectura del decimal (caso «no cabe en un
+        // decimal finito» de `tests/results_repeat_guards.rs`).
         if !value.is_finite() || !(0.0..=1.0).contains(&value) {
             return Err(reason(
                 "una proporción del alelo no es finita ni pertenece a [0,1]",
@@ -6140,6 +6208,11 @@ fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str
         .get("units")
         .and_then(Value::as_f64)
         .ok_or_else(|| reason("las unidades del alelo no son un decimal"))?;
+    // **Mitad equivalente** (DT-001, tanda 6): `!units.is_finite()` no decide nunca. Con
+    // `serde_json` y `arbitrary_precision`, `as_f64` devuelve `None` para un número
+    // que no cabe en un `f64` finito (`1e999`), así que un decimal no finito no
+    // llega aquí: lo rechaza antes la lectura del decimal (caso «no cabe en un
+    // decimal finito» de `tests/results_repeat_guards.rs`).
     if !units.is_finite() || units <= 0.0 {
         return Err(reason("las unidades del alelo no son un decimal positivo"));
     }
@@ -6162,6 +6235,9 @@ fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str
     // **La misma comparación que el documento vecino**: bit a bit contra
     // copias realizadas entre copias sorteadas. Sin sorteo no hay proporción, y
     // publicar un cero afirmaría una medida que no se hizo.
+    // **Inalcanzable** (DT-001, tanda 6): `realized_frequency` figura en `FIELDS`, y el cierre
+    // de campos del principio de esta función exige las quince claves, de modo
+    // que no puede faltar sin que ese cierre rechace antes.
     let realized = allele
         .get("realized_frequency")
         .ok_or_else(|| reason("falta la frecuencia realizada del alelo"))?;
@@ -6219,7 +6295,15 @@ fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str
             return Err(reason("un bloque sin bases no es un bloque"));
         }
         let derived = bases[index] as f64 / motif_lengths[index] as f64;
+        // **Mitad equivalente** (DT-001, tanda 6): `!unit_counts[index].is_finite()` no decide nunca. Con
+        // `serde_json` y `arbitrary_precision`, `as_f64` devuelve `None` para un número
+        // que no cabe en un `f64` finito (`1e999`), así que un decimal no finito no
+        // llega aquí: lo rechaza antes la lectura del decimal (caso «no cabe en un
+        // decimal finito» de `tests/results_repeat_guards.rs`).
         if !unit_counts[index].is_finite()
+            // `>` frente a `>=` es **equivalente en la práctica** (DT-001, tanda 6): no
+            // hay un decimal de entrada cuya diferencia con lo derivado sea
+            // exactamente la tolerancia. El suelo `max(1.0)` sí decide y tiene caso.
             || (unit_counts[index] - derived).abs() > 1e-9 * derived.max(1.0)
         {
             return Err(reason(
@@ -8429,6 +8513,9 @@ fn validate_effective_tract_length_dependence(
                 "una fila dice tener curva medida y no la tiene, o al revés",
             ));
         }
+        // La rama nula es **equivalente** a `as_u64()` (DT-001, tanda 6): un `null`
+        // da `None` de las dos formas; mutada, sobrevive y no hay entrada que la
+        // distinga.
         let published = entry.get("reference_tract_bases").and_then(|value| {
             if value.is_null() {
                 None

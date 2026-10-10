@@ -385,10 +385,23 @@
 # y se verificaron mutando una copia. La búsqueda de huecos que sustituye no
 # tenía comprobación propia.
 # modulo	comprobaciones	techo_sin_disparar
+# **El 10/10/2026 (DT-001, tanda 6, primera parte) `src/results.rs` baja de 618 a
+# 498 sin disparar; las comprobaciones siguen en 779.** Lo cubre
+# `tests/results_repeat_guards.rs`, que parte de paquetes **publicados de
+# verdad** (loci declarado y generado, bordes del modelo de deslizamiento,
+# inserción de tractos, amplificación con y sin microsatélites), los altera en
+# un solo punto y exige el motivo exacto, para diez funciones: la sección de
+# loci del manifiesto, el abanico de deslizamiento (rehecho por el juez), el
+# bloque del generador y las secciones efectivas de tartamudeo, curva de longitud
+# de tracto, tartamudeo clonal y amplificación. Las 12 de ese alcance que
+# quedan sin disparar son inalcanzables y cada una lleva junto a la guarda el
+# porqué; no se borró ninguna. Las 498 restantes son de otras partes del juez,
+# para las siguientes tandas. Es lo medido por la puerta, un suelo y no una
+# prueba de que fallaría si estuviera mal escrita.
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
-src/results.rs	779	618
+src/results.rs	779	498
 src/event_manifest.rs	147	8
 src/truth_validation.rs	121	32
 src/truth_schema.rs	69	8
