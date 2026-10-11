@@ -427,10 +427,26 @@
 # solo se disparaba el del bloque BGZF, y de los tres, también solo ese. No se
 # ha probado nada nuevo para bajar la cifra: es el mismo hueco con un punto
 # menos.
+# **El 11/10/2026 (tanda 7 de DT-001, la configuración efectiva) `src/results.rs`
+# pasa de 497 a 393 sin disparar; las comprobaciones siguen en 787.** Son 104 menos:
+# 97 del alcance, que cubre `tests/results_effective_guards.rs` con su motivo exacto
+# (la efectiva frente al manifiesto, el enlace del evento técnico, las poblaciones
+# iniciales, los eventos directos, el evento técnico sin amplificación, la referencia,
+# las reducciones, los catálogos derivados, el texto reversible y la efectiva atada al
+# TOML copiado; cada una murió al anularla en una copia), y 7 de los ayudantes y del
+# lector del manifiesto que alcanzan los intentos de llegar a las inalcanzables. Quedan
+# 26 del alcance anotadas junto a la guarda como inalcanzables.
+# **Ese mismo día `src/results.rs` pasa de 787 a 721 comprobaciones y de 393 a 327 sin
+# disparar**: por decisión del responsable se borró el código muerto de la versión 1
+# (`validate_effective_config_v1_against_manifest_bytes`,
+# `validate_effective_targets_against_configuration_v1`, `validate_published_resources_v1`,
+# `parse_general_manifest_v1_object` y `retag_v1_pair_error`, todo con `#[allow(dead_code)]` y
+# sin ningún llamante): 66 comprobaciones, todas sin disparar, y 685 líneas. No es una
+# regresión: es lo que la puerta declara con la nota.
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
-src/results.rs	787	497
+src/results.rs	721	327
 src/event_manifest.rs	147	8
 src/truth_validation.rs	121	32
 src/truth_schema.rs	69	8

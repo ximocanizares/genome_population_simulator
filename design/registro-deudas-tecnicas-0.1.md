@@ -34,7 +34,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026); tanda 3, matriz de SNV (08/10/2026); tanda 4, manifiesto de evento (08/10/2026); tanda 5, verdad (09/10/2026); tanda 6, primera parte de `results.rs`: microsatélites, tartamudeo y PCR (10/10/2026) |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026); tanda 3, matriz de SNV (08/10/2026); tanda 4, manifiesto de evento (08/10/2026); tanda 5, verdad (09/10/2026); tanda 6, primera parte de `results.rs`: microsatélites, tartamudeo y PCR (10/10/2026); tanda 7, segunda parte de `results.rs`: la configuración efectiva (11/10/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | **Cerrada (06/10/2026)**, borradas; los dos huecos que dejaban, cubiertos con pruebas nuevas de la vía de parejas |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | **Cerrada (06/10/2026)** |
@@ -1156,6 +1156,461 @@ restaurada: el motivo de las bases no materializadas y su guarda neutralizada
 de 1, solo el de 0) **sobreviven**, equivalentes. La revisión confirmó además que
 los cinco supervivientes «de comentario» eran ruido del generador (repetían las
 mitades reales de la condición, que mueren).
+
+**Tanda 7, segunda parte de `results.rs` (11/10/2026): 104 sin disparar menos (de
+497 a 393) y 97 de ellas en la configuración efectiva; ninguna guarda borrada, las
+comprobaciones siguen en 787.** Las otras 7 son guardas de ayudantes compartidos y
+del lector del manifiesto que alcanzan los intentos de llegar a las inalcanzables.
+`results.rs` es el juez de los recursos publicados,
+de la configuración efectiva y del manifiesto general. Esta tanda toca diez funciones
+de la configuración efectiva y sus ayudantes privados exclusivos: 161 guardas sin
+disparar al empezar (123 en código vivo y 38 en las dos funciones de la versión 1, que
+eran **código muerto**, ver abajo); quedan **26 de las 123 vivas**, todas anotadas
+junto a la guarda como inalcanzables con su porqué real. Las de la versión 1 desaparecen
+con el código (borrado el 11/10/2026).
+
+| Función | Sin disparar antes | Hoy |
+|---|---|---|
+| `validate_effective_config_v3_against_manifest_bytes` (la efectiva frente al manifiesto) | 15 | 7 |
+| `validate_effective_technical_event_link` (enlace del evento técnico) | 7 | 3 |
+| `validate_effective_targets_against_configuration` (la efectiva atada al TOML copiado) | 21 | 11 |
+| `validate_effective_initial_populations` | 10 | 0 |
+| `validate_effective_direct_events` | 9 | 0 |
+| `validate_effective_technical_event` (sin amplificación) | 25 | 1 |
+| `validate_effective_reference` | 19 | 2 |
+| `validate_effective_derived_sequences` | 9 | 2 |
+| ayudantes: `validate_effective_reduction`, `validate_reversible_text` | 8 | 0 |
+| **Total vivo** | **123** | **26** |
+| `validate_effective_config_v1_against_manifest_bytes`, `validate_effective_targets_against_configuration_v1` (**código muerto, borrado**) | 38 | — |
+
+- *Las funciones de la versión 1 eran código muerto y se borraron (11/10/2026, decisión
+  del responsable).* Llevaban `#[allow(dead_code)]` y **ninguna ruta de producción ni de
+  prueba las llamaba**: `validate_effective_config_v1_against_manifest_bytes` (16 guardas),
+  `validate_effective_targets_against_configuration_v1` (22; solo la llamaba
+  `validate_published_resources_v1`), `validate_published_resources_v1` (21),
+  `parse_general_manifest_v1_object` (7) y `retag_v1_pair_error`: 66 comprobaciones, todas
+  sin disparar, y 685 líneas. Los esquemas v1 de `schemas/` son ficheros congelados y no se
+  tocaron. DTC-036 se actualizó a las versiones que el programa lee de verdad.
+- *Cubiertas con prueba y motivo exacto (97).* `tests/truth_validation_guards.rs`
+  (84 pruebas) y `tests/truth_schema_guards.rs` (45) parten de una verdad **publicada
+  de verdad** por el programa y la alteran en un solo punto. El escenario
+  compartido (`tests/truth_guard_scenario/`) lleva dos secuencias (600 y 400
+  bases), tres individuos de dos poblaciones, una matriz con un locus
+  multialélico, cambios de base directos, inserciones y deleciones directas (una
+  inserción en el punto uno, una deleción desde la base uno, una deleción que
+  se come bases insertadas y de referencia, otra que solo se come insertadas, una
+  inserción que sigue a otra), un tracto simple `(CA)50` y uno **compuesto**
+  `(CAG)4(CA)9`. Se publica en versión 4 (sin repeticiones: la leen los dos
+  lectores) y en versión 5 (con ellas: solo el lector completo, ver DT-015). Cada
+  prueba exige el error exacto (variante, identidad, campo y valor); las del juez
+  semántico, con **los dos lectores** cuando los dos pueden verlo (las tablas
+  léxicas del contrato se probaron solo sobre el documento en memoria: el lector por
+  flujo no aplica ese paso a los casos, ver DT-049), con control positivo y comprobación de
+  que la alteración alteró. Las comprobaciones que el contrato adelanta
+  (rechazos que el lector por bytes nunca ve porque `validate_structure` corre
+  antes) se ejercitan con el documento **en memoria**, que es lo que recibe
+  `validate_and_reconstruct_truth`; los documentos que armó a mano la prueba van
+  con el fragmento vigente que resultaría de **ignorar la guarda**, para que sin
+  ella no los pare un rechazo posterior con el mismo error. Dos pruebas en línea
+  (`src/truth_validation.rs`) cubren las comprobaciones `pub(crate)`: una vista
+  validada que se reutiliza contra otra referencia, y los jueces ante una
+  referencia de otro identificador. Tablas por llamante para los ayudantes
+  léxicos del contrato (`valid_id`: cada uno de sus llamantes, con el límite de 64
+  y el de 65;
+  `valid_sha`; `valid_base`; `valid_bases`; `valid_repeat_blocks`, los tres sitios
+  donde se publica un bloque; `validate_modification_provenance`, ocho sitios).
+- *Inalcanzables (40; 32 + 8).* Ningún `truth.jsonl` publicado y manipulado, ni
+  documento en memoria, llega a ellas. Por clases:
+  - *Conversiones de ancho* (`usize` y `u64` tienen el mismo ancho en x86_64):
+    doce en el juez (réplica, materialización, locus de repetición, bloques,
+    entero fuera de `usize`) y dos en el contrato. En un objetivo de 32 bits
+    serían alcanzables.
+  - *Desbordes de contador* que exigen 2^64 registros (copias y casos, lector
+    completo y por flujo; 2 en el contrato) o un alelo con más de diez
+    portadores (el paso léxico limita el índice de copia a 0..9).
+  - *Sombreadas por otra comprobación anterior*: `BasesNotMaterialized` en
+    `bases_of`, la réplica y la materialización (la huella de la referencia
+    falla antes: `a_reference_without_bases_is_rejected_before_any_copy_is_rebuilt`);
+    `DuplicateHeader` (la cabecera solo se acepta en la línea 1); dos
+    modificaciones de segmento con el mismo evento (las rechaza
+    `validate_structural_event_ids` antes); la longitud de un fragmento y la suma de longitudes dentro de
+    `piece_boundary_index`, `split_replay_at` y el bucle de la deleción (las
+    validó `replay_length` en la misma rama), el rechazo final de ambas funciones
+    (el punto siempre cae en un fragmento) y el `else` de `let ... Source`;
+    en el contrato, las bases vacías de un fragmento vigente o de un tracto (el
+    paso léxico), el punto cero del evento fuente de una inserción y los
+    extremos del evento fuente de una deleción (el alelo ya los exigió).
+  La prueba `unreachable_guards_are_shadowed_by_other_checks` de cada fichero
+  ejecuta el intento donde cabe y **no discrimina** esas guardas.
+- *Pendientes: ninguno.* Ninguna guarda exigía cambiar código de producción
+  (solo comentarios).
+
+**Defectos encontrados.** **DT-047** (baja, **cerrada en la ronda 2**): el contrato
+admitía un cambio de base de segmento cubierto por una deleción del mismo
+segmento y la réplica lo rechazaba. El error estaba en el contrato
+(`Segment::new` rechaza todo solape y `schemas/truth-v1.md` exige modificaciones
+«ordenadas y no solapadas»): se quitó la excepción `deletion_covers_snp`; ahora
+el contrato rechaza ese documento, en los dos órdenes y con su motivo exacto
+(`ModificationsNotOrdered` y `OverlappingModifications`), y la guarda de la
+réplica solo se alcanza con un documento en memoria. **DT-048** (media, nueva): el
+juez no exige que el estado heredado recorra la referencia una vez y en orden
+(rotaciones y duplicaciones se aceptan); se quitaron las dos pruebas que lo
+consagraban. **DT-049** (media-baja, nueva): el lector por flujo no aplica a los
+casos el paso léxico del contrato. Y se **reconfirma DT-015**: el lector por flujo
+rechaza toda verdad de versión 5, de modo que ninguna prueba de esta tanda con
+repeticiones lo usa.
+
+**Verificación por mutación.** Sobre cinco copias fuera del repositorio (el arnés
+se niega a trabajar bajo `/home/ximo/devel`, cada una con su directorio de
+compilación y sus copias de seguridad fuera de git), **un mutante por ejecución**,
+con la huella SHA antes, mutada y restaurada de cada una (todas coincidieron
+entre «antes» y «restaurada», con `touch` tras restaurar). La pasada final sobre
+el árbol de la ronda 2 fue de **746 ejecuciones** (la de la ronda 1 había sido de 752): cada motivo de los 187 rechazos,
+cada guarda entera, cada mitad de cada disyunción o conjunción (también las
+anidadas), cada operador de comparación y cada literal entero de las condiciones
+(247 + 296 mutantes generados) y 186 escritos a mano para las **derivaciones**
+que alimentan guardas (ancla de la inserción y su `.rev()`, `min`/`max` del
+intervalo de una deleción, reparto de cambios al partir un fragmento, límites de
+`<`/`<=` en la búsqueda del fragmento, filtros de copias por referencia,
+individuo y secuencia, tolerancia del número de unidades, cada letra de los
+alfabetos, `contained`, `overlaps`, `deletion_covers_snp`, `sort_key`). Resultado:
+**595 mueren** (588 con las pruebas de integración, 7 con las en línea), **29 no
+compilan** (se reescribieron conservando el efecto lateral, como en la ronda 1) y
+**122 sobreviven**; tras añadir una prueba (tracto al final de su fragmento) mueren
+dos más y quedan **120**, demostrados:
+  - 54 son mutantes de los sitios inalcanzables de arriba.
+  - 10 los mueren con la **batería entera** y no con estas pruebas (la rama de la
+    matriz de `validate_individual_case_set`: población de las copias, alelos
+    exactos de un caso SNP y de repetición, identificador del caso, filtros por
+    secuencia de `expected_snp_alleles` y `expected_repeat_alleles`; las
+    ejercita `tests/published_resource_validation.rs` y las pruebas de
+    `execution`), y 1 con la prueba en línea que faltaba en la lista del arnés.
+  - 55 son **equivalentes**, con su motivo anotado junto al código: solo
+    `summaries.contains_key` y `seen_genotypes.insert` del orden del lector por
+    flujo (`previous >= identidad` y `previous >= clave` **no** lo son: anular
+    cada una sola muere por `two_copies_in_decreasing_order_are_out_of_order` y
+    `two_genotypes_in_decreasing_order_are_out_of_order`); `population_id.is_empty()`
+    y `variant_id.is_empty()` de la procedencia (los caza antes `valid_id`) y
+    `historical_position == position` de la réplica inicial (lo caza antes
+    `validate_structural_event_ids`); las tres igualdades de
+    `segment_snp_matches_history` y la clase y el tipo del evento, que repiten
+    el filtro de la réplica o la guarda previa con el **mismo error**;
+    `*point == 0` y `start >= end` de la réplica (el siguiente rechazo da el
+    mismo error); `<` frente a `<=` en `split_replay_at`, porque la frontera se
+    ve desde los dos lados; `start >= end` de `validated_source`; el
+    `motif_length == 0` de los bloques; `source_start >= 1`/`source_end >= 2`
+    en el alelo de deleción; las bases vacías de `InvalidInsertion` y el
+    `start >= end` de `InvalidDeletion` (el paso léxico y `contained` los
+    rechazan antes); y las comparaciones de `overlaps`, `contained`, `sort_key` y
+    la etiqueta de deleción de un punto que ninguna pareja ordenada distingue.
+    Los dos que la revisión dio por equivalentes sin serlo
+    (`other.start < self.start` y `other.start <= self.end` de `overlaps`)
+    **mueren** con dos filas aceptadas nuevas (inserción estrictamente antes de
+    una deleción, y deleción seguida de una inserción tras su final). La comparación `>` frente
+    a `>=` de la tolerancia del número de unidades es equivalente **en la
+    práctica** (no hay entrada de coma flotante en la que la diferencia sea
+    exactamente la tolerancia).
+
+**Lecciones aplicadas.** Una primera encuesta con un solo `chr1` dejó vivas las
+mitades de `identity.sequence_id` de los tres filtros de copias: **se añadió una
+segunda secuencia** al escenario. Otra, con tractos simples, dejó sin probar el
+reparto de bloques: se añadió el tracto compuesto. Los mutantes de `.rev()`
+del ancla, `min`/`max` del intervalo y el reparto de cambios al partir
+exigieron **eventos directos nuevos** en el escenario (inserción tras otra
+inserción, deleción que cruza una inserción, deleción solo de bases
+insertadas, cambio de base justo en la frontera de una inserción). Cuatro
+documentos armados a mano pasaban por la guarda y por el mutante con el mismo
+error (el fragmento vigente que armé no era el que resultaba): se corrigieron
+hasta que el mutante daba **otro** error. Y la comparación de ese día con los
+supervivientes de la batería entera evitó dar por sin cubrir 10 guardas que
+cubren pruebas de otros módulos.
+
+Tras la pasada final se amplió una prueba (`an_inherited_base_change_covered_by_a_segment_deletion_does_not_replay`,
+con el orden inverso): solo añade una aserción, así que no puede restar
+discriminación.
+
+
+**Tanda 6, primera parte (10/10/2026): 120 sin disparar menos (de 618 a 498) en
+`src/results.rs`, con microsatélites, tartamudeo y PCR; ninguna guarda borrada,
+las comprobaciones siguen en 779.** `results.rs` es el juez de los recursos
+publicados, de la configuración efectiva y del manifiesto general; es el
+módulo con más guardas sin disparar y se cubre por temas en varias tandas. Esta
+toca diez funciones y sus ayudantes privados exclusivos: 130 guardas sin
+disparar al empezar (113 en las diez funciones y 17 en los ayudantes); quedan
+**12**, todas anotadas junto a la guarda como inalcanzables, con su porqué.
+
+| Función | Sin disparar antes | Hoy |
+|---|---|---|
+| `validate_repeat_loci_section` (sección de loci del manifiesto) | 17 | 4 |
+| `validate_published_slippage_fans` | 7 | 2 |
+| `published_ancestral_tract` | 13 | 2 |
+| `compare_published_fan_against_oracle` | 6 | 0 |
+| `validate_repeat_slippage` (bloque del generador) | 7 | 0 |
+| `validate_repeat_allele` | 21 | 1 |
+| `validate_effective_stutter` | 8 | 0 |
+| `validate_effective_tract_length_dependence` | 11 | 0 |
+| `validate_effective_clonal_stutter` | 12 | 0 |
+| `validate_effective_pcr` | 11 | 0 |
+| ayudantes: `recompute_slippage_fan`, `validate_repeat_tract_output`, `validate_repeat_admission`, `repeat_motif_list`, `repeat_u64_list` | 17 | 3 |
+| **Total del alcance** | **130** | **12** |
+
+(La tabla cuenta guardas con la numeración de la medición del 10/10/2026; las 618
+y 498 son las de la puerta sobre todo el módulo.)
+
+- *Cubiertas con prueba y motivo exacto (118).* `tests/results_repeat_guards.rs`
+  (24 pruebas) parte de paquetes **publicados de verdad** por el programa y los
+  altera en un solo punto: `mixed` (un locus declarado con un alelo interrumpido
+  y otro puro, y uno generado por deslizamiento), `edges` (cuatro loci generados
+  cuyos linajes llegan a los bordes: tirada agotada, tope, expansión que ya no
+  cabe y un tracto interrumpido), `inserting` (inserción de un tracto en la
+  referencia y un locus generado sobre la final), la ploidía 4, y el escenario
+  amplificado con microsatélites (tartamudeo de base y clonal, con y sin
+  multiplicador de los homopolímeros) y sin ellos. El lector del manifiesto
+  juzga la sección de loci (`validate_general_manifest_bytes`); el juez completo
+  (`validate_published_resources`), el abanico; y la estructura de las
+  secciones efectivas, `validate_effective_config_against_manifest_bytes` con la
+  efectiva alterada y el manifiesto intacto (corre antes de todo lo que ata la
+  efectiva al TOML). Cada tabla lleva control positivo, comprueba que **la
+  alteración alteró** y fija el lado aceptado de los límites (inicio uno, final
+  igual al inicio, extremos cerrados de pureza y sesgo, cuatro clases de
+  eficiencia, tres nudos, mínimo de ciclos de 32 bits justo) y de las listas
+  cerradas; las frecuencias y las fracciones se comparan al bit con el decimal
+  siguiente, y un cero negativo se rechaza donde la frecuencia realizada es
+  cero. Ayudantes compartidos con casos por llamante (`validate_repeat_admission`,
+  dos; `repeat_motif_list` y `repeat_u64_list`, locus y alelo).
+- *Inalcanzables (12).* Ningún paquete publicado y manipulado llega a ellas:
+  - *Sombreadas por una comprobación anterior (5):* los `ok_or_else` de los
+    mínimos de omisión, de la contabilidad de tracto, de los mínimos del locus y
+    de la frecuencia realizada del alelo (el cierre exige las claves exactas, de
+    modo que ninguna falta), y el origen del alelo (lo exige antes
+    `validate_repeat_allele`). Intento ejecutado:
+    `unreachable_guards_are_shadowed_by_other_checks`.
+  - *Sombreada por la lectura de la referencia (1):* el identificador de la
+    referencia (lo exigen `read_physical_reference` y `judge_inserted_reference`).
+    Intento ejecutado: `unreachable_fan_guards_are_shadowed_by_other_checks`.
+    **Las bases no materializadas sí se alcanzan** (corrección de la revisión
+    adversarial): con un paquete rehecho entero sin poblaciones ni matriz (copia
+    del TOML, su huella y el identificador de ejecución, efectiva, manifiesto, dos
+    roles y dos artefactos) el juez completo rechaza con ese motivo exacto; lo
+    cubre `a_package_forged_without_populations_reaches_the_unmaterialized_reference`
+    y su mutante muere.
+  - *Conversiones de ancho (2):* `u64` a `usize`, iguales en x86_64.
+  - *Imposibles en la práctica (4):* el recuento de Poisson fallido (la media está
+    acotada a [0, 1000] y el error exige 2^64 iteraciones o un sorteo a menos de
+    2^-52 del extremo, sobre una semilla atada al TOML), el desborde de la suma de
+    pasos y el paso de tracto fallido (el filtro de viabilidad exige una tirada de
+    al menos dos unidades); y, además, la derivación de la subsemilla, que solo falla con
+    un identificador de locus de más de 4 GiB (**no es imposible en lógica**, no
+    cabe en una prueba).
+- *Mitades equivalentes demostradas.* Los dos atajos de sesgo 1 y sesgo 0 de
+  `recompute_slippage_fan` (`f4_bernoulli` ya devuelve sin consumir azar con
+  probabilidad 1 o 0: quitar cada uno, o los dos, da el mismo recorrido; anotados
+  junto al código y conservados). Las seis mitades `!x.is_finite()` de los
+  decimales del generador, de los mínimos, del alelo y del recuento de copias por
+  bloque: con `serde_json` y `arbitrary_precision`, `as_f64` devuelve `None` para
+  un número que no cabe en un `f64` finito, así que un decimal no finito no llega
+  a la comprobación; lo que rechaza `1e999` es la lectura, y tiene caso en cada
+  sitio. Además: la rama nula de `reference_tract_bases` (`null` da `None` con
+  `as_u64`), `>` frente a `>=` de la tolerancia de las copias por bloque (no hay
+  decimal de entrada con diferencia exactamente igual a la tolerancia) y
+  `stopped = true` del recorrido (el filtro de viabilidad es idempotente sobre un
+  estado que no cambia).
+- *Pendientes: ninguno.* Ninguna guarda exigía cambiar código de producción (solo
+  comentarios).
+
+**Defecto encontrado: DT-051** (media; sin arreglar en esta tanda, cerrada el
+10/10/2026 en un cambio propio). Al preguntarse qué cambiaría
+alguien para que el juez completo aceptara un manifiesto falso, se ejecutó y el
+juez **acepta** alterar la sección de loci del manifiesto (secuencias, frecuencias,
+pureza, unidades, intervalos, topes, mínimos, procedencia de la referencia,
+parámetros del generador) y, en la efectiva, los loci declarados y los campos de los
+generados que su juez no lee. Ver DT-051.
+
+**Verificación por mutación.** Sobre cuatro copias fuera del repositorio (el arnés
+se niega a trabajar bajo `/home/ximo/devel`, cada una con su directorio de
+compilación y sus copias de seguridad fuera de git), **un mutante por ejecución**,
+con la huella SHA antes (`1ffd7ba82c…`), mutada y restaurada de cada una (todas
+coincidieron entre «antes» y «restaurada», con `touch` tras restaurar y comprobación
+final contra el árbol real). La pasada final fue de **623 ejecuciones** sobre el árbol
+final: el motivo de cada rechazo, cada guarda entera, cada mitad de cada
+disyunción o conjunción (también las anidadas), cada operador de comparación y cada
+literal entero de las condiciones, los cierres `filter`/`is_some_and`/`is_none_or`
+y 184 mutantes a mano de derivaciones y límites (catálogo derivado de la presencia
+del tartamudeo clonal, iteraciones de la inversión, longitud de la tabla de factores,
+suelo de la tolerancia, aritmética comprobada frente a la que da la vuelta,
+viabilidad del paso, sentido del sesgo, orden canónico de los alelos, ploidía de los
+linajes, identificador de la referencia final). Resultado: **588 mueren**, **8 no
+compilan** (se reescribieron a mano conservando el efecto y mueren) y **27
+sobreviven**, todos demostrados: 12 son los rechazos de los sitios inalcanzables, 6
+las mitades `is_finite`, 5 mutan texto de un comentario que quedó dentro de la
+condición, y 4 equivalentes (`>=` de la tolerancia, la rama nula, `stopped = true` y
+una mutación mía que era la identidad). La primera pasada (606 mutantes) dejó 74
+vivos; la mayoría eran guardas que solo cubrían pruebas de otros ficheros, o a las
+que les faltaba un lado del límite, y se añadieron casos (linajes distintos de
+las copias, tope de media por los dos lados, inicio uno, lista de loci vacía,
+procedencia de la referencia, listas de bloque más largas y más cortas que el
+recuento, bases de bloque por encima y por debajo, tolerancia con suelo uno,
+marcas de tosquedad que no son booleanos, fracción y `m` negativas con fracción
+cero) y los tres escenarios que alcanzan los bordes del recorrido, la inserción y la
+ploidía 4.
+
+**Ronda 2 (revisión adversarial).** Se corrigió la inalcanzable de las bases no
+materializadas (ver arriba) y se anotaron los dos atajos de sesgo como
+equivalentes. Cinco mutantes sobre el árbol corregido, huella `e3e9182a69…` antes y
+restaurada: el motivo de las bases no materializadas y su guarda neutralizada
+**mueren** con la prueba nueva; los tres de los atajos de sesgo (los dos, solo el
+de 1, solo el de 0) **sobreviven**, equivalentes. La revisión confirmó además que
+los cinco supervivientes «de comentario» eran ruido del generador (repetían las
+mitades reales de la condición, que mueren).
+
+**Tanda 7, segunda parte de `results.rs` (11/10/2026): 104 sin disparar menos (de
+497 a 393) y 97 de ellas en la configuración efectiva; ninguna guarda borrada, las
+comprobaciones siguen en 787.** Las otras 7 son guardas de ayudantes compartidos y
+del lector del manifiesto que alcanzan los intentos de llegar a las inalcanzables.
+`results.rs` es el juez de los recursos publicados,
+de la configuración efectiva y del manifiesto general. Esta tanda toca diez funciones
+de la configuración efectiva y sus ayudantes privados exclusivos: 161 guardas sin
+disparar al empezar (123 en código vivo y 38 en las dos funciones de la versión 1, que
+eran **código muerto**, ver abajo); quedan **26 de las 123 vivas**, todas anotadas
+junto a la guarda como inalcanzables con su porqué real. Las de la versión 1 desaparecen
+con el código (borrado el 11/10/2026).
+
+| Función | Sin disparar antes | Hoy |
+|---|---|---|
+| `validate_effective_config_v3_against_manifest_bytes` (la efectiva frente al manifiesto) | 15 | 7 |
+| `validate_effective_technical_event_link` (enlace del evento técnico) | 7 | 3 |
+| `validate_effective_targets_against_configuration` (la efectiva atada al TOML copiado) | 21 | 11 |
+| `validate_effective_initial_populations` | 10 | 0 |
+| `validate_effective_direct_events` | 9 | 0 |
+| `validate_effective_technical_event` (sin amplificación) | 25 | 1 |
+| `validate_effective_reference` | 19 | 2 |
+| `validate_effective_derived_sequences` | 9 | 2 |
+| ayudantes: `validate_effective_reduction`, `validate_reversible_text` | 8 | 0 |
+| **Total vivo** | **123** | **26** |
+| `validate_effective_config_v1_against_manifest_bytes`, `validate_effective_targets_against_configuration_v1` (**código muerto, borrado**) | 38 | — |
+
+- *Las dos funciones de la versión 1 son código muerto.* Las dos llevan
+  `#[allow(dead_code)]` y **ninguna ruta de producción ni de prueba las llama**:
+  `validate_effective_targets_against_configuration_v1` solo la llama
+  `validate_published_resources_v1`, que tampoco tiene llamantes, y
+  `validate_effective_config_v1_against_manifest_bytes` no tiene ninguno (el único lector de
+  una efectiva es `validate_effective_config_against_manifest_bytes`, que solo admite las versiones 4 y 6).
+  Lo mismo vale para `validate_published_resources_v1` (21 guardas) y
+  `parse_general_manifest_v1_object` (7), fuera del alcance de esta tanda. **No se
+  probaron ni se borraron**: decide el responsable si se borran o se anotan. Las 38
+  guardas siguen contando en la cifra de la puerta mientras existan.
+- *Cubiertas con prueba y motivo exacto (97).* `tests/results_effective_guards.rs`
+  (13 pruebas) parte de paquetes **publicados de verdad** por el programa y altera la
+  efectiva, o el manifiesto, **en un solo punto**, con el motivo exacto del rechazo: una
+  referencia suministrada con dos secuencias, una reducción, dos cohortes (una con
+  `founder_keys` y endogamia), tres eventos directos, un evento técnico con
+  contaminación biológica y VCF de texto (ploidía global 3 y tolerancia propia, para
+  que los valores esperados no coincidan con los de por defecto); una referencia simulada
+  con composición y bases desconocidas, con y sin semilla declarada; y una referencia final
+  por inserción. El juez de la efectiva frente al manifiesto
+  (`validate_effective_config_against_manifest_bytes`) recibe los dos documentos
+  alterados; el juez completo, además, lee el TOML copiado. Cada tabla lleva
+  control positivo, comprueba que **la alteración alteró** y fija el lado aceptado de
+  los límites (ploidía 10, fase 9, longitud de lectura 1 y 150, contaminación de 0 a 0
+  y de 100 a 100, tasas 0 y 1, cobertura 0, endogamia 0 y 1, composición con extremos
+  cerrados, bases desconocidas iguales a la longitud) y de las listas cerradas. Varias
+  guardas **solo se alcanzan con un manifiesto válido distinto**, que las pruebas
+  construyen: sin eventos, con la lista de eventos vacía, con dos eventos, de una
+  ejecución fallida con el evento fallido, de una fallida sin enlace a la efectiva,
+  sin la reducción, sin el VCF y con una reducción que reutiliza el identificador de la
+  referencia (el rol de cada FASTA se reajusta para que el lector del manifiesto la
+  acepte). Las del TOML copiado se alcanzan **alterando el fichero copiado** (y
+  restaurándolo): sintaxis, campo desconocido y objetivo de reducción que no cabe, con
+  el código y el significado del catálogo de diagnósticos.
+- *Inalcanzables (26).* Ningún paquete publicado y manipulado llega a ellas.
+  - *Sombreadas por el lector del manifiesto (11):* manifiesto que no es JSON ni
+    objeto (2), versión no admitida (1), una reducción que no es objeto (1), un
+    enlace de evento que no es objeto, sin `manifest_artifact_id` o a un artefacto que no
+    es manifiesto de evento (3), y el JSON del manifiesto releído por el juez completo,
+    el `artifact_id` de la copia TOML, su ausencia en el catálogo y su `original_path` (4);
+    `parse_general_manifest_bytes` los rechaza antes, con otro texto.
+  - *Sombreadas por la lectura de la efectiva (2):* JSON ilegible y raíz que no es objeto
+    (`effective_schema_version`, la única entrada).
+  - *Sombreadas por la validación estructural de la efectiva (8):* una reducción o una
+    secuencia que no son objeto (3), la raíz de la semilla (1: la valida
+    `validate_effective_seed`), y la cabecera y la descripción ausentes (4: la lista
+    cerrada de campos exige las claves).
+  - *Sombreada por la comparación de origen (1):* el formato FASTA canónico frente
+    al origen del TOML; el origen se compara antes.
+  - *Imposibles en la práctica (4):* el resumen del TOML solo falla con más de 2^64 bytes;
+    la derivación del identificador de ejecución, sobre un registro recién creado; la
+    conversión de error de los cambios de inserción (solo corre con plan de inserción, y
+    solo falla sin él); y la del plan de identidades técnicas (colisión de identificadores
+    derivados con individuos distintos), que **no es imposible en lógica** pero sí en una
+    prueba. Intento ejecutado de las sombreadas:
+    `unreachable_effective_guards_are_shadowed_by_other_checks`.
+- *Mitades equivalentes demostradas (12 mutantes que sobreviven a la batería
+  entera).* Ninguna entrada las distingue, y se buscó una para cada una:
+  - el filtro de vacío del identificador de individuo inicial (`IndividualId::parse("")`
+    ya falla, con el mismo motivo);
+  - siete mitades `is_finite` (la endogamia, el mínimo y el máximo del rango de
+    contaminación, la tasa de quimeras, la de index hopping, la cobertura y la N de la
+    composición): con `serde_json` y `arbitrary_precision`, `as_f64` da `None` para
+    `1e999`, así que un decimal no finito no llega a la comprobación; la premisa y cada
+    sitio, con el mismo motivo, los fija `unreachable_effective_guards_are_shadowed_by_other_checks`;
+  - el techo del mínimo y el suelo del máximo del rango de contaminación (el orden
+    `mínimo <= máximo` con `0 <= mínimo` y `máximo <= 100` ya los implica);
+  - la mitad de pertenencia del individuo en la comprobación de la biblioteca (el plan
+    de identidades solo trae las de los individuos del evento, y un ajeno se rechaza
+    antes con «library técnica no derivable»; anotada junto a la guarda);
+  - `!sum.is_finite()` de la suma de la composición (las cuatro frecuencias ya están en
+    [0, 1]; anotada junto a la guarda).
+  La batería entera la corrieron los doce de uno en uno sobre copias; uno
+  (`re-n-finite`) «murió» en una ejecución con tres baterías simultáneas por una
+  prueba ajena (`current_schemas_close_copy_and_genotype_records_to_unknown_properties`)
+  que **no falla** al repetirla sola ni con el mutante aplicado: las tres copias
+  compartían ficheros temporales. Repetido solo, sobrevive.
+- *Pendientes: ninguno.* Ninguna guarda exigía cambiar código de producción (solo
+  comentarios).
+
+**Verificación por mutación.** Sobre tres copias fuera del repositorio (el arnés se
+niega a trabajar bajo `/home/ximo/devel`, cada copia con su directorio de compilación y
+su copia de seguridad fuera de git), **un mutante por ejecución**, con la huella SHA antes
+(`72b840deb3…`), mutada y restaurada de cada uno (coincidieron todas entre «antes» y
+«restaurada», con `touch` tras restaurar y comprobación final de que las copias son
+idénticas al árbol real). La pasada final fue de **308 ejecuciones** sobre el árbol final: el
+motivo de cada rechazo, cada guarda entera, cada mitad de cada disyunción (también la
+mitad anulada con `false`), cada operador de comparación y cada extremo cerrado o abierto de
+los rangos, cada letra de las listas cerradas (las bases en minúscula, una por una),
+y derivaciones (la ploidía global esperada, el origen de la semilla, la tolerancia
+comparada por bits, la suma desbordada de longitudes) más 32 motivos de guardas que ya
+disparaban otras pruebas. Resultado: **294 mueren**, **2 no compilan** (se reescribieron
+y mueren) y **12 sobreviven**, todos equivalentes demostrados (arriba). La primera pasada
+dejó 19 vivos: 12 equivalentes y 7 que **no lo eran** (los lados que sobran: más
+`founder_keys`, más bibliotecas, más secuencias y más reducciones que el TOML; la semilla del
+sistema frente a la declarada; y cada base en minúscula por separado en la inserción y
+en la UDI), que se cubrieron con casos nuevos. Una segunda pasada con los dos mutantes
+que no compilaban, reescritos, dejó uno más vivo: las bibliotecas del mismo individuo,
+cuyo rechazo se escondía tras el `library_id`; se añadió el caso con todo lo demás
+correcto. **Veinticuatro de las 32 guardas que ya disparaban otras pruebas tenían un
+motivo que ninguna prueba del fichero nuevo afirmaba**, y las tres primeras que se
+midieron contra la batería entera sobrevivieron: tampoco lo afirmaba ninguna otra. Se
+fijaron con `the_guards_other_tests_only_triggered_have_their_exact_motive` y las 32
+mueren.
+
+**Ronda 2 (revisión adversarial).** Se corrigieron dos huecos. (1) La mitad de la
+**raíz de la semilla** en la comparación con el TOML **no es equivalente** (la pasada de
+arriba la daba por tal): si el TOML declara la semilla, la reconstrucción usa la del TOML,
+y el `execution_id` se puede rehacer (`derive_execution_id` y `configuration_digest` son
+públicas). Con la raíz cambiada y el identificador rehecho, solo esa mitad rechaza («la
+semilla efectiva no coincide con la declaración TOML»), y es la única defensa: con ella
+anulada la batería entera sobrevivía y una falsificación completa se aceptaba. Caso nuevo
+en dos paquetes (referencia simulada y referencia final por inserción) y comentario
+corregido. (2) La mitad `id_catalog` de «catálogo técnico F4 inválido» no la probaba nadie;
+caso nuevo (`id_catalog.version = "99"`). Resultado de los dos mutantes (mitad anulada), uno
+por ejecución contra la batería entera sobre una copia: **los dos mueren** (huella `10aff0c2a0…` antes y restaurada; mutadas `daf09fd8af…` y `20dd5ec62d…`; los mata `the_effective_config_must_be_the_one_the_toml_resolves` y `the_technical_event_is_judged`). La puerta queda en 721 comprobaciones y 327 sin disparar tras borrar la versión 1. Los equivalentes siguen
+siendo 12: los 11 de arriba y `!sum.is_finite()`.
+
+**Alcance de «0 pendientes» en esta tanda.** Se refiere a las guardas del alcance que
+cuenta la puerta. DT-040 (catálogo de azar con
+tartamudeo clonal), DT-041 (esquema del manifiesto sin perfil con PCR), DT-043, DT-046
+y DT-053 no se tocan y ninguna prueba nueva choca con ellas: el evento técnico que se
+prueba es el sin amplificación y sin tartamudeo, con el catálogo v3.
 
 ---
 

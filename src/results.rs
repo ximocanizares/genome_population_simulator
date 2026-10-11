@@ -1861,11 +1861,18 @@ fn validate_effective_config_v3_against_manifest_bytes(
     manifest_bytes: &[u8],
 ) -> Result<(), Diagnostic> {
     let artifacts = parse_general_manifest_bytes(manifest_path, manifest_bytes)?;
+    // Inalcanzables, las dos del manifiesto (JSON no legible y raíz que no es objeto): la primera línea de esta
+    // función, `parse_general_manifest_bytes`, ya leyó los mismos bytes como JSON y exigió un objeto raíz,
+    // de modo que este segundo parseo no puede fallar.
+    // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
     let manifest: Value = serde_json::from_slice(manifest_bytes)
         .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
     let manifest = manifest
         .as_object()
         .ok_or_else(|| manifest_error(manifest_path, "la raíz no es un objeto"))?;
+    // Inalcanzable: `parse_general_manifest_bytes` (primera línea de esta función) rechaza antes cualquier
+    // versión que `is_supported_general_manifest_version` no admite; es la misma función.
+    // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
     if !is_supported_general_manifest_version(
         manifest.get("schema_version").and_then(Value::as_str),
     ) {
@@ -1892,6 +1899,10 @@ fn validate_effective_config_v3_against_manifest_bytes(
         manifest_path,
     )?;
 
+    // Inalcanzables, las dos de la efectiva (JSON no legible y raíz que no es objeto): esta función solo la
+    // llama `validate_effective_config_against_manifest_bytes`, que antes lee la versión con
+    // `effective_schema_version`, y esta ya parsea los mismos bytes y exige un objeto raíz.
+    // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
     let document: Value = serde_json::from_slice(effective_bytes)
         .map_err(|error| effective_error(effective_path, format!("JSON no legible: {error}")))?;
     let object = document
@@ -2051,6 +2062,9 @@ fn validate_effective_config_v3_against_manifest_bytes(
     let manifest_reductions = required_array(manifest, "reference_reductions", manifest_path)?
         .iter()
         .map(|value| {
+            // Inalcanzable: el lector del manifiesto (`validate_reference_reductions`, dentro de
+            // `parse_general_manifest_bytes`) exige que cada reducción sea un objeto antes de llegar aquí.
+            // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
             let reduction = value
                 .as_object()
                 .ok_or_else(|| manifest_error(manifest_path, "una reducción no es objeto"))?;
@@ -2080,6 +2094,9 @@ fn validate_effective_config_v3_against_manifest_bytes(
                 format!("la reducción {} no existe en el manifiesto", reduction.id),
             )
         })?;
+        // Inalcanzable: `validate_effective_reduction`, que se acaba de llamar con este mismo valor, ya exige que
+        // sea un objeto.
+        // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
         let effective_reduction = value
             .as_object()
             .ok_or_else(|| effective_error(effective_path, "una reducción no es objeto"))?;
@@ -2267,6 +2284,11 @@ fn validate_effective_technical_event_link(
             "F3 exige exactamente un enlace de evento técnico",
         ));
     }
+    // Inalcanzables, esta y las dos siguientes (enlace sin `manifest_artifact_id` y manifiesto de evento no
+    // catalogado): el lector del manifiesto (`validate_manifest_events`, dentro de
+    // `parse_general_manifest_bytes`) exige que cada enlace sea un objeto cerrado, que su
+    // `manifest_artifact_id` sea texto y que ese artefacto exista con la clase `event_manifest`.
+    // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
     let link = events[0]
         .as_object()
         .ok_or_else(|| effective_error(effective_path, "enlace de evento inválido"))?;
@@ -3770,388 +3792,6 @@ fn validate_f4_coverage_against_effective(
     Ok(())
 }
 
-#[allow(dead_code)]
-fn validate_published_resources_v1(
-    root: &Path,
-    effective_path: &Path,
-    effective_bytes: &[u8],
-    manifest_path: &Path,
-    manifest_bytes: &[u8],
-) -> Result<(), Diagnostic> {
-    validate_effective_config_against_manifest_bytes(
-        effective_path,
-        effective_bytes,
-        manifest_path,
-        manifest_bytes,
-    )?;
-    let artifacts = parse_general_manifest_bytes(manifest_path, manifest_bytes)?;
-    let artifact_paths = artifacts
-        .iter()
-        .map(|artifact| (artifact.id.as_str(), artifact.path.as_str()))
-        .collect::<BTreeMap<_, _>>();
-    let effective: Value = serde_json::from_slice(effective_bytes)
-        .map_err(|error| effective_error(effective_path, format!("JSON no legible: {error}")))?;
-    let effective = effective
-        .as_object()
-        .ok_or_else(|| effective_error(effective_path, "la raíz no es objeto"))?;
-    validate_effective_targets_against_configuration_v1(
-        root,
-        effective,
-        &artifact_paths,
-        manifest_path,
-        manifest_bytes,
-        effective_path,
-    )?;
-    let root_seed = RootSeed::parse(
-        "effective-config.seed.root",
-        effective["seed"]["root"]
-            .as_str()
-            .ok_or_else(|| effective_error(effective_path, "seed.root inválida"))?,
-    )
-    .map_err(|error| physical_error(effective_path, "root_seed", &error))?;
-    let reference_value = effective_object(effective, "reference", effective_path)?;
-    let source_reference = read_physical_reference(
-        root,
-        reference_value,
-        &artifact_paths,
-        effective_path,
-        if effective_needs_reference_bases(effective) {
-            CatalogBases::Materialized
-        } else {
-            CatalogBases::SummaryOnly
-        },
-    )?;
-    if reference_value.get("source").and_then(Value::as_str) == Some("simulated") {
-        // Las versiones de este lector no conocen los microsatélites: no hay
-        // tracto que colocar.
-        validate_generated_reference(
-            reference_value,
-            root_seed,
-            &source_reference,
-            effective_path,
-            None,
-        )?;
-    }
-    let mut references =
-        BTreeMap::from([(source_reference.id().as_str().to_owned(), source_reference)]);
-
-    for reduction_value in effective_array(effective, "reduced_references", effective_path)? {
-        let reduction = reduction_value
-            .as_object()
-            .ok_or_else(|| effective_error(effective_path, "una reducción no es objeto"))?;
-        let id = effective_non_empty_text(reduction, "id", effective_path)?;
-        let source_id = effective_non_empty_text(reduction, "source_reference_id", effective_path)?;
-        let source = references.get(source_id).ok_or_else(|| {
-            effective_error(
-                effective_path,
-                format!("la referencia fuente física {source_id} no existe"),
-            )
-        })?;
-        let derived_subseed = derive_subseed(
-            root_seed,
-            RuntimeSubseedScope::ReferenceReduction {
-                source_reference_id: source_id,
-                derived_reference_id: id,
-            },
-        )
-        .map_err(|error| physical_error(effective_path, "derive_reduction_subseed", &error))?;
-        if effective_non_empty_text(reduction, "selection_subseed", effective_path)?
-            != derived_subseed.to_hex()
-        {
-            return Err(effective_error(
-                effective_path,
-                format!("selection_subseed de {id} no reproduce el ámbito canónico"),
-            ));
-        }
-        let eligible = source
-            .sequences()
-            .iter()
-            .map(|sequence| {
-                EligibleSequence::new(sequence.id().clone(), sequence.class(), sequence.length())
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| {
-                effective_error(
-                    effective_path,
-                    format!("catálogo elegible inválido: {error:?}"),
-                )
-            })?;
-        let target_bases = effective_positive_u64(
-            effective_object(reduction, "target", effective_path)?,
-            "bases",
-            effective_path,
-        )?;
-        let region_size_bases =
-            effective_positive_u64(reduction, "region_size_bases", effective_path)?;
-        let mut rng = derived_subseed.local_rng();
-        let selection = select_reduced_reference(
-            source.id(),
-            &eligible,
-            target_bases,
-            region_size_bases,
-            &mut rng,
-        )
-        .map_err(|error| {
-            effective_error(
-                effective_path,
-                format!("selección física no reproducible: {error:?}"),
-            )
-        })?;
-        let derived_id = ReferenceId::parse(id, "published-resource-validation")
-            .map_err(|error| physical_error(effective_path, "derived_reference_id", &error))?;
-        let plan = materialize_selection(&selection, &derived_id, &eligible).map_err(|error| {
-            effective_error(
-                effective_path,
-                format!("plan físico no materializable: {error:?}"),
-            )
-        })?;
-        let declared_order = effective_array(reduction, "selection_order", effective_path)?
-            .iter()
-            .map(Value::as_u64)
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| effective_error(effective_path, "selection_order inválido"))?;
-        let expected_order = plan
-            .segments()
-            .iter()
-            .map(|segment| segment.selection_order())
-            .collect::<Vec<_>>();
-        if declared_order != expected_order {
-            return Err(effective_error(
-                effective_path,
-                format!("selection_order de {id} no coincide con la subsemilla"),
-            ));
-        }
-        let expected_derived = build_reduced_reference(
-            source_for(source, None)
-                .map_err(|error| physical_error(effective_path, "reduction_source", &error))?
-                .as_ref(),
-            &plan,
-        )
-        .map_err(|error| physical_error(effective_path, "build_reduced_reference", &error))?;
-        let fasta_id = effective_non_empty_text(reduction, "fasta_artifact_id", effective_path)?;
-        let derived = read_reference_with_expected(
-            root,
-            id,
-            fasta_id,
-            effective_array(reduction, "sequences", effective_path)?,
-            expected_derived.sequences(),
-            &artifact_paths,
-            effective_path,
-        )?;
-        compare_reference_bases(&expected_derived, &derived, effective_path, id)?;
-        let map_id = effective_non_empty_text(reduction, "map_artifact_id", effective_path)?;
-        let map_relative = artifact_paths.get(map_id).ok_or_else(|| {
-            effective_error(effective_path, format!("mapa físico ausente: {map_id}"))
-        })?;
-        let map_path = root.join(map_relative);
-        let map_bytes = std::fs::read(&map_path)
-            .map_err(|error| io_error(&map_path, "read_reduction_map", error))?;
-        let map: Value = serde_json::from_slice(&map_bytes).map_err(|error| {
-            effective_error(
-                effective_path,
-                format!("mapa {map_id} no es JSON legible: {error}"),
-            )
-        })?;
-        if map != reduction_map_document(&plan) {
-            return Err(effective_error(
-                effective_path,
-                format!("mapa físico {map_id} no coincide con subsemilla y selección"),
-            ));
-        }
-        validate_reduction_map_document(
-            source_for(source, None)
-                .map_err(|error| physical_error(effective_path, "reduction_source", &error))?
-                .as_ref(),
-            &derived,
-            &map,
-            ReductionMapParameters {
-                region_size_bases,
-                target_bases,
-            },
-        )
-        .map_err(|error| physical_error(effective_path, "validate_reduction_map", &error))?;
-        references.insert(id.to_owned(), derived);
-    }
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn validate_effective_targets_against_configuration_v1(
-    root: &Path,
-    effective: &serde_json::Map<String, Value>,
-    artifact_paths: &BTreeMap<&str, &str>,
-    manifest_path: &Path,
-    manifest_bytes: &[u8],
-    effective_path: &Path,
-) -> Result<(), Diagnostic> {
-    let manifest: Value = serde_json::from_slice(manifest_bytes)
-        .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
-    let configuration_id = manifest["configuration_input"]["artifact_id"]
-        .as_str()
-        .ok_or_else(|| effective_error(effective_path, "configuration_input no enlaza TOML"))?;
-    let relative = artifact_paths.get(configuration_id).ok_or_else(|| {
-        effective_error(
-            effective_path,
-            format!("TOML físico ausente: {configuration_id}"),
-        )
-    })?;
-    let configuration_path = root.join(relative);
-    let bytes = std::fs::read(&configuration_path)
-        .map_err(|error| io_error(&configuration_path, "read_configuration", error))?;
-    let digest = configuration_digest(&bytes)
-        .map_err(|error| physical_error(effective_path, "configuration_digest", &error))?;
-    let original_configuration_path = manifest["configuration_input"]["original_path"]
-        .as_str()
-        .ok_or_else(|| effective_error(effective_path, "configuration_input sin procedencia"))?;
-    let admitted = admit_toml_header(
-        Path::new(original_configuration_path),
-        bytes,
-        ExpectedConfigKind::General,
-    )
-    .map_err(|error| physical_error(effective_path, "admit_configuration", &error))?;
-    let declared = parse_declared_config(admitted)
-        .map_err(|error| physical_error(effective_path, "parse_configuration", &error))?;
-    let seed = effective_object(effective, "seed", effective_path)?;
-    let root_seed = RootSeed::parse(
-        "effective-config.seed.root",
-        effective_non_empty_text(seed, "root", effective_path)?,
-    )
-    .map_err(|error| physical_error(effective_path, "root_seed", &error))?;
-    let mut entropy = ReplayEntropy(root_seed);
-    let expected = build_effective_config_with_entropy(&declared, &mut entropy)
-        .map_err(|error| physical_error(effective_path, "rebuild_effective_config", &error))?;
-    let expected_execution = derive_execution_id(root_seed, &digest)
-        .map_err(|error| physical_error(effective_path, "derive_execution_id", &error))?;
-    if manifest.get("execution_id").and_then(Value::as_str) != Some(expected_execution.as_str()) {
-        return Err(effective_error(
-            effective_path,
-            "execution_id no coincide con la semilla y los bytes TOML",
-        ));
-    }
-
-    if seed.get("root").and_then(Value::as_str)
-        != Some(expected.reproducibility().root_seed().to_hex().as_str())
-        || seed.get("origin").and_then(Value::as_str)
-            != Some(expected.reproducibility().seed_origin().as_str())
-    {
-        return Err(effective_error(
-            effective_path,
-            "la semilla efectiva no coincide con la declaración TOML",
-        ));
-    }
-
-    let reference = effective_object(effective, "reference", effective_path)?;
-    let expected_source = match expected.reference_source() {
-        EffectiveReferenceSource::Simulated => "simulated",
-        EffectiveReferenceSource::Supplied { .. } => "supplied",
-    };
-    if effective_non_empty_text(reference, "id", effective_path)? != expected.reference_id()
-        || reference.get("source").and_then(Value::as_str) != Some(expected_source)
-        || reference.get("total_genome_size").and_then(Value::as_u64)
-            != Some(expected.total_genome_size())
-    {
-        return Err(effective_error(
-            effective_path,
-            "la referencia efectiva no coincide con la declaración TOML",
-        ));
-    }
-    let expected_original_path = match expected.reference_source() {
-        EffectiveReferenceSource::Simulated => Value::Null,
-        EffectiveReferenceSource::Supplied { original_path } => {
-            Value::String(original_path.to_string_lossy().into_owned())
-        }
-    };
-    if reference.get("original_fasta_path") != Some(&expected_original_path) {
-        return Err(effective_error(
-            effective_path,
-            "la procedencia FASTA efectiva no coincide con la declaración TOML",
-        ));
-    }
-    let expected_canonical_format = match expected.reference_source() {
-        EffectiveReferenceSource::Simulated => canonical_fasta_json(),
-        EffectiveReferenceSource::Supplied { .. } => Value::Null,
-    };
-    if reference.get("canonical_format") != Some(&expected_canonical_format) {
-        return Err(effective_error(
-            effective_path,
-            "el formato FASTA efectivo no corresponde al origen declarado",
-        ));
-    }
-
-    let expected_composition = expected.composition().map(|composition| {
-        let values = composition.values();
-        json!({"A": values[0], "C": values[1], "G": values[2], "T": values[3]})
-    });
-    if reference.get("composition") != Some(&expected_composition.unwrap_or(Value::Null)) {
-        return Err(effective_error(
-            effective_path,
-            "la composición efectiva no coincide con la declaración TOML",
-        ));
-    }
-
-    let effective_sequences = effective_array(reference, "sequences", effective_path)?;
-    if effective_sequences.len() != expected.sequences().len() {
-        return Err(effective_error(
-            effective_path,
-            "el número de secuencias efectivo no coincide con el TOML",
-        ));
-    }
-    for (observed, expected) in effective_sequences.iter().zip(expected.sequences()) {
-        let observed = observed
-            .as_object()
-            .ok_or_else(|| effective_error(effective_path, "una secuencia no es objeto"))?;
-        if effective_non_empty_text(observed, "id", effective_path)? != expected.id()
-            || observed.get("class").and_then(Value::as_str)
-                != Some(sequence_class(expected.class()))
-            || observed.get("length").and_then(Value::as_u64) != Some(expected.length())
-        {
-            return Err(effective_error(
-                effective_path,
-                "orden, ID, clase o longitud de secuencia no coincide con el TOML",
-            ));
-        }
-    }
-
-    let effective_reductions = effective_array(effective, "reduced_references", effective_path)?;
-    if effective_reductions.len() != expected.reduced_references().len() {
-        return Err(effective_error(
-            effective_path,
-            "las reducciones efectivas no coinciden con las declaradas en TOML",
-        ));
-    }
-    for (expected, effective) in expected
-        .reduced_references()
-        .iter()
-        .zip(effective_reductions)
-    {
-        let effective = effective
-            .as_object()
-            .ok_or_else(|| effective_error(effective_path, "una reducción no es objeto"))?;
-        let target = effective_object(effective, "target", effective_path)?;
-        let expected_declared = expected.target().declared_value();
-        if effective_non_empty_text(effective, "id", effective_path)? != expected.id()
-            || effective_non_empty_text(effective, "source_reference_id", effective_path)?
-                != expected.source_reference_id()
-            || effective.get("region_size_bases").and_then(Value::as_u64)
-                != Some(expected.region_size_bases())
-            || target.get("mode").and_then(Value::as_str) != Some(expected.target().mode())
-            || target.get("declared").and_then(Value::as_str) != Some(expected_declared.as_str())
-            || target.get("bases").and_then(Value::as_u64) != Some(expected.target_bases())
-            || effective.get("selection_subseed").and_then(Value::as_str)
-                != Some(expected.selection_subseed().to_hex().as_str())
-        {
-            return Err(effective_error(
-                effective_path,
-                format!(
-                    "la reducción efectiva {} no coincide completamente con el TOML",
-                    expected.id()
-                ),
-            ));
-        }
-    }
-    Ok(())
-}
-
 /// El objeto de la configuración efectiva que describe la referencia **de la
 /// simulación**: `inserted_reference` si la ejecución inserta tractos
 /// (DTC-098) y `reference` en los demás casos.
@@ -4967,8 +4607,15 @@ fn validate_effective_targets_against_configuration(
     manifest_bytes: &[u8],
     effective_path: &Path,
 ) -> Result<EffectiveConfig, Diagnostic> {
+    // Inalcanzable: el juez completo ya leyó este manifiesto en `validate_effective_config_against_manifest_bytes`
+    // y en `parse_general_manifest_bytes`.
+    // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
     let manifest: Value = serde_json::from_slice(manifest_bytes)
         .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
+    // Inalcanzables, esta y la del TOML físico ausente: `validate_configuration_input` (en el lector del
+    // manifiesto) exige un `artifact_id` de texto que el catálogo tenga con la clase `config_general_toml`, y
+    // `validate_effective_config_v3_against_manifest_bytes` exige que `configuration_input` sea un objeto.
+    // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
     let configuration_id = manifest["configuration_input"]["artifact_id"]
         .as_str()
         .ok_or_else(|| effective_error(effective_path, "configuration_input no enlaza TOML"))?;
@@ -4981,8 +4628,12 @@ fn validate_effective_targets_against_configuration(
     let configuration_path = root.join(relative);
     let bytes = std::fs::read(&configuration_path)
         .map_err(|error| io_error(&configuration_path, "read_configuration", error))?;
+    // Inalcanzable: `configuration_digest` solo falla si el tamaño de los bytes no cabe en un u64 (más de 2^64
+    // bytes), cosa que un fichero leído en memoria no puede cumplir.
     let digest = configuration_digest(&bytes)
         .map_err(|error| physical_error(effective_path, "configuration_digest", &error))?;
+    // Inalcanzable: `validate_configuration_input` exige un `original_path` de texto no vacío.
+    // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
     let original_configuration_path = manifest["configuration_input"]["original_path"]
         .as_str()
         .ok_or_else(|| effective_error(effective_path, "configuration_input sin procedencia"))?;
@@ -4995,6 +4646,9 @@ fn validate_effective_targets_against_configuration(
     let declared = parse_declared_config(admitted)
         .map_err(|error| physical_error(effective_path, "parse_configuration", &error))?;
     let seed = effective_object(effective, "seed", effective_path)?;
+    // Inalcanzable: `validate_effective_seed` (config v3) exige ya una raíz de 64 hexadecimales en minúscula,
+    // que es lo que `RootSeed::parse` admite.
+    // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
     let root_seed = RootSeed::parse(
         "effective-config.seed.root",
         effective_non_empty_text(seed, "root", effective_path)?,
@@ -5003,6 +4657,9 @@ fn validate_effective_targets_against_configuration(
     let mut entropy = ReplayEntropy(root_seed);
     let expected = build_effective_config_with_entropy(&declared, &mut entropy)
         .map_err(|error| physical_error(effective_path, "rebuild_effective_config", &error))?;
+    // Inalcanzable: `derive_execution_id` usa un registro de identidades recién creado, un solo identificador
+    // y un resumen de longitud fija; solo fallaría por un componente de más de 4 GiB o por una colisión en un
+    // registro vacío.
     let expected_execution = derive_execution_id(root_seed, &digest)
         .map_err(|error| physical_error(effective_path, "derive_execution_id", &error))?;
     if manifest.get("execution_id").and_then(Value::as_str) != Some(expected_execution.as_str()) {
@@ -5012,6 +4669,9 @@ fn validate_effective_targets_against_configuration(
         ));
     }
 
+    // Esta comparación de la raíz es la única defensa frente a una raíz falsificada con el
+    // `execution_id` rehecho (la derivación es pública): si el TOML declara la semilla, la
+    // reconstrucción usa la del TOML. Probada con motivo exacto.
     if seed.get("root").and_then(Value::as_str)
         != Some(expected.reproducibility().root_seed().to_hex().as_str())
         || seed.get("origin").and_then(Value::as_str)
@@ -5082,6 +4742,10 @@ fn validate_effective_targets_against_configuration(
         EffectiveReferenceSource::Simulated => canonical_fasta_json(),
         EffectiveReferenceSource::Supplied { .. } => Value::Null,
     };
+    // Inalcanzable: la comparación del origen de arriba ya rechazó cualquier efectiva cuyo origen no sea el del
+    // TOML; con el mismo origen, `validate_effective_reference` (config v3) exige el formato canónico exacto
+    // en una simulada y `null` en una suministrada, que es lo que se espera aquí.
+    // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
     if reference.get("canonical_format") != Some(&expected_canonical_format) {
         return Err(effective_error(
             effective_path,
@@ -5108,6 +4772,8 @@ fn validate_effective_targets_against_configuration(
         ));
     }
     for (observed, expected) in effective_sequences.iter().zip(expected.sequences()) {
+        // Inalcanzable: `validate_effective_reference` (config v3) exige que cada secuencia sea un objeto.
+        // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
         let observed = observed
             .as_object()
             .ok_or_else(|| effective_error(effective_path, "una secuencia no es objeto"))?;
@@ -5135,6 +4801,8 @@ fn validate_effective_targets_against_configuration(
         .iter()
         .zip(effective_reductions)
     {
+        // Inalcanzable: `validate_effective_reduction` (config v3) exige que cada reducción sea un objeto.
+        // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
         let effective = effective
             .as_object()
             .ok_or_else(|| effective_error(effective_path, "una reducción no es objeto"))?;
@@ -5246,6 +4914,8 @@ fn validate_effective_targets_against_configuration(
     // referencia final, los mismos cambios y, en cada locus, lo mismo
     // declarado. La traducción de lo declarado al genoma final la juzga por su
     // cuenta `judge_inserted_reference`, sin pasar por esta resolución.
+    // Inalcanzable la conversión de error de `insertion_changes_json`: el cierre solo corre cuando
+    // `expected.tract_insertion()` existe, y esa función solo falla si no existe.
     let expected_inserted = expected
         .tract_insertion()
         .map(|plan| {
@@ -7169,289 +6839,6 @@ fn parse_general_manifest_bytes_unretagged(
         UnitState::Incomplete => unreachable!("manifest parser never constructs incomplete"),
     }
     Ok(records)
-}
-
-/// Reads the frozen F1 manifest contract.  It deliberately does not route a
-/// v1 document through F2 requirements such as `truth.jsonl`, population-SNV
-/// metadata, authorizations, or VCF outputs.
-#[allow(dead_code)]
-fn parse_general_manifest_v1_object(
-    path: &Path,
-    object: &serde_json::Map<String, Value>,
-) -> Result<Vec<ArtifactRecord>, Diagnostic> {
-    const FIELDS: [&str; 11] = [
-        "manifest_kind",
-        "schema_version",
-        "execution_id",
-        "state",
-        "configuration_input",
-        "effective_config_artifact_id",
-        "references",
-        "reference_reductions",
-        "output_categories",
-        "artifacts",
-        "diagnostics",
-    ];
-    validate_closed_object(object, &FIELDS, "manifest.json", path)?;
-    if object.get("manifest_kind").and_then(Value::as_str) != Some("gps_execution_manifest")
-        || object.get("schema_version").and_then(Value::as_str) != Some("1")
-    {
-        return Err(manifest_error(path, "clase o versión incompatible"));
-    }
-    required_non_empty_text(object, "execution_id", path)?;
-    let state = match object.get("state").and_then(Value::as_str) {
-        Some("complete") => UnitState::Complete,
-        Some("failed") => UnitState::Failed,
-        _ => return Err(manifest_error(path, "estado de ejecución inválido")),
-    };
-
-    let values = required_array(object, "artifacts", path)?;
-    let mut ids = BTreeSet::new();
-    let mut paths = BTreeSet::new();
-    let mut records = Vec::with_capacity(values.len());
-    for value in values {
-        let record = validate_artifact(value, path)?;
-        if !ids.insert(record.id.clone()) || !paths.insert(record.path.clone()) {
-            return Err(manifest_error(path, "ID o ruta de artefacto repetidos"));
-        }
-        records.push(record);
-    }
-    let catalog = records
-        .iter()
-        .map(|record| (record.id.as_str(), record.kind.as_str()))
-        .collect::<BTreeMap<_, _>>();
-    let configuration_input = object
-        .get("configuration_input")
-        .ok_or_else(|| manifest_error(path, "falta configuration_input"))?;
-    let configuration_artifact_id = match configuration_input {
-        Value::Null => None,
-        Value::Object(value) => Some(validate_configuration_input(value, &catalog, path)?),
-        _ => return Err(manifest_error(path, "configuration_input inválido")),
-    };
-    let effective_id = optional_text(object, "effective_config_artifact_id", path)?;
-    if let Some(id) = effective_id {
-        require_artifact_kind(&catalog, id, "effective_config", path)?;
-    }
-    let references =
-        validate_references(required_array(object, "references", path)?, &catalog, path)?;
-    let reductions = validate_reference_reductions(
-        required_array(object, "reference_reductions", path)?,
-        &catalog,
-        &references,
-        path,
-    )?;
-    let mut expected_minimum = BTreeSet::new();
-    if let Some(id) = configuration_artifact_id.as_deref() {
-        expected_minimum.insert(id);
-    }
-    if let Some(id) = effective_id {
-        expected_minimum.insert(id);
-    }
-    for (reference_id, artifact_id) in &references {
-        if !reductions.derived_reference_ids.contains(reference_id) {
-            expected_minimum.insert(artifact_id.as_str());
-        }
-    }
-    validate_output_categories(
-        required_object(object, "output_categories", path)?,
-        &catalog,
-        &expected_minimum,
-        &reductions.requested_artifact_ids,
-        path,
-    )?;
-    let diagnostics = required_array(object, "diagnostics", path)?;
-    validate_diagnostics(diagnostics, "3", path)?;
-    match state {
-        UnitState::Complete
-            if configuration_input.is_null()
-                || effective_id.is_none()
-                || required_array(object, "references", path)?.is_empty()
-                || reductions
-                    .states
-                    .iter()
-                    .any(|state| *state != UnitState::Complete)
-                || !diagnostics.is_empty() =>
-        {
-            Err(manifest_error(
-                path,
-                "una ejecución complete exige entrada, configuración efectiva, referencia y ningún diagnóstico",
-            ))
-        }
-        UnitState::Failed if diagnostics.is_empty() => Err(manifest_error(
-            path,
-            "una ejecución failed exige al menos un diagnóstico",
-        )),
-        UnitState::Incomplete => unreachable!("manifest parser never constructs incomplete"),
-        _ => Ok(records),
-    }
-}
-
-#[allow(dead_code)]
-fn validate_effective_config_v1_against_manifest_bytes(
-    effective_path: &Path,
-    effective_bytes: &[u8],
-    manifest_path: &Path,
-    manifest_bytes: &[u8],
-) -> Result<(), Diagnostic> {
-    let artifacts = parse_general_manifest_bytes(manifest_path, manifest_bytes)?;
-    let manifest: Value = serde_json::from_slice(manifest_bytes)
-        .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
-    let manifest = manifest
-        .as_object()
-        .ok_or_else(|| manifest_error(manifest_path, "la raíz no es un objeto"))?;
-    if manifest.get("schema_version").and_then(Value::as_str) != Some("1") {
-        return Err(effective_error(
-            effective_path,
-            "el manifiesto no usa la misma versión de contrato que la configuración efectiva",
-        ));
-    }
-    let catalog = artifacts
-        .iter()
-        .map(|record| (record.id.as_str(), record.kind.as_str()))
-        .collect::<BTreeMap<_, _>>();
-    let effective_id = optional_text(manifest, "effective_config_artifact_id", manifest_path)?
-        .ok_or_else(|| {
-            effective_error(
-                effective_path,
-                "el manifiesto no enlaza la configuración efectiva",
-            )
-        })?;
-    require_artifact_kind(&catalog, effective_id, "effective_config", manifest_path)?;
-    let manifest_references = validate_references(
-        required_array(manifest, "references", manifest_path)?,
-        &catalog,
-        manifest_path,
-    )?;
-    let document: Value = serde_json::from_slice(effective_bytes)
-        .map_err(|error| effective_error(effective_path, format!("JSON no legible: {error}")))?;
-    let object = document
-        .as_object()
-        .ok_or_else(|| effective_error(effective_path, "la raíz no es un objeto"))?;
-    const FIELDS: [&str; 6] = [
-        "effective_config_kind",
-        "schema_version",
-        "source_path",
-        "seed",
-        "reference",
-        "reduced_references",
-    ];
-    validate_effective_closed_object(object, &FIELDS, "effective-config.json", effective_path)?;
-    if object.get("effective_config_kind").and_then(Value::as_str) != Some("gps_effective_config")
-        || object.get("schema_version").and_then(Value::as_str) != Some("1")
-    {
-        return Err(effective_error(
-            effective_path,
-            "clase o versión incompatible",
-        ));
-    }
-    let source_path = effective_non_empty_text(object, "source_path", effective_path)?;
-    let configuration_input = required_object(manifest, "configuration_input", manifest_path)?;
-    if required_non_empty_text(configuration_input, "original_path", manifest_path)? != source_path
-    {
-        return Err(effective_error(
-            effective_path,
-            "source_path no coincide con la procedencia de la copia TOML",
-        ));
-    }
-    let seed = effective_object(object, "seed", effective_path)?;
-    validate_effective_seed(seed, effective_path)?;
-    let effective_root_seed = effective_non_empty_text(seed, "root", effective_path)?;
-    let effective_reference = effective_object(object, "reference", effective_path)?;
-    let reference = validate_effective_reference(effective_reference, &catalog, effective_path)?;
-    let eligible_bases =
-        effective_positive_u64(effective_reference, "total_genome_size", effective_path)?;
-    if manifest_references.get(&reference.0).map(String::as_str) != Some(reference.1.as_str()) {
-        return Err(effective_error(
-            effective_path,
-            "la referencia efectiva no coincide con el enlace del manifiesto",
-        ));
-    }
-    let mut effective_references = BTreeMap::from([(reference.0.clone(), reference.1.clone())]);
-    let manifest_reductions = required_array(manifest, "reference_reductions", manifest_path)?
-        .iter()
-        .map(|value| {
-            let reduction = value
-                .as_object()
-                .ok_or_else(|| manifest_error(manifest_path, "una reducción no es objeto"))?;
-            let id = required_non_empty_text(reduction, "id", manifest_path)?;
-            Ok((id.to_owned(), reduction))
-        })
-        .collect::<Result<BTreeMap<_, _>, Diagnostic>>()?;
-    let effective_reductions = effective_array(object, "reduced_references", effective_path)?;
-    if effective_reductions.len() != manifest_reductions.len() {
-        return Err(effective_error(
-            effective_path,
-            "las reducciones efectivas no coinciden con el manifiesto",
-        ));
-    }
-    for value in effective_reductions {
-        let reduction = validate_effective_reduction(value, &catalog, effective_path)?;
-        let manifest_reduction = manifest_reductions.get(&reduction.id).ok_or_else(|| {
-            effective_error(
-                effective_path,
-                format!("la reducción {} no existe en el manifiesto", reduction.id),
-            )
-        })?;
-        let effective_reduction = value
-            .as_object()
-            .ok_or_else(|| effective_error(effective_path, "una reducción no es objeto"))?;
-        if manifest_reduction.get("state").and_then(Value::as_str) != Some("complete")
-            || manifest_reduction
-                .get("eligible_bases")
-                .and_then(Value::as_u64)
-                != Some(eligible_bases)
-            || manifest_reduction.get("root_seed").and_then(Value::as_str)
-                != Some(effective_root_seed)
-            || manifest_reduction
-                .get("source_reference_id")
-                .and_then(Value::as_str)
-                != Some(reduction.source_reference_id.as_str())
-            || manifest_reduction
-                .get("fasta_artifact_id")
-                .and_then(Value::as_str)
-                != Some(reduction.fasta_artifact_id.as_str())
-            || manifest_reduction
-                .get("map_artifact_id")
-                .and_then(Value::as_str)
-                != Some(reduction.map_artifact_id.as_str())
-            || manifest_reduction
-                .get("source_fasta_artifact_id")
-                .and_then(Value::as_str)
-                != Some(reduction.source_fasta_artifact_id.as_str())
-            || [
-                "region_size_bases",
-                "target",
-                "selection_subseed",
-                "selection_order",
-            ]
-            .iter()
-            .any(|field| manifest_reduction.get(*field) != effective_reduction.get(*field))
-        {
-            return Err(effective_error(
-                effective_path,
-                format!(
-                    "la reducción efectiva {} no coincide con el manifiesto",
-                    reduction.id
-                ),
-            ));
-        }
-        if effective_references
-            .insert(reduction.id.clone(), reduction.fasta_artifact_id.clone())
-            .is_some()
-        {
-            return Err(effective_error(
-                effective_path,
-                "una reducción reutiliza un ID de referencia",
-            ));
-        }
-    }
-    if effective_references != manifest_references {
-        return Err(effective_error(
-            effective_path,
-            "el conjunto de referencias del manifiesto no coincide exactamente con la configuración efectiva",
-        ));
-    }
-    Ok(())
 }
 
 fn require_truth_artifact(records: &[ArtifactRecord], path: &Path) -> Result<(), Diagnostic> {
@@ -9681,6 +9068,9 @@ fn validate_effective_technical_event(
             "effective_config",
         )
         .map_err(|_| effective_error(path, "library individual_id inválido"))?;
+        // La conversión de error del plan ("biblioteca técnica no derivable") es inalcanzable: los individuos son
+        // identificadores ya analizados, distintos y de longitud acotada; el plan solo falla por una colisión de
+        // identificadores derivados dentro de un registro recién creado.
         let expected_library = derive_technical_identity_plan(
             RootSeed::parse(
                 "root",
@@ -9711,6 +9101,9 @@ fn validate_effective_technical_event(
                         .all(|base| matches!(base, b'A' | b'C' | b'G' | b'T'))
             })
         };
+        // La primera mitad es equivalente a `false`: el plan de identidades solo trae las
+        // bibliotecas de `individuals`, así que un individuo ajeno ya se rechazó arriba con
+        // `library técnica no derivable`. Se conserva como defensa.
         if !individuals.contains(&individual_id)
             || !library_individuals.insert(individual_id.clone())
             || effective_non_empty_text(library, "library_id", path)? != expected_library
@@ -10441,6 +9834,7 @@ fn validate_effective_reference(
                 .iter()
                 .map(|base| composition[*base].as_f64().expect("validated frequency"))
                 .sum::<f64>();
+            // `!sum.is_finite()` es equivalente a `false`: las cuatro frecuencias ya están en [0, 1].
             if !sum.is_finite() || (sum - 1.0).abs() > COMPOSITION_TOLERANCE {
                 return Err(effective_error(
                     path,
@@ -10534,6 +9928,9 @@ fn validate_effective_reference(
         if unknown > length {
             return Err(effective_error(path, "unknown_base_count excede length"));
         }
+        // Inalcanzable (`header` ausente): la lista cerrada de `validate_effective_closed_object`, unas líneas más
+        // arriba, exige exactamente estos siete campos por número y por nombre, así que la clave existe siempre.
+        // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
         validate_reversible_text(
             sequence
                 .get("header")
@@ -10546,6 +9943,8 @@ fn validate_effective_reference(
             Some(value) => {
                 validate_reversible_text(value, "reference.sequences[].description", path)?
             }
+            // Inalcanzable (`description` ausente): lo mismo que `header`: la lista cerrada de campos la exige.
+            // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
             None => return Err(effective_error(path, "description ausente")),
         }
         if sequence.get("alphabet_validation").and_then(Value::as_str)
@@ -10690,6 +10089,9 @@ fn validate_effective_derived_sequences(
         if n_count > length {
             return Err(effective_error(path, "n_count derivado excede length"));
         }
+        // Inalcanzable (`header` derivado ausente): la lista cerrada de `validate_effective_closed_object` exige
+        // exactamente estos siete campos.
+        // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
         validate_reversible_text(
             sequence
                 .get("header")
@@ -10704,6 +10106,8 @@ fn validate_effective_derived_sequences(
                 "reduced_references[].sequences[].description",
                 path,
             )?,
+            // Inalcanzable (`description` derivada ausente): lo mismo que `header`.
+            // Intento ejecutado: `unreachable_effective_guards_are_shadowed_by_other_checks`.
             None => return Err(effective_error(path, "description derivada ausente")),
         }
         if sequence.get("alphabet_validation").and_then(Value::as_str)
@@ -11223,31 +10627,6 @@ fn retag_format_schema(error: Diagnostic, schema: &'static str) -> Diagnostic {
             .cloned()
             .unwrap_or_else(|| "documento inválido".to_owned()),
     )
-}
-
-#[allow(dead_code)]
-fn retag_v1_pair_error(
-    error: Diagnostic,
-    effective_path: &Path,
-    manifest_path: &Path,
-) -> Diagnostic {
-    if error.code() != "GPS-FMT-006" {
-        return error;
-    }
-    let context = error.context();
-    let error_path = context.get("path").map(String::as_str);
-    let error_schema = context.get("schema").map(String::as_str);
-    if error_path == Some(&manifest_path.display().to_string())
-        || error_schema.is_some_and(|schema| schema.starts_with("manifest-general-"))
-    {
-        retag_format_schema(error, "manifest-general-v1.schema.json")
-    } else if error_path == Some(&effective_path.display().to_string())
-        || error_schema.is_some_and(|schema| schema.starts_with("effective-config-"))
-    {
-        retag_format_schema(error, "effective-config-v1.schema.json")
-    } else {
-        error
-    }
 }
 
 /// Envoltorio puro sobre [`manifest_error_for_schema`]. Lleva
