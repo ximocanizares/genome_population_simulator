@@ -43,6 +43,14 @@
 //! 10/10/2026, el trasplante de un abanico con sus parámetros y el lado
 //! aceptado de dos alelos que la verdad no distingue.
 //!
+//! # DT-052 y DT-043: la contabilidad de tracto y la amplificación
+//!
+//! Las dos últimas secciones comprueban que el juez completo recuenta al
+//! publicar las bases de tracto y ata su cota, en el manifiesto y en la
+//! configuración efectiva, al TOML copiado (DT-052), y que cada parámetro de la
+//! amplificación del manifiesto de evento es el de la configuración efectiva
+//! (DT-043), con el lado aceptado sobre paquetes publicados de verdad.
+//!
 //! # Lo que este fichero no es
 //!
 //! Las guardas que ningún paquete publicado y manipulado puede alcanzar están
@@ -160,6 +168,22 @@ fn publish_mixed_with_ploidy(individuals: usize, ploidy: u32) -> Package {
 /// Lo mismo con la media de pasos del generador que se pida (DT-051: el
 /// trasplante de un abanico con otros parámetros).
 fn publish_mixed_with(individuals: usize, ploidy: u32, mean_events: &str) -> Package {
+    publish_mixed_with_tail(individuals, ploidy, mean_events, "")
+}
+
+/// Lo mismo, con un VCF de texto (DT-052: la parte VCF de la contabilidad de
+/// tracto).
+fn publish_mixed_with_vcf(individuals: usize) -> Package {
+    publish_mixed_with_tail(individuals, 2, "3.0", "\n[vcf_output]\nmode = \"text\"\n")
+}
+
+/// El escenario `mixed` con lo que se pida añadido al final del TOML.
+fn publish_mixed_with_tail(
+    individuals: usize,
+    ploidy: u32,
+    mean_events: &str,
+    tail: &str,
+) -> Package {
     let ids = (1..=individuals)
         .map(|index| format!("\"I{index:03}\""))
         .collect::<Vec<_>>()
@@ -237,7 +261,7 @@ individual_count = {individuals}
 individual_ids = [{ids}]
 ploidy = {ploidy}
 genotype_model = "hwe"
-"#
+{tail}"#
     );
     publish(&[("general.toml", &config), ("reference.fa", &reference)])
 }
@@ -3865,5 +3889,644 @@ fn alleles_the_truth_cannot_tell_apart_are_compared_by_their_sum() {
     assert_eq!(
         detail(judge_both(&package, &effective, &leaked)),
         REALIZED_LEFT
+    );
+}
+
+// ---------------------------------------------------------------------------
+// DT-052: la contabilidad de bases de tracto, juzgada al publicar y atada al TOML
+// ---------------------------------------------------------------------------
+
+const BOUND_MISMATCH: &str = "la cota del manifiesto no es la de la configuración efectiva";
+const REALIZED_TRACT: &str =
+    "las bases de tracto realizadas no son las que los documentos publicados llevan";
+const MANIFEST_TRACT: &str =
+    "la contabilidad de tracto del manifiesto no es la que resuelven el TOML y lo medido";
+const EFFECTIVE_TRACT: &str =
+    "la cota de bases de tracto efectiva no es la que resuelven el TOML y lo que el VCF lleva";
+
+/// Suma `delta` a un entero de un documento (con signo, para poder rebajar).
+fn shift(value: &mut Value, delta: i64) {
+    let current = value.as_u64().expect("un entero");
+    *value = json!(current.checked_add_signed(delta).expect("sin desbordar"));
+}
+
+/// Una alteración de la contabilidad de tracto: la etiqueta, el motivo
+/// exacto, y lo que se cambia en el manifiesto y en la configuración
+/// efectiva (cualquiera de los dos puede quedar intacto).
+type TractCase = (&'static str, &'static str, fn(&mut Value), fn(&mut Value));
+
+fn untouched(_: &mut Value) {}
+
+/// **La contabilidad de bases de tracto se juzga al publicar, y su cota se ata
+/// al TOML copiado** (DT-052).
+///
+/// Son las alteraciones que la segunda revisión adversarial de DT-051
+/// reprodujo, más la versión coherente en los dos documentos y la del tope
+/// declarado. Hasta el 10/10/2026 el juez completo las **aceptaba** todas: el
+/// juez que recuenta las bases (`validate_published_tract_output_accounting`)
+/// no lo llamaba nadie al publicar, y nada ataba la cota al TOML. Se comprobó
+/// ejecutando esta prueba contra una copia del código anterior.
+///
+/// Cada caso altera las cifras de forma que la aritmética que el lector del
+/// manifiesto comprueba (cada total es la suma de sus términos, lo realizado
+/// no pasa de su cota) siga cuadrando: si no, el rechazo vendría de ese lector
+/// y la prueba no diría nada del juez nuevo. Se ejecuta con y sin VCF; la
+/// alteración de las bases del VCF solo tiene sentido con él.
+///
+/// Qué guarda caza cada uno, en el orden en que corren:
+///
+/// - el juez que recuenta, si un documento dice otra cota que el otro o unas
+///   bases realizadas que los ficheros no llevan;
+/// - la comparación del manifiesto con el TOML, si la cota de la verdad se
+///   infla **a la vez** en los dos documentos (solo así se llega a ella);
+/// - la comparación de la efectiva con el TOML, si cambia una cifra que solo
+///   ella publica: la cota de un locus, el tope declarado, las copias de la
+///   verdad por copia de haplotipo, o la cota de la verdad sin tocar su total.
+#[test]
+fn the_tract_accounting_is_judged_when_publishing_and_bound_to_the_toml() {
+    fn manifest_truth_bound(d: &mut Value) {
+        let accounting = &mut d["repeat_loci"]["tract_output"];
+        shift(&mut accounting["truth_tract_bases_bound"], 1000);
+        shift(&mut accounting["total_tract_bases_bound"], 1000);
+    }
+    fn effective_truth_bound(d: &mut Value) {
+        shift(
+            &mut d["repeat_output_budget"]["truth_tract_bases_bound"],
+            1000,
+        );
+    }
+    fn effective_truth_bound_and_total(d: &mut Value) {
+        effective_truth_bound(d);
+        shift(
+            &mut d["repeat_output_budget"]["total_tract_bases_bound"],
+            1000,
+        );
+    }
+    let common: [TractCase; 8] = [
+        (
+            "manifiesto: cota de la verdad +1000, con su total",
+            BOUND_MISMATCH,
+            manifest_truth_bound,
+            untouched,
+        ),
+        (
+            "manifiesto: bases realizadas de la verdad -2, con su total",
+            REALIZED_TRACT,
+            |d| {
+                let accounting = &mut d["repeat_loci"]["tract_output"];
+                shift(&mut accounting["realized_truth_tract_bases"], -2);
+                shift(&mut accounting["realized_total_tract_bases"], -2);
+            },
+            untouched,
+        ),
+        (
+            "efectiva: cota de la verdad +1000",
+            EFFECTIVE_TRACT,
+            untouched,
+            effective_truth_bound,
+        ),
+        (
+            "efectiva: cota de la verdad +1000, con su total",
+            BOUND_MISMATCH,
+            untouched,
+            effective_truth_bound_and_total,
+        ),
+        (
+            "efectiva: cota de un locus +5",
+            EFFECTIVE_TRACT,
+            untouched,
+            |d| {
+                shift(
+                    &mut d["repeat_output_budget"]["per_locus"][0]["truth_tract_bases_bound"],
+                    5,
+                )
+            },
+        ),
+        (
+            "efectiva: tope declarado 7",
+            EFFECTIVE_TRACT,
+            untouched,
+            |d| d["repeat_output_budget"]["declared_max_tract_output_bases"] = json!(7),
+        ),
+        (
+            "efectiva: copias de la verdad por copia de haplotipo 4 (publica 3)",
+            EFFECTIVE_TRACT,
+            untouched,
+            |d| d["repeat_output_budget"]["truth_copies_per_haplotype_copy"] = json!(4),
+        ),
+        (
+            "los dos: cota de la verdad +1000, con su total",
+            MANIFEST_TRACT,
+            manifest_truth_bound,
+            effective_truth_bound_and_total,
+        ),
+    ];
+    let with_vcf: [TractCase; 1] = [(
+        "manifiesto: bases realizadas del VCF -1, con su total",
+        REALIZED_TRACT,
+        |d| {
+            let accounting = &mut d["repeat_loci"]["tract_output"];
+            shift(&mut accounting["realized_vcf_tract_bases"], -1);
+            shift(&mut accounting["realized_total_tract_bases"], -1);
+        },
+        untouched,
+    )];
+    for (package, vcf) in [(publish_mixed(5), false), (publish_mixed_with_vcf(5), true)] {
+        let effective = package.json("effective-config.json");
+        let manifest = package.json("manifest.json");
+        judge_both(&package, &effective, &manifest)
+            .expect("control positivo: el paquete intacto se acepta");
+        let accounting = &manifest["repeat_loci"]["tract_output"];
+        assert_eq!(
+            accounting["realized_vcf_tract_bases"]
+                .as_u64()
+                .expect("VCF")
+                > 0,
+            vcf,
+            "el fixture: el VCF lleva bases de tracto si y solo si se publica"
+        );
+        assert!(
+            accounting["realized_truth_tract_bases"].as_u64()
+                < accounting["truth_tract_bases_bound"].as_u64(),
+            "el fixture: lo realizado queda por debajo de la cota, así que rebajarlo cuadra"
+        );
+        let cases = common
+            .iter()
+            .chain(vcf.then_some(&with_vcf).into_iter().flatten());
+        for (label, expected, mutate_manifest, mutate_effective) in cases {
+            let mut forged_manifest = manifest.clone();
+            mutate_manifest(&mut forged_manifest);
+            let mut forged_effective = effective.clone();
+            mutate_effective(&mut forged_effective);
+            assert!(
+                forged_manifest != manifest || forged_effective != effective,
+                "«{label}»: la alteración no alteró nada"
+            );
+            // La aritmética del manifiesto sigue cuadrando: el lector lo acepta.
+            judge_manifest(&package, &forged_manifest).unwrap_or_else(|error| {
+                panic!("«{label}»: el lector del manifiesto no debía rechazarlo: {error:?}")
+            });
+            assert_eq!(
+                detail(judge_both(&package, &forged_effective, &forged_manifest)),
+                *expected,
+                "«{label}» (VCF: {vcf}) se rechazó por otra razón"
+            );
+        }
+    }
+}
+
+/// **Con VCF, los loci se atan al TOML antes de recontar el tracto** (DT-052).
+///
+/// El juez que recuenta las bases atribuye cada registro de repetición del VCF
+/// a un locus **del manifiesto**. Si corriera antes de la comparación de los
+/// loci con el TOML (DT-051), una sección de loci alterada se rechazaría por un
+/// síntoma del recuento —«un registro de repetición del VCF no contiene el
+/// intervalo de ningún locus», o las bases de un locus que no cuadran— en vez
+/// de por su causa. Las pruebas de DT-051 son sin VCF y no veían ese orden; la
+/// revisión adversarial de DT-052 comprobó que adelantar el recuento
+/// sobrevivía a la batería entera. Estos dos casos, con VCF, exigen el motivo
+/// de la comparación con el TOML.
+#[test]
+fn with_a_vcf_the_loci_are_bound_to_the_toml_before_the_tract_recount() {
+    let package = publish_mixed_with_vcf(5);
+    assert_manifest_cases_against_the_toml(
+        &package,
+        &[
+            case("secuencia de un locus cambiada", MANIFEST_SECTION, |d| {
+                declared(d)["sequence_id"] = json!("chr9")
+            }),
+            case(
+                "identificadores de los dos loci intercambiados",
+                MANIFEST_SECTION,
+                |d| {
+                    let left = declared(d)["id"].clone();
+                    let right = generated(d)["id"].clone();
+                    declared(d)["id"] = right;
+                    generated(d)["id"] = left;
+                },
+            ),
+        ],
+    );
+}
+
+/// **Sin loci, la cota publicada es cero entera** (DT-052).
+///
+/// Un documento v4 publica siempre `repeat_output_budget`, aunque no declare
+/// loci, y el manifiesto no publica sección de loci. El juez que recuenta no
+/// tiene nada que mirar sin esa sección, de modo que antes nada impedía
+/// publicar en la efectiva unas bases de VCF inventadas: hasta el 10/10/2026 se
+/// **aceptaba** (comprobado contra el código anterior). Ahora la efectiva tiene
+/// que ser la que resuelve el TOML con lo medido, que sin loci es cero.
+#[test]
+fn without_loci_the_effective_tract_bound_is_all_zero() {
+    let package = publish_amplified_without_loci("0.3");
+    let effective = package.json("effective-config.json");
+    let manifest = package.json("manifest.json");
+    assert!(
+        manifest.get("repeat_loci").is_none(),
+        "el fixture: sin loci"
+    );
+    assert_eq!(
+        effective["repeat_output_budget"]["total_tract_bases_bound"],
+        json!(0),
+        "el fixture: la cota publicada es cero"
+    );
+    judge_both(&package, &effective, &manifest).expect("control positivo");
+    let forged = altered(&effective, "bases de VCF inventadas", &|d| {
+        let budget = &mut d["repeat_output_budget"];
+        budget["vcf_tract_bases_bound"] = json!(50);
+        budget["total_tract_bases_bound"] = json!(50);
+    });
+    assert_eq!(
+        detail(judge_both(&package, &forged, &manifest)),
+        EFFECTIVE_TRACT
+    );
+}
+
+/// El escenario amplificado con loci y un VCF comprimido.
+fn publish_amplified_with_vcf() -> Package {
+    let toml = format!("{AMPLIFIED_TOML}\n[vcf_output]\nmode = \"bgzf\"\n");
+    publish(&[
+        ("general.toml", &toml),
+        ("reference.fa", AMPLIFIED_FASTA),
+        ("population-snvs.tsv", AMPLIFIED_SNVS),
+    ])
+}
+
+/// **El lado aceptado de DT-052 y DT-043 con paquetes publicados de verdad.**
+///
+/// Cada paquete que el programa publica pasa por el juez completo al
+/// publicarse, de modo que la batería entera ya es el lado aceptado; esta
+/// prueba lo hace explícito para las combinaciones que tocan las dos
+/// comparaciones nuevas: loci con y sin VCF (de texto y comprimido), un tracto
+/// insertado, amplificación con loci (con y sin multiplicador de los
+/// homopolímeros, con VCF) y sin loci. Que haya bases de tracto en el VCF
+/// donde se espera se comprueba, para que el lado aceptado no sea trivial.
+#[test]
+fn real_packages_pass_the_tract_and_amplification_comparisons() {
+    let packages = [
+        ("loci sin VCF", publish_mixed(5), false),
+        ("loci con VCF de texto", publish_mixed_with_vcf(5), true),
+        (
+            "tracto insertado con VCF comprimido",
+            publish_inserting(),
+            true,
+        ),
+        ("amplificado con loci", publish_amplified(""), false),
+        (
+            "amplificado con multiplicador",
+            publish_amplified("homopolymer_pcr_fold = 2.5\n"),
+            false,
+        ),
+        (
+            "amplificado con loci y VCF",
+            publish_amplified_with_vcf(),
+            true,
+        ),
+        (
+            "amplificado sin loci",
+            publish_amplified_without_loci("0.3"),
+            false,
+        ),
+    ];
+    for (label, package, vcf_bases) in &packages {
+        let manifest = package.json("manifest.json");
+        let realized_vcf = manifest
+            .pointer("/repeat_loci/tract_output/realized_vcf_tract_bases")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        assert_eq!(realized_vcf > 0, *vcf_bases, "«{label}»: el fixture");
+        judge_both(package, &package.json("effective-config.json"), &manifest)
+            .unwrap_or_else(|error| panic!("«{label}» se tenía que aceptar: {error:?}"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DT-043: la amplificación del manifiesto de evento, atada a la efectiva
+// ---------------------------------------------------------------------------
+
+const EVENT_MANIFEST: &str = "events/reads-main/manifest.json";
+
+/// Reescribe en disco el manifiesto de evento y **rehace sus huellas** en el
+/// manifiesto general, que es lo que haría quien quisiera colarlo. Devuelve el
+/// manifiesto general resultante.
+fn forge_event_manifest(package: &Package, event: &Value) -> Value {
+    use sha2::{Digest, Sha256};
+    fn rehash(value: &mut Value, digest: &str, size: usize) {
+        match value {
+            Value::Object(map) => {
+                if map.get("path").and_then(Value::as_str) == Some(EVENT_MANIFEST) {
+                    map.insert(
+                        "checksum".to_owned(),
+                        json!({"algorithm": "sha256", "digest": digest}),
+                    );
+                    map.insert("size_bytes".to_owned(), json!(size));
+                }
+                for nested in map.values_mut() {
+                    rehash(nested, digest, size);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    rehash(item, digest, size);
+                }
+            }
+            _ => {}
+        }
+    }
+    let bytes = serde_json::to_vec_pretty(event).expect("JSON");
+    fs::write(package.destination.join(EVENT_MANIFEST), &bytes).expect("manifiesto de evento");
+    let mut manifest = package.json("manifest.json");
+    rehash(
+        &mut manifest,
+        &format!("{:x}", Sha256::digest(&bytes)),
+        bytes.len(),
+    );
+    manifest
+}
+
+fn amplification_mismatch(key: &str) -> String {
+    format!(
+        "el campo {key} de la amplificación del manifiesto técnico no es el de la configuración efectiva"
+    )
+}
+
+/// **Cada parámetro de la amplificación del manifiesto de evento tiene que ser
+/// el de la configuración efectiva** (DT-043).
+///
+/// La efectiva ya está atada exactamente al TOML copiado; el manifiesto de
+/// evento publica el mismo bloque más los recuentos realizados. Cada caso
+/// cambia **una** clave del bloque en el manifiesto de evento, rehace sus
+/// huellas en el manifiesto general y exige el motivo exacto, que nombra la
+/// clave. Hasta el 10/10/2026 el juez completo **aceptaba** todos (comprobado
+/// contra el código anterior): solo se comparaba el sub-bloque del tartamudeo
+/// clonal. El primero es el caso reproducido por la revisión de DT-009:
+/// `cycles` a 12 con el tartamudeo clonal en 10.
+///
+/// Se ejecuta sobre los tres paquetes amplificados: con loci (con tartamudeo
+/// clonal, catálogo v6), con el multiplicador de los homopolímeros declarado y
+/// sin loci (sin tartamudeo clonal, catálogo v5).
+///
+/// **Cinco claves del bloque no las alcanza esta comparación**, y no se
+/// finge: `applicable`, `algorithm`, `rng_catalog` y el método de
+/// `duplicate_fraction_inversion` los fija ya el juez propio del manifiesto de
+/// evento como literales (y `applicable` decide la forma entera del bloque), y
+/// el sub-bloque `stutter` lo compara antes la igualdad de REQ-VAL-61, con su
+/// motivo. Sus casos comprueban que se rechazan por **otra** guarda que corre
+/// antes; no discriminan la comparación nueva.
+#[test]
+fn the_amplification_of_the_event_manifest_is_the_effective_one() {
+    type Mutation = fn(&mut Value);
+    let reachable: [(&str, Mutation); 11] = [
+        ("cycles", |pcr| pcr["cycles"] = json!(12)),
+        ("efficiency", |pcr| pcr["efficiency"] = json!(0.8)),
+        ("early_cycles", |pcr| shift(&mut pcr["early_cycles"], 1)),
+        ("declared_duplicate_fraction", |pcr| {
+            pcr["declared_duplicate_fraction"] = json!(0.25);
+        }),
+        ("expected_duplicate_fraction", |pcr| {
+            pcr["expected_duplicate_fraction"] = json!(0.25);
+        }),
+        ("mean_pairs_per_molecule", |pcr| {
+            pcr["mean_pairs_per_molecule"] = json!(1.5);
+        }),
+        ("duplicate_fraction_inversion", |pcr| {
+            shift(&mut pcr["duplicate_fraction_inversion"]["iterations"], 1);
+        }),
+        ("max_family_size", |pcr| {
+            shift(&mut pcr["max_family_size"], 1)
+        }),
+        ("gc_max_attempts", |pcr| {
+            shift(&mut pcr["gc_max_attempts"], 1)
+        }),
+        ("gc_relative_efficiency", |pcr| {
+            pcr["gc_relative_efficiency"][0]["relative_efficiency"] = json!(0.123);
+        }),
+        ("efficiency_classes", |pcr| {
+            pcr["efficiency_classes"][0]["efficiency"] = json!(0.123);
+        }),
+    ];
+    let shadowed: [(&str, Mutation); 5] = [
+        ("applicable", |pcr| pcr["applicable"] = json!(false)),
+        ("algorithm", |pcr| pcr["algorithm"] = json!("otro-v1")),
+        ("rng_catalog", |pcr| {
+            pcr["rng_catalog"] = json!("f4-technical-v3")
+        }),
+        ("duplicate_fraction_inversion", |pcr| {
+            pcr["duplicate_fraction_inversion"]["method"] = json!("otro");
+        }),
+        ("stutter", |pcr| {
+            if let Some(block) = pcr.get_mut("stutter") {
+                block["cycles"] = json!(12);
+            }
+        }),
+    ];
+    for (label, package, clonal) in [
+        ("con loci", publish_amplified(""), true),
+        (
+            "con multiplicador",
+            publish_amplified("homopolymer_pcr_fold = 2.5\n"),
+            true,
+        ),
+        ("sin loci", publish_amplified_without_loci("0.3"), false),
+    ] {
+        let effective = package.json("effective-config.json");
+        let original = package.json(EVENT_MANIFEST);
+        let effective_pcr = &effective["technical_event"]["artifacts"]["pcr"];
+        let keys = effective_pcr.as_object().expect("bloque").len();
+        assert_eq!(
+            keys,
+            if clonal { 15 } else { 14 },
+            "«{label}»: el fixture, el bloque de la efectiva tiene sus claves"
+        );
+        let untouched = forge_event_manifest(&package, &original);
+        judge_both(&package, &effective, &untouched)
+            .unwrap_or_else(|error| panic!("«{label}»: control positivo rehecho: {error:?}"));
+        for (key, mutate) in reachable {
+            let mut event = original.clone();
+            mutate(&mut event["artifacts"]["pcr"]);
+            assert_ne!(event, original, "«{label}», {key}: la alteración altera");
+            let manifest = forge_event_manifest(&package, &event);
+            assert_eq!(
+                detail(judge_both(&package, &effective, &manifest)),
+                amplification_mismatch(key),
+                "«{label}», {key}"
+            );
+        }
+        for (key, mutate) in shadowed {
+            let mut event = original.clone();
+            mutate(&mut event["artifacts"]["pcr"]);
+            if event == original {
+                // Sin tartamudeo clonal no hay sub-bloque que alterar.
+                assert!(!clonal, "«{label}», {key}: la alteración altera");
+                continue;
+            }
+            let manifest = forge_event_manifest(&package, &event);
+            let motive = detail(judge_both(&package, &effective, &manifest));
+            assert_ne!(
+                motive,
+                amplification_mismatch(key),
+                "«{label}», {key}: lo caza otra guarda que corre antes"
+            );
+        }
+        // Se deja el manifiesto de evento como estaba.
+        forge_event_manifest(&package, &original);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DT-054: la verdad y el VCF son de esta ejecución
+// ---------------------------------------------------------------------------
+
+const TRUTH_EXECUTION: &str =
+    "la cabecera de la verdad publicada no lleva el execution_id del manifiesto general";
+const VCF_EXECUTION: &str =
+    "la cabecera del VCF publicado no lleva el execution_id del manifiesto general";
+
+/// Rehace, en todo el manifiesto general, la huella y el tamaño del artefacto
+/// con esa ruta.
+fn rehash_artifact(manifest: &mut Value, path: &str, bytes: &[u8]) {
+    use sha2::{Digest, Sha256};
+    fn walk(value: &mut Value, path: &str, digest: &str, size: usize) {
+        match value {
+            Value::Object(map) => {
+                if map.get("path").and_then(Value::as_str) == Some(path) {
+                    if map.contains_key("checksum") {
+                        map.insert(
+                            "checksum".to_owned(),
+                            json!({"algorithm": "sha256", "digest": digest}),
+                        );
+                    }
+                    if map.contains_key("sha256") {
+                        map.insert("sha256".to_owned(), json!(digest));
+                    }
+                    if map.contains_key("size_bytes") {
+                        map.insert("size_bytes".to_owned(), json!(size));
+                    }
+                }
+                for nested in map.values_mut() {
+                    walk(nested, path, digest, size);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    walk(item, path, digest, size);
+                }
+            }
+            _ => {}
+        }
+    }
+    walk(
+        manifest,
+        path,
+        &format!("{:x}", Sha256::digest(bytes)),
+        bytes.len(),
+    );
+}
+
+fn catalog_path(manifest: &Value, id: &str) -> String {
+    manifest["artifacts"]
+        .as_array()
+        .expect("catálogo")
+        .iter()
+        .find(|artifact| artifact["id"] == id)
+        .and_then(|artifact| artifact["path"].as_str())
+        .expect("ruta del artefacto")
+        .to_owned()
+}
+
+/// Cambia el TOML copiado de forma **coherente**: le añade un tope de bases de
+/// tracto, rehace su huella en el manifiesto, pone el mismo tope en la
+/// efectiva y sustituye el `execution_id` del manifiesto por el que sale del
+/// TOML nuevo y la semilla. Devuelve la efectiva, el manifiesto y los dos
+/// identificadores de ejecución, el viejo y el nuevo.
+fn forge_configuration(package: &Package) -> (Value, Value, String, String) {
+    let manifest = package.json("manifest.json");
+    let mut effective = package.json("effective-config.json");
+    let configuration = catalog_path(
+        &manifest,
+        manifest["configuration_input"]["artifact_id"]
+            .as_str()
+            .expect("TOML copiado"),
+    );
+    let text = String::from_utf8(package.bytes(&configuration)).expect("TOML");
+    let anchor = "fasta = \"reference.fa\"\n";
+    assert_eq!(text.matches(anchor).count(), 1, "el fixture");
+    let altered = text.replacen(
+        anchor,
+        &format!("{anchor}max_tract_output_bases = 999999\n"),
+        1,
+    );
+    fs::write(package.destination.join(&configuration), &altered).expect("TOML alterado");
+    let mut forged = manifest.clone();
+    rehash_artifact(&mut forged, &configuration, altered.as_bytes());
+    effective["repeat_output_budget"]["declared_max_tract_output_bases"] = json!(999_999);
+    let root_seed = genome_population_simulator::randomness::RootSeed::parse(
+        "semilla",
+        effective["seed"]["root"].as_str().expect("semilla"),
+    )
+    .expect("semilla");
+    let digest = genome_population_simulator::integrity::configuration_digest(altered.as_bytes())
+        .expect("huella del TOML");
+    let new = genome_population_simulator::identity::derive_execution_id(root_seed, &digest)
+        .expect("execution_id")
+        .as_str()
+        .to_owned();
+    let old = manifest["execution_id"]
+        .as_str()
+        .expect("execution_id")
+        .to_owned();
+    assert_ne!(old, new, "el fixture: el TOML nuevo da otro execution_id");
+    forged["execution_id"] = json!(new);
+    (effective, forged, old, new)
+}
+
+/// **El `execution_id` de la cabecera de la verdad y del VCF tiene que ser el
+/// del manifiesto general** (DT-054).
+///
+/// Es la reproducción de la revisión adversarial de DT-052: un TOML copiado
+/// cambiado de forma coherente (tope de tracto añadido, su huella, el tope de
+/// la efectiva y el `execution_id` del manifiesto rehechos) lo **aceptaba** el
+/// juez completo hasta el 11/10/2026, aunque la cabecera de la verdad seguía
+/// con el identificador de la ejecución original (comprobado contra el código
+/// anterior). Sin VCF lo rechaza la comparación de la verdad. Con VCF, si se
+/// rehace también la cabecera de la verdad (con su huella), lo rechaza la
+/// comparación del VCF; con la verdad sin rehacer, la de la verdad, que va
+/// antes. El manifiesto de evento no publica `execution_id`.
+#[test]
+fn the_truth_and_the_vcf_carry_the_execution_id_of_the_manifest() {
+    let package = publish_mixed(5);
+    let (effective, forged, _, _) = forge_configuration(&package);
+    assert_eq!(
+        detail(judge_both(&package, &effective, &forged)),
+        TRUTH_EXECUTION,
+        "sin VCF"
+    );
+
+    let package = publish_mixed_with_vcf(5);
+    judge_both(
+        &package,
+        &package.json("effective-config.json"),
+        &package.json("manifest.json"),
+    )
+    .expect("control positivo");
+    let (effective, mut forged, old, new) = forge_configuration(&package);
+    assert_eq!(
+        detail(judge_both(&package, &effective, &forged)),
+        TRUTH_EXECUTION,
+        "con VCF y la verdad sin rehacer"
+    );
+    let truth = catalog_path(&forged, "truth-jsonl");
+    let text = String::from_utf8(package.bytes(&truth)).expect("verdad");
+    let (header, rest) = text.split_once('\n').expect("cabecera de la verdad");
+    let field = |id: &str| format!("\"execution_id\":\"{id}\"");
+    assert_eq!(header.matches(&field(&old)).count(), 1, "el fixture");
+    let rewritten = format!("{}\n{rest}", header.replace(&field(&old), &field(&new)));
+    fs::write(package.destination.join(&truth), &rewritten).expect("verdad rehecha");
+    rehash_artifact(&mut forged, &truth, rewritten.as_bytes());
+    assert_eq!(
+        detail(judge_both(&package, &effective, &forged)),
+        VCF_EXECUTION,
+        "con VCF y la verdad rehecha"
     );
 }

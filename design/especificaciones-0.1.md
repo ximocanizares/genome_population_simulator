@@ -1028,13 +1028,24 @@ su asignación por fase está en la matriz de trazabilidad.
   TOML **salvo lo medido**: lo que solo sale del sorteo —copias sorteadas, copias
   realizadas y frecuencia realizada— y las bases de tracto **medidas** en la
   verdad y en el VCF; la cota declarada de bases de tracto de la verdad debe
-  coincidir con la del TOML. Las copias realizadas de cada alelo deben ser las
-  que lleva la verdad publicada, sumadas sobre los alelos que la verdad no
-  distingue (mismas bases y mismos bloques). Esta comparación va **después** del
-  juez de REQ-VAL-60, que sigue rehaciendo el abanico desde lo publicado. **La
-  parte de la contabilidad de bases de tracto —la cota declarada y las bases
-  medidas— todavía no la comprueba el juez: queda pendiente de DT-052** del
-  registro de deudas técnicas, hasta que se cierre.
+  coincidir con la del TOML, y las bases medidas deben ser las que llevan la
+  verdad y el VCF publicados, **recontadas sobre los propios ficheros**. En la
+  configuración efectiva, la cota de bases de tracto —la de la verdad, la de
+  cada locus, el tope declarado y las copias de la verdad por copia de
+  haplotipo— debe coincidir exactamente con la que resuelve el TOML copiado, y
+  su parte VCF, en total y por locus, debe ser la que lleva el VCF publicado;
+  sin loci, la cota entera es cero. Las copias realizadas de cada alelo deben
+  ser las que lleva la verdad publicada, sumadas sobre los alelos que la verdad
+  no distingue (mismas bases y mismos bloques). Esta comparación va **después**
+  del juez de REQ-VAL-60, que sigue rehaciendo el abanico desde lo publicado.
+- **REQ-VAL-63.** Al publicar, el juez de los recursos publicados debe exigir
+  que cada parámetro del bloque de amplificación de la configuración efectiva
+  (`technical_event.artifacts.pcr`) aparezca **idéntico** en el manifiesto de
+  evento. Los recuentos realizados —familias, parejas, parejas duplicadas,
+  fracción realizada, histograma de tamaños de familia, familias truncadas,
+  intentos de composición, cobertura de moléculas distintas, cota de recursos y
+  recuentos de linaje— quedan fuera: la configuración efectiva no los publica y
+  atarlos exige rehacer la amplificación (DT-043).
 - **REQ-UI-16.** La interfaz debe ofrecer un **control para elegir** entre
   declarar los alelos de un locus y generarlos, y **enseñar solo la tabla que
   corresponda**: con «declarar», las de alelos e interrupciones; con «generar»,

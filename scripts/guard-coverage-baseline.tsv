@@ -405,10 +405,32 @@
 # copias realizadas de cada alelo. Las cuatro las dispara
 # `tests/results_repeat_guards.rs` (sección DT-051) con su motivo exacto, y cada
 # una murió al anularla en una copia.
+# **El 10/10/2026 (DT-052 y DT-043) `src/results.rs` pasa de 783 a 786
+# comprobaciones; las sin disparar siguen en 498.** Son las dos de
+# `validate_published_tract_bounds`, que ata al TOML copiado y a lo recontado
+# la contabilidad de tracto del manifiesto y la cota de la configuración
+# efectiva, y la del final de `validate_physical_technical_event`, que exige que
+# cada parámetro de la amplificación del manifiesto de evento sea el de la
+# efectiva. Las tres las dispara `tests/results_repeat_guards.rs` (secciones
+# DT-052 y DT-043) con su motivo exacto, y cada una murió al anularla en una
+# copia. El juez que recuenta las bases de tracto, ahora llamado al publicar, no
+# añade comprobaciones: ya las ejercitaban sus pruebas directas.
+# **El 11/10/2026 (segunda ronda de DT-052, y DT-054) `src/results.rs` pasa de
+# 786 a 787 comprobaciones y de 498 a 497 sin disparar.** Entran las dos de
+# `validate_published_execution_ids` (el `execution_id` de la cabecera de la
+# verdad y del VCF frente al del manifiesto), que dispara
+# `the_truth_and_the_vcf_carry_the_execution_id_of_the_manifest` con su motivo
+# exacto, y cada una murió al anularla en una copia. Sale una: la relectura del
+# VCF pasó a ser por flujo (`published_vcf_lines`) y sus cuatro puntos de rechazo
+# (lectura, bloque BGZF, descompresión y UTF-8) quedan en tres (apertura, bloque
+# BGZF y lectura de una línea, que conserva los mismos motivos); de los cuatro
+# solo se disparaba el del bloque BGZF, y de los tres, también solo ese. No se
+# ha probado nada nuevo para bajar la cifra: es el mismo hueco con un punto
+# menos.
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
-src/results.rs	783	498
+src/results.rs	787	497
 src/event_manifest.rs	147	8
 src/truth_validation.rs	121	32
 src/truth_schema.rs	69	8

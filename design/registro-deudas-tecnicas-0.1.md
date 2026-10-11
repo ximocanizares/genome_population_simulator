@@ -76,7 +76,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-040 | Con tartamudeo clonal, la configuración efectiva publica `technical_event.rng_catalog = "f4-technical-v5"` y su esquema v6 exige `f4-technical-v6`: el validador externo la rechaza | Media | 08/10/2026 | Abierta; decidido el 08/10/2026 que manda el esquema, en un cambio aparte junto con DT-041 |
 | DT-041 | Toda ejecución amplificada, con microsatélites o sin ellos, publica un manifiesto general que no pasa su propio esquema: el perfil está fijado al de sin PCR y los catálogos a v3 y v4 | Media | 08/10/2026 | Abierta; decidido que manda el contrato, ampliándolo; junto con DT-040 |
 | DT-042 | En el cuaderno, con un evento técnico activo, la celda que reconstruye el formulario falla con `NameError` sobre `TechnicalEventForm`: ningún control del panel de PCR llega al TOML | Media | 08/10/2026 | Abierta |
-| DT-043 | El juez acepta en el manifiesto de evento los ciclos de la amplificación fuera del bloque del tartamudeo y los recuentos de linaje alterados, con las huellas rehechas | Media | 08/10/2026 | Abierta |
+| DT-043 | El juez acepta en el manifiesto de evento los recuentos realizados de la amplificación (familias, parejas, histograma, linaje) alterados, con las huellas rehechas | Media | 08/10/2026 | Abierta, reducida (10/10/2026): los parámetros de la amplificación ya se atan a la efectiva; quedan los recuentos realizados |
 | DT-044 | REQ-CONF-134 a 138, REQ-DAT-81 a 85 y REQ-MAN-94 no tienen fila en la matriz de trazabilidad | Baja | 08/10/2026 | Abierta |
 | DT-046 | Referencias cruzadas internas del manifiesto de evento no atadas por su propio juez (`id_catalog`, bibliotecas repetidas, receptora y donantes ajenos, UDI repetidos, esquema v2 en los hechos del escritor) | Baja | 08/10/2026 | Abierta |
 | DT-045 | El juez de la matriz de SNV tiene catorce comprobaciones de código muerto y un conjunto redundante, porque repite lo que `parse_metadata_json` ya exige | Baja | 08/10/2026 | Abierta; encargo aparte |
@@ -85,8 +85,9 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-049 | El lector por flujo de la verdad no aplica a los casos genotípicos el paso léxico del contrato | Media-baja | 09/10/2026 | Abierta (junto a DT-015) |
 | DT-050 | En memoria, el juez de la verdad aceptaba una copia con un segmento de otra secuencia en medio | Baja | 09/10/2026 | **Cerrada (09/10/2026)**, en el mismo cambio que DT-048 |
 | DT-051 | El juez de los recursos publicados no ata los loci de repetición publicados (manifiesto y configuración efectiva) al TOML copiado: acepta alterar secuencias, frecuencias, pureza, intervalos, topes y mínimos | Media | 10/10/2026 | **Cerrada (10/10/2026)**, en un cambio propio tras la tanda 6 |
-| DT-052 | La contabilidad de bases de tracto no la juzga nadie al publicar: su juez no está cableado y, aunque lo estuviera, no ata las cotas al TOML | Media | 10/10/2026 | Abierta; se arreglará en un cambio propio justo después de DT-051 |
+| DT-052 | La contabilidad de bases de tracto no la juzga nadie al publicar: su juez no está cableado y, aunque lo estuviera, no ata las cotas al TOML | Media | 10/10/2026 | **Cerrada (10/10/2026)**, en un cambio propio tras DT-051 |
 | DT-053 | Las copias realizadas de cada alelo no se atan al sorteo rehecho con la semilla | Baja | 10/10/2026 | Abierta; decidido no arreglarla por ahora |
+| DT-054 | Nadie compara el `execution_id` de la cabecera de la verdad y del VCF con el del manifiesto general: un TOML copiado cambiado de forma coherente pasaba con la verdad de la ejecución original | Media | 11/10/2026 | **Cerrada (11/10/2026)**, en el mismo cambio que DT-052 |
 
 ---
 
@@ -3697,18 +3698,56 @@ lo dice en su docstring. **Sin arreglar.**
 
 ---
 
-## DT-043. El juez no ata la sección de amplificación del manifiesto de evento fuera del bloque del tartamudeo
+## DT-043. El juez no ata los recuentos realizados de la amplificación del manifiesto de evento
 
 **Gravedad: media.** Hallada el 08/10/2026 por la revisión adversarial de
 DT-009, que la reprodujo con las huellas rehechas en el manifiesto general: el
-juez de los recursos publicados **acepta** un manifiesto de evento con
+juez de los recursos publicados **aceptaba** un manifiesto de evento con
 `artifacts.pcr.cycles` cambiado a 12 —incoherente con los `cycles` del bloque
 del tartamudeo clonal, que siguen en 10— y con `lineage_applied_steps_by_locus`
 aumentado en uno. Desde DT-009 el **bloque** del tartamudeo clonal tiene que
-ser idéntico al de la configuración efectiva (REQ-VAL-61); el resto de la
-sección de amplificación sigue sin atarse a la efectiva ni a las lecturas, y
-solo lo comprueban su esquema y las relaciones internas que
-`validate_pcr_manifest` mira. **Sin arreglar.**
+ser idéntico al de la configuración efectiva (REQ-VAL-61).
+
+**Cerrada en parte el 10/10/2026** (decisión del responsable: arreglarlo ya, en
+un cambio propio, junto con DT-052). Los **parámetros** de la amplificación ya
+se atan: el bloque `technical_event.artifacts.pcr` de la configuración efectiva
+está atado exactamente a lo que resuelve el TOML copiado, sus claves (catorce,
+quince con el tartamudeo clonal) son un subconjunto exacto de las del bloque del
+manifiesto de evento —los dos salen de la misma función del productor—, y el
+juez completo exige ahora que cada una aparezca **idéntica** en el manifiesto de
+evento (`validate_physical_technical_event`, al final). El `cycles` = 12 se
+rechaza. El catálogo de azar del bloque (`artifacts.pcr.rng_catalog`) entra en
+la comparación sin decidir nada sobre DT-040: los dos documentos publican el
+mismo, y DT-040 trata del catálogo de la **raíz** del evento en la efectiva, que
+no forma parte del bloque. Pruebas, en `tests/results_repeat_guards.rs`:
+`the_amplification_of_the_event_manifest_is_the_effective_one` (cada una de las
+once claves alcanzables, alterada una a una con las huellas rehechas, sobre los
+tres paquetes amplificados; todas aceptadas por el código anterior) y
+`real_packages_pass_the_tract_and_amplification_comparisons` (lado aceptado).
+Cinco claves no las alcanza esta comparación porque otra guarda las caza antes:
+`applicable`, `algorithm`, `rng_catalog` y el método de la inversión los fija
+como literales el juez propio del manifiesto de evento, y el sub-bloque
+`stutter` lo compara antes la igualdad de REQ-VAL-61.
+
+**Lo que queda abierto.** Los **recuentos realizados** del bloque del manifiesto
+de evento —`families`, `pairs`, `duplicate_pairs`,
+`realized_duplicate_fraction`, `family_size_histogram`,
+`families_truncated_at_end`, `gc_attempts_total`,
+`gc_attempts_exhausted_families`, `unique_molecule_coverage_x`,
+`resource_bound` y los tres recuentos de linaje— no están en la efectiva y
+nada los ata a las lecturas publicadas ni a una amplificación rehecha: solo los
+comprueban su esquema y las relaciones internas que `validate_pcr_manifest`
+mira (familias frente a parejas, histograma frente a totales, fracción
+realizada frente a recuentos). Un `lineage_applied_steps_by_locus` aumentado
+en uno con las huellas rehechas **sigue aceptándose** (comprobado ejecutando el
+10/10/2026). Atarlos exigiría rehacer la amplificación con la semilla o recontar
+sobre los FASTQ. El camino ya está pedido en otro sitio: REQ-VAL-58 exige, en la
+validación de cierre, contar las parejas duplicadas sobre los FASTQ finales y
+rederivar desde la semilla las familias y sus tamaños; llevar ese oráculo al
+juez de publicación cerraría esta deuda (según la revisión adversarial de
+DT-052, REQ-VAL-58 no tiene fila en la matriz de trazabilidad; no lo he
+comprobado aparte). La regla de lo que sí se ata quedó en REQ-VAL-63.
+**Sin arreglar.**
 
 ---
 
@@ -4151,9 +4190,10 @@ tracto (DT-052) y las copias realizadas frente al sorteo rehecho (DT-053).
 
 ## DT-052. La contabilidad de bases de tracto no la juzga nadie al publicar
 
-**Gravedad: media.** Hallada el 10/10/2026 por la segunda revisión adversarial de
-DT-051, que la **reprodujo ejecutando**. **Sin arreglar**: decisión del responsable
-del 10/10/2026, se arregla en un cambio propio justo después de DT-051.
+**Gravedad: media. Cerrada (10/10/2026)**; ver «Cómo se cerró» al final. Hallada
+el 10/10/2026 por la segunda revisión adversarial de DT-051, que la **reprodujo
+ejecutando**. Decisión del responsable del 10/10/2026: se arregla en un cambio
+propio justo después de DT-051.
 
 `validate_published_tract_output_accounting` (`src/results.rs`), el juez que
 recuenta las bases de tracto releyendo la verdad y el VCF, **no lo llama nadie en
@@ -4178,6 +4218,128 @@ cota de la efectiva (`repeat_output_budget`) con la que resuelve el TOML salvo l
 partes del VCF, que se miden al publicar (DTC-097). REQ-VAL-62 remite a esta deuda
 hasta que se cierre.
 
+### Cómo se cerró (10/10/2026)
+
+Los tres pasos propuestos, en `src/results.rs`, dentro del juez completo y
+**después** de `validate_published_repeat_loci` (DT-051), que a su vez va después
+del juez del abanico, del de la referencia final y del de la referencia simulada:
+ninguno de ellos cambia de motivo.
+
+1. **El juez que recuenta, cableado.** Su cuerpo pasa a
+   `judge_tract_output_accounting`, que hace las mismas comprobaciones y
+   devuelve además lo recontado; `validate_published_tract_output_accounting`
+   queda como envoltorio público con la misma firma. El juez completo lo llama
+   con la verdad y el VCF del catálogo (texto o comprimido); sin verdad, lo
+   medido es cero. **Relee la verdad y el VCF a propósito**: el recuento va
+   sobre los bytes, por un camino que no comparte nada con el lector tipado
+   que acaba de juzgar la verdad; contar sobre el documento ya leído sería
+   usar la estructura del productor (`realized_truth_tract_bases` recorre ese
+   mismo tipo) y la comparación perdería su independencia. **Lee línea a
+   línea**, la verdad con un lector con búfer y el VCF también sobre el lector
+   BGZF (`published_vcf_lines`). La primera versión leía la verdad entera en una
+   cadena y el VCF entero en memoria, y la revisión adversarial midió que eso
+   subía el pico del juez un 38 %; el texto de entonces decía que las dos
+   lecturas no coincidían en memoria, y **era falso**. Medido de nuevo el
+   11/10/2026 con compilación optimizada, sobre los escenarios de la revisión
+   (cuatro loci, VCF comprimido), ejecutando solo el juez completo sobre el
+   paquete ya publicado, dos repeticiones:
+
+   | Paquete | Antes del cambio (36d78eb) | Primera versión | Línea a línea |
+   |---|---|---|---|
+   | 400 individuos, verdad de 121 MB | 267,7 MB; 7,3 s | 369,3 MB; 8,1–8,2 s | 267,6 MB; 8,1 s |
+   | 1200 individuos, verdad de 365 MB | 784,4 MB; 39,5–42,0 s | 1090,3 MB; 42,2–44,4 s | 784,4 MB; 42,9–43,3 s |
+
+   El pico vuelve exactamente al de antes; el tiempo sube entre un 3 % y un 10 %
+   (incluye también la comparación de DT-054, que lee la cabecera del VCF). En
+   la ejecución entera no se nota en el pico, que lo fija la simulación (488 MB
+   con 400 individuos, en las tres versiones; 1,41 GB con 1200, en la primera
+   versión y en la de línea a línea).
+2. **La cota del manifiesto, atada al TOML** (`validate_published_tract_bounds`).
+   La contabilidad de tracto del manifiesto tiene que ser **exactamente** la que
+   el productor escribiría con la configuración reconstruida del TOML copiado y
+   las cifras **recontadas**: la cota de la verdad sale del TOML; la parte VCF y
+   las bases realizadas, de lo recontado; los totales, de sumar. Como el juez
+   que recuenta ya exige que el manifiesto coincida con la efectiva y con lo
+   recontado, aquí solo llega una cota de la verdad inflada **a la vez** en los
+   dos documentos.
+3. **La cota de la efectiva, atada al TOML**, en la misma función:
+   `repeat_output_budget` tiene que ser **exactamente** el que publica la
+   configuración reconstruida, completado con lo que el VCF lleva, en total y
+   por locus (`publish_measured_vcf_tract_bases` con lo recontado, DTC-097). No
+   se neutraliza nada: la parte VCF y el total también se comparan, con lo
+   medido. Eso cierra además un hueco que la propuesta no veía: **sin loci**, el
+   manifiesto no publica sección y el juez que recuenta no mira nada, de modo
+   que unas bases de VCF inventadas en la efectiva de un documento v4 sin loci
+   se aceptaban; ahora tiene que ser cero entera.
+
+**Pruebas** (`tests/results_repeat_guards.rs`, sección DT-052), todas con motivo
+exacto y control positivo; ejecutadas contra una copia del commit anterior,
+**cada uno** de los dieciséis casos se aceptaba:
+
+- `the_tract_accounting_is_judged_when_publishing_and_bound_to_the_toml`: con y
+  sin VCF, la cota de la verdad del manifiesto +1000 con su total y las bases
+  realizadas de la verdad −2 (y, con VCF, las del VCF −1), que rechaza el juez
+  que recuenta; en la efectiva, la cota de la verdad +1000, una cota por locus
+  +5 y el tope declarado a 7, que rechaza la comparación con el TOML, y la cota
+  de la verdad +1000 con su total, que rechaza el juez que recuenta; y la cota
+  de la verdad +1000 con su total **en los dos documentos**, que rechaza la
+  comparación del manifiesto con el TOML. Cada caso comprueba antes que el
+  lector del manifiesto lo acepta (la aritmética sigue cuadrando), para que el
+  rechazo sea del juez nuevo;
+- `without_loci_the_effective_tract_bound_is_all_zero`: el hueco sin loci;
+- `real_packages_pass_the_tract_and_amplification_comparisons`: lado aceptado
+  con paquetes publicados de verdad —loci sin VCF, con VCF de texto, tracto
+  insertado con VCF comprimido, amplificado con loci, con multiplicador de los
+  homopolímeros, con loci y VCF, y sin loci—, comprobando que el VCF lleva
+  bases de tracto donde se espera;
+- añadidos tras la segunda revisión adversarial (11/10/2026): el caso «copias
+  de la verdad por copia de haplotipo» en la primera prueba (sin él, no
+  comparar ese campo sobrevivía a la batería entera), y
+  `with_a_vcf_the_loci_are_bound_to_the_toml_before_the_tract_recount`, que con
+  VCF exige el motivo de la comparación de los loci con el TOML para una
+  secuencia de locus cambiada y para los identificadores de los dos loci
+  intercambiados: si el recuento se adelantara a esa comparación, los dos se
+  rechazarían por un síntoma del recuento y no por su causa, y las pruebas de
+  DT-051, sin VCF, no lo veían.
+
+El lado aceptado lo da además toda la batería: cada paquete que el programa
+publica pasa por el juez completo, y ninguno cambió de resultado (2015 pruebas
+antes del cambio, todas en verde con él).
+
+**Verificación por mutación** (copia fuera del repositorio, con su propio
+directorio de compilación, un mutante por ejecución contra la batería entera,
+huella antes, mutada y restaurada, y `touch` tras restaurar). Murieron los nueve
+(dos primeras redacciones del de «no recontar» no compilaban y no cuentan):
+anular la comparación del manifiesto (la mata solo el caso coherente en los dos
+documentos) o la de la efectiva (la matan los casos de la efectiva y el de sin
+loci); no llamar al juez que recuenta; rehacer la efectiva sin lo medido o el
+manifiesto sin lo recontado; no pasarle el VCF; no devolver las bases del VCF por
+locus; invertir la condición de versión; y, para DT-043, anular la comparación de
+la amplificación (la mata solo `the_amplification_of_the_event_manifest_is_the_effective_one`).
+Las que rehacen sin lo medido, no pasan el VCF o no recuentan las matan además el
+lado aceptado y decenas de pruebas que publican paquetes con loci.
+
+Tras la segunda revisión adversarial (11/10/2026), dos mutantes más que entonces
+sobrevivían a la batería entera, ahora muertos, cada uno solo por su prueba nueva
+(huella antes y restaurada `5a2b3d5a…7a18`): no comparar las copias de la verdad
+por copia de haplotipo en la efectiva (mutada `aff30acc…cc87`; lo mata
+`the_tract_accounting_is_judged_when_publishing_and_bound_to_the_toml`) y
+adelantar el recuento a la comparación de los loci con el TOML (mutada
+`555fbc51…b3b1`; lo mata
+`with_a_vcf_the_loci_are_bound_to_the_toml_before_the_tract_recount`).
+
+La puerta de cobertura de los jueces: `src/results.rs` pasa de 783 a 786
+comprobaciones y sigue con 498 sin disparar; las tres nuevas se disparan.
+Con la segunda ronda (11/10/2026), 787 comprobaciones y 497 sin disparar: entran
+las dos de DT-054, que se disparan, y la relectura del VCF por flujo pasa de
+cuatro puntos de rechazo a tres con los mismos motivos (de ellos solo se dispara,
+antes y ahora, el del bloque BGZF que declara más de 64 KiB). Las mutaciones de
+la segunda ronda se hicieron antes de unir en un solo punto los tres motivos de
+la lectura de una línea del VCF, que no tocan ninguna de las comprobaciones
+mutadas; las medidas de memoria y tiempo, también.
+
+La regla queda en REQ-VAL-62, que ya no remite a esta deuda.
+
 ## DT-053. Las copias realizadas de cada alelo no se atan al sorteo rehecho con la semilla
 
 **Gravedad: baja.** Hallada el 10/10/2026 por la segunda revisión adversarial de
@@ -4194,3 +4356,55 @@ distingue el reparto entre dos alelos gemelos (la limitación anotada en DT-051)
 **Corrección posible:** rehacer el sorteo con la semilla y comparar las copias por
 índice de alelo. El juez ya lo rehace para las estadísticas de la población
 inicial y lo descarta; aprovecharlo cerraría también el caso de los gemelos.
+
+## DT-054. Nadie compara el `execution_id` de la verdad y del VCF con el del manifiesto general
+
+**Gravedad: media. Cerrada (11/10/2026)**; ver «Cómo se cerró» al final. Hallada
+el 11/10/2026 por la revisión adversarial de DT-052, que la **reprodujo
+ejecutando**. Decisión del responsable: arreglarla en el mismo cambio.
+
+El juez completo ata el `execution_id` del manifiesto general a la semilla y a
+los bytes del TOML copiado, pero nadie comparaba con él el que llevan las
+cabeceras de la verdad (`execution_id`) y del VCF (`##gps_execution_id=`).
+Reproducción: en el TOML copiado se añade `max_tract_output_bases = 999999`, se
+rehace su huella en el manifiesto, se pone el mismo tope en la efectiva y se
+sustituye el `execution_id` del manifiesto por el que sale del TOML nuevo. El
+juez lo **aceptaba**, aunque la cabecera de la verdad seguía con el
+identificador de la ejecución original: el paquete afirmaba una configuración
+que no es la que produjo su verdad. El manifiesto de evento no publica
+`execution_id` (comprobado en el productor y en su esquema v3), de modo que no
+hay nada que comparar allí.
+
+### Cómo se cerró (11/10/2026)
+
+En `src/results.rs`, función nueva `validate_published_execution_ids`, llamada
+por el juez completo después de todo lo de DT-051 y DT-052:
+
+- **verdad**: el `execution_id` de la cabecera, que ya lee y juzga el juez de la
+  verdad (`validate_physical_truth` lo devuelve ahora junto al recuento de
+  copias), tiene que ser el del manifiesto general;
+- **VCF**, si lo hay: la línea `##gps_execution_id=` de la cabecera, leída por
+  flujo y solo hasta la primera línea que no es de metadatos, tiene que existir
+  y llevar el mismo identificador.
+
+Los dos rechazos pasan por `manifest_error`, con `#[track_caller]`.
+
+Antes de exigirlo se pasó la batería entera: **todos los paquetes que publica el
+programa lo cumplen**. Fallaron solo las dos pruebas de
+`tests/f4_physical_technical_manifest.rs`, cuya fixture **no la publica el
+programa**: publica sin evento y después cambia a mano el TOML copiado y rehace
+el `execution_id` del manifiesto, que es justo el patrón que esta deuda cierra.
+La fixture rehace ahora también la cabecera de la verdad, con su huella, como
+tendría que hacer quien quisiera colarlo de forma coherente.
+
+**Prueba**: `the_truth_and_the_vcf_carry_the_execution_id_of_the_manifest`
+(`tests/results_repeat_guards.rs`), con la reproducción de la revisión y el
+motivo exacto: sin VCF la rechaza la comparación de la verdad; con VCF y la
+verdad sin rehacer, también la de la verdad, que va antes; con la cabecera de la
+verdad rehecha (y su huella), la del VCF. Falla contra el código anterior
+(ejecutada sobre una copia de 36d78eb: el juez la aceptaba).
+
+**Verificación por mutación** (copia fuera del repositorio, batería entera, huella
+antes y restaurada `5a2b3d5a…7a18`): anular la comparación de la verdad (mutada
+`76cc2f52…549e`) y anular la del VCF (mutada `e0fd338b…bded`) mueren los dos, y
+solo por esta prueba.

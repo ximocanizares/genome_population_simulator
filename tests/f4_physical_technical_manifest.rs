@@ -318,11 +318,29 @@ impl Fixture {
         refresh_catalog_record(&output, &mut general, &configuration_id);
         let root_seed = RootSeed::parse("fixture root", ROOT_SEED).expect("root seed");
         let digest = configuration_digest(technical_toml.as_bytes()).expect("configuration digest");
-        general["execution_id"] = json!(
-            derive_execution_id(root_seed, &digest)
-                .expect("execution id")
-                .as_str()
+        let original_execution_id = general["execution_id"]
+            .as_str()
+            .expect("execution id")
+            .to_owned();
+        let execution_id = derive_execution_id(root_seed, &digest)
+            .expect("execution id")
+            .as_str()
+            .to_owned();
+        general["execution_id"] = json!(execution_id);
+        // La cabecera de la verdad lleva el `execution_id` de la ejecución, y el
+        // juez completo lo compara con el del manifiesto (DT-054): al cambiar
+        // el TOML copiado, la fixture la rehace también, con su huella.
+        let truth_path = output.join(catalog_path(&general, "truth-jsonl"));
+        let truth = fs::read_to_string(&truth_path).expect("truth");
+        let (header, rest) = truth.split_once('\n').expect("truth header");
+        let original_field = format!("\"execution_id\":\"{original_execution_id}\"");
+        assert_eq!(header.matches(&original_field).count(), 1, "truth header");
+        let header = header.replace(
+            &original_field,
+            &format!("\"execution_id\":\"{execution_id}\""),
         );
+        fs::write(&truth_path, format!("{header}\n{rest}")).expect("truth rewritten");
+        refresh_catalog_record(&output, &mut general, "truth-jsonl");
 
         let reference = artifact_record(
             general["artifacts"]

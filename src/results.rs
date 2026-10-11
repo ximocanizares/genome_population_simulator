@@ -462,12 +462,36 @@ pub fn validate_published_tract_output_accounting(
     truth_path: &Path,
     vcf_path: Option<&Path>,
 ) -> Result<(), Diagnostic> {
+    judge_tract_output_accounting(
+        effective_path,
+        effective_bytes,
+        manifest_path,
+        manifest_bytes,
+        truth_path,
+        vcf_path,
+    )
+    .map(drop)
+}
+
+/// El cuerpo de [`validate_published_tract_output_accounting`], que devuelve
+/// además **lo recontado** sobre los bytes: el juez completo lo necesita para
+/// rehacer, desde el TOML copiado, las cifras de tracto que los dos documentos
+/// tienen que publicar (DT-052). Sin sección de loci no recuenta nada y
+/// devuelve ceros: sin loci no hay registros ni piezas de repetición.
+fn judge_tract_output_accounting(
+    effective_path: &Path,
+    effective_bytes: &[u8],
+    manifest_path: &Path,
+    manifest_bytes: &[u8],
+    truth_path: &Path,
+    vcf_path: Option<&Path>,
+) -> Result<RealizedTractOutput, Diagnostic> {
     let manifest: Value = serde_json::from_slice(manifest_bytes)
         .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
     let Some(section) = manifest.get("repeat_loci") else {
         // Sin loci no hay contabilidad de tracto que juzgar, y exigirla sería
         // inventar una obligación donde el manifiesto no promete nada.
-        return Ok(());
+        return Ok(RealizedTractOutput::default());
     };
     let accounting = section
         .get("tract_output")
@@ -596,16 +620,27 @@ pub fn validate_published_tract_output_accounting(
             "las bases de tracto realizadas superan la cota declarada",
         ));
     }
-    Ok(())
+    Ok(RealizedTractOutput {
+        truth_bases: recomputed_truth,
+        vcf_bases: recomputed_vcf,
+        vcf_by_locus: recomputed_by_locus.into_iter().collect(),
+    })
 }
 
-/// Recuenta las bases de tracto releyendo el `truth.jsonl` como JSON.
+/// Recuenta las bases de tracto releyendo el `truth.jsonl` como JSON, **línea
+/// a línea**: la verdad puede medir cientos de megas, y leerla entera en una
+/// cadena subía el pico de memoria del juez en más de un tercio (DT-052).
 fn recount_truth_tract_bases(path: &Path) -> Result<u64, Diagnostic> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|error| manifest_error(path, format!("verdad no legible: {error}")))?;
+    use std::io::BufRead;
+    let unreadable =
+        |error: std::io::Error| manifest_error(path, format!("verdad no legible: {error}"));
     let mut total = 0_u64;
-    for line in text.lines().filter(|line| !line.trim().is_empty()) {
-        let record: Value = serde_json::from_str(line)
+    for line in std::io::BufReader::new(File::open(path).map_err(unreadable)?).lines() {
+        let line = line.map_err(unreadable)?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let record: Value = serde_json::from_str(&line)
             .map_err(|error| manifest_error(path, format!("línea de verdad ilegible: {error}")))?;
         let mut add = |value: Option<&Value>| {
             if let Some(bases) = value.and_then(Value::as_str) {
@@ -653,23 +688,13 @@ fn recount_vcf_tract_bases(
     loci: &BTreeSet<(String, u64, u64, String)>,
     manifest_path: &Path,
 ) -> Result<(u64, BTreeMap<String, u64>), Diagnostic> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| manifest_error(path, format!("VCF no legible: {error}")))?;
-    let text = if path.extension().is_some_and(|extension| extension == "gz") {
-        let mut bytes = std::io::Cursor::new(bytes);
-        crate::bgzf_blocks::reject_oversized_bgzf_blocks(&mut bytes)
-            .map_err(|fault| manifest_error(path, format!("VCF BGZF no legible: {fault}")))?;
-        let mut reader = noodles_bgzf::io::Reader::new(bytes);
-        let mut decoded = String::new();
-        std::io::Read::read_to_string(&mut reader, &mut decoded)
-            .map_err(|error| manifest_error(path, format!("VCF BGZF no legible: {error}")))?;
-        decoded
-    } else {
-        String::from_utf8(bytes).map_err(|_| manifest_error(path, "VCF no es UTF-8"))?
-    };
     let mut total = 0_u64;
     let mut by_locus = BTreeMap::<String, u64>::new();
-    for line in text.lines().filter(|line| !line.starts_with('#')) {
+    for line in published_vcf_lines(path)? {
+        let line = line?;
+        if line.starts_with('#') {
+            continue;
+        }
         let fields = line.split('\t').collect::<Vec<_>>();
         let Some(info) = fields.get(7) else { continue };
         if !info.split(';').any(|field| field.starts_with("RN=")) {
@@ -698,6 +723,43 @@ fn recount_vcf_tract_bases(
         *entry = entry.saturating_add(bases);
     }
     Ok((total, by_locus))
+}
+
+/// Las líneas de un VCF publicado, de texto o BGZF, leídas **por flujo**: ni
+/// los bytes ni el texto descomprimido se cargan enteros (DT-052). Un BGZF se
+/// recorre antes bloque a bloque para rechazar el que declare más de 64 KiB
+/// descomprimidos, que haría abortar al lector (DT-030).
+fn published_vcf_lines(
+    path: &Path,
+) -> Result<impl Iterator<Item = Result<String, Diagnostic>>, Diagnostic> {
+    use std::io::BufRead;
+    let mut file = std::io::BufReader::new(
+        File::open(path)
+            .map_err(|error| manifest_error(path, format!("VCF no legible: {error}")))?,
+    );
+    let compressed = path.extension().is_some_and(|extension| extension == "gz");
+    let reader: Box<dyn BufRead> = if compressed {
+        crate::bgzf_blocks::reject_oversized_bgzf_blocks(&mut file)
+            .map_err(|fault| manifest_error(path, format!("VCF BGZF no legible: {fault}")))?;
+        Box::new(noodles_bgzf::io::Reader::new(file))
+    } else {
+        Box::new(file)
+    };
+    let path = path.to_path_buf();
+    // Los mismos motivos que la lectura entera de antes: en un BGZF, cualquier
+    // fallo es de descompresión; en texto, `InvalidData` es UTF-8 inválido.
+    Ok(reader.lines().map(move |line| {
+        line.map_err(|error| {
+            let detail = if compressed {
+                format!("VCF BGZF no legible: {error}")
+            } else if error.kind() == std::io::ErrorKind::InvalidData {
+                "VCF no es UTF-8".to_owned()
+            } else {
+                format!("VCF no legible: {error}")
+            };
+            manifest_error(&path, detail)
+        })
+    }))
 }
 
 /// Bases de tracto que los documentos publicados llevan de verdad.
@@ -2405,7 +2467,7 @@ fn validate_published_resources_v3(
         matrix.as_ref(),
         effective_path,
     )?;
-    let truth_tally = validate_physical_truth(
+    let (truth_tally, truth_execution_id) = validate_physical_truth(
         root,
         &artifacts,
         &physical_config,
@@ -2442,6 +2504,48 @@ fn validate_published_resources_v3(
         source_reference,
         &truth_tally,
         effective_path,
+        manifest_path,
+    )?;
+    // **La contabilidad de bases de tracto** (DT-052). Primero el juez que la
+    // recuenta releyendo la verdad y el VCF publicados, que ata los dos
+    // documentos entre sí y con lo recontado; después, con lo recontado, la
+    // comparación con lo que resuelve el TOML copiado, que es lo único que ata
+    // la cota declarada. Releer la verdad y el VCF aquí es deliberado: el
+    // recuento va sobre los bytes, por un camino que no comparte nada con el
+    // lector tipado de la verdad que acaba de juzgarla.
+    let measured_tract_output = match artifacts
+        .iter()
+        .find(|artifact| artifact.id == "truth-jsonl")
+    {
+        // Sin verdad no hay nada publicado que recontar: las cifras medidas
+        // tienen que ser cero, y la comparación de abajo lo exige.
+        None => RealizedTractOutput::default(),
+        Some(truth) => judge_tract_output_accounting(
+            effective_path,
+            effective_bytes,
+            manifest_path,
+            manifest_bytes,
+            &root.join(&truth.path),
+            artifacts
+                .iter()
+                .find(|artifact| artifact.id == crate::vcf_publication::VCF_ARTIFACT_ID)
+                .map(|vcf| root.join(&vcf.path))
+                .as_deref(),
+        )?,
+    };
+    validate_published_tract_bounds(
+        effective,
+        manifest_bytes,
+        &physical_config,
+        &measured_tract_output,
+        effective_path,
+        manifest_path,
+    )?;
+    validate_published_execution_ids(
+        root,
+        &artifacts,
+        manifest_bytes,
+        truth_execution_id.as_deref(),
         manifest_path,
     )?;
     drop(inserted_reference);
@@ -3263,8 +3367,8 @@ fn validate_physical_technical_event(
     // sustituciones—; sin esta igualdad, el bloque del manifiesto de evento
     // solo lo juzgaba su esquema, y unas fracciones cambiadas junto con su
     // probabilidad pasaban. Se reprodujo el 08/10/2026 antes de escribirla.
-    // Cubre el bloque entero, no el resto de la sección de amplificación del
-    // manifiesto de evento, que sigue sin atarse a la efectiva (DT-043).
+    // Cubre el bloque entero; el resto de los parámetros de la amplificación
+    // lo ata la comparación del final de esta función (DT-043).
     fn pcr_stutter(artifacts: Option<&Value>) -> Option<&Value> {
         artifacts
             .and_then(|artifacts| artifacts.get("pcr"))
@@ -3309,6 +3413,39 @@ fn validate_physical_technical_event(
             effective_path,
             "el manifiesto técnico físico no coincide con la configuración efectiva, semilla o referencia",
         ));
+    }
+    // **Los parámetros de la amplificación del manifiesto de evento son los de
+    // la configuración efectiva** (DT-043). El bloque de la efectiva ya está
+    // atado exactamente a lo que resuelve el TOML copiado (la comparación de
+    // `technical_event` en `validate_effective_targets_against_configuration`),
+    // y el manifiesto de evento publica el mismo bloque —sale de la misma
+    // función del productor— más los recuentos realizados. Se exige que cada
+    // clave de la efectiva aparezca **idéntica** en el manifiesto de evento:
+    // así un `cycles` cambiado a 12 con las huellas rehechas ya no pasa. Los
+    // recuentos realizados (familias, parejas, histograma, linaje) no están en
+    // la efectiva y quedan fuera: no hay nada en el paquete contra lo que
+    // compararlos sin rehacer la amplificación. El catálogo de azar de este
+    // bloque (`artifacts.pcr.rng_catalog`) entra en la comparación: los dos
+    // documentos publican el mismo, y no es el de la raíz del evento que
+    // discute DT-040. Sin amplificación el bloque es solo `applicable`.
+    let event_pcr = event
+        .get("artifacts")
+        .and_then(|artifacts| artifacts.get("pcr"));
+    for (key, value) in technical_event
+        .get("artifacts")
+        .and_then(|artifacts| artifacts.get("pcr"))
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        if event_pcr.and_then(|pcr| pcr.get(key)) != Some(value) {
+            return Err(effective_error(
+                effective_path,
+                format!(
+                    "el campo {key} de la amplificación del manifiesto técnico no es el de la configuración efectiva"
+                ),
+            ));
+        }
     }
     Ok(())
 }
@@ -4381,6 +4518,119 @@ fn validate_published_repeat_loci(
     Ok(())
 }
 
+/// **Las cifras de tracto publicadas son las que resuelve el TOML copiado,
+/// completadas con lo medido** (DT-052).
+///
+/// [`judge_tract_output_accounting`] ata el manifiesto y la configuración
+/// efectiva entre sí y con lo que recuenta sobre los bytes, pero **no al
+/// TOML**: una cota de la verdad inflada a la vez en los dos documentos, una
+/// cota por locus o el tope declarado cambiados pasaban. Aquí se rehacen las
+/// dos secciones con las funciones del productor, desde la configuración
+/// reconstruida del TOML y las cifras **recontadas** (no las publicadas), y se
+/// exige que coincidan exactamente:
+///
+/// 1. en el manifiesto general, la contabilidad de tracto entera: la cota de la
+///    verdad sale del TOML; la parte VCF de la cota y las bases realizadas, de
+///    lo recontado; los totales, de sumarlas;
+/// 2. en la configuración efectiva, `repeat_output_budget` entero: la cota de
+///    la verdad, la de cada locus, el tope declarado y las copias por copia de
+///    haplotipo salen del TOML, y la parte VCF —en total y por locus— es lo que
+///    el VCF publicado lleva, porque se mide al publicar (DTC-097).
+///
+/// El manifiesto va primero: si solo él está alterado, la comparación entre
+/// los dos documentos de [`judge_tract_output_accounting`] ya lo rechazó, de
+/// modo que aquí solo llega una alteración **coherente** en los dos, y el
+/// motivo nombra el documento que se lee primero.
+fn validate_published_tract_bounds(
+    effective: &serde_json::Map<String, Value>,
+    manifest_bytes: &[u8],
+    physical_config: &EffectiveConfig,
+    measured: &RealizedTractOutput,
+    effective_path: &Path,
+    manifest_path: &Path,
+) -> Result<(), Diagnostic> {
+    // El manifiesto ya lo leyeron, como JSON, los jueces de antes; si no se
+    // pudiera leer, la sección ausente no coincidiría con la esperada.
+    let manifest: Value = serde_json::from_slice(manifest_bytes).unwrap_or(Value::Null);
+    let tract_output =
+        |section: Option<&Value>| section.and_then(|section| section.get("tract_output").cloned());
+    let expected = repeat_loci_manifest_json(physical_config, &[], measured)?;
+    if tract_output(manifest.get("repeat_loci")) != tract_output(expected.as_ref()) {
+        return Err(repeat_section_error(
+            manifest_path,
+            "la contabilidad de tracto del manifiesto no es la que resuelven el TOML y lo medido",
+        ));
+    }
+    if physical_config.document_version() == DeclaredDocumentVersion::V4 {
+        let mut expected =
+            json!({"repeat_output_budget": repeat_output_budget_json(physical_config)});
+        publish_measured_vcf_tract_bases(&mut expected, measured);
+        if effective.get("repeat_output_budget") != expected.get("repeat_output_budget") {
+            return Err(effective_error(
+                effective_path,
+                "la cota de bases de tracto efectiva no es la que resuelven el TOML y lo que el VCF lleva",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// **La verdad y el VCF son de esta ejecución** (DT-054).
+///
+/// Los dos llevan en su cabecera el `execution_id` de la ejecución que los
+/// produjo: la verdad en `execution_id`, el VCF en la línea
+/// `##gps_execution_id=`. El juez ata el del manifiesto general a la semilla y
+/// a los bytes del TOML copiado, pero hasta el 11/10/2026 nadie comparaba con él
+/// los de esas cabeceras: un TOML copiado cambiado de forma coherente —su
+/// huella, el tope de la efectiva y el `execution_id` del manifiesto rehechos—
+/// pasaba con una verdad cuya cabecera seguía siendo la de la ejecución
+/// original. El manifiesto de evento no publica `execution_id`.
+fn validate_published_execution_ids(
+    root: &Path,
+    artifacts: &[ArtifactRecord],
+    manifest_bytes: &[u8],
+    truth_execution_id: Option<&str>,
+    manifest_path: &Path,
+) -> Result<(), Diagnostic> {
+    // El manifiesto ya lo leyeron, como JSON, los jueces de antes, y el
+    // `execution_id` que se compara es el que ya se ató al TOML.
+    let manifest: Value = serde_json::from_slice(manifest_bytes).unwrap_or(Value::Null);
+    let expected = manifest.get("execution_id").and_then(Value::as_str);
+    if truth_execution_id.is_some() && truth_execution_id != expected {
+        return Err(manifest_error(
+            manifest_path,
+            "la cabecera de la verdad publicada no lleva el execution_id del manifiesto general",
+        ));
+    }
+    let Some(vcf) = artifacts
+        .iter()
+        .find(|artifact| artifact.id == crate::vcf_publication::VCF_ARTIFACT_ID)
+    else {
+        return Ok(());
+    };
+    // Solo la cabecera: se deja de leer en la primera línea que no es de
+    // metadatos.
+    let prefix = format!("##{}=", crate::vcf_contract::VCF_EXECUTION_META_KEY);
+    let mut published = None;
+    for line in published_vcf_lines(&root.join(&vcf.path))? {
+        let line = line?;
+        if !line.starts_with("##") {
+            break;
+        }
+        if let Some(value) = line.strip_prefix(&prefix) {
+            published = Some(value.to_owned());
+            break;
+        }
+    }
+    if published.as_deref() != expected {
+        return Err(manifest_error(
+            manifest_path,
+            "la cabecera del VCF publicado no lleva el execution_id del manifiesto general",
+        ));
+    }
+    Ok(())
+}
+
 /// **El juez completo de la verdad sobre los bytes publicados** (DT-020 y
 /// DT-021), con la matriz publicada y la población de cada individuo según la
 /// configuración efectiva: cada caso contra las copias que reconstruye por su
@@ -4396,7 +4646,7 @@ fn validate_physical_truth(
     reference: &Reference,
     matrix: Option<&PreparedPopulationSnvs>,
     effective_path: &Path,
-) -> Result<TruthRepeatTally, Diagnostic> {
+) -> Result<(TruthRepeatTally, Option<String>), Diagnostic> {
     // **Sin poblaciones iniciales** la verdad no lleva copias ni casos, pero su
     // cabecera sigue siendo contrato (DT-027): el lector de la verdad la
     // juzga siempre. El juez semántico completo, que solo añade algo con
@@ -4407,7 +4657,7 @@ fn validate_physical_truth(
         .iter()
         .find(|artifact| artifact.id == "truth-jsonl")
     else {
-        return Ok(TruthRepeatTally::new());
+        return Ok((TruthRepeatTally::new(), None));
     };
     let judge_semantics = !physical_config.initial_populations().is_empty();
     let populations = physical_config
@@ -4497,7 +4747,12 @@ fn validate_physical_truth(
             format!("la verdad publicada trae una copia que la simulación no tiene: {extra:?}"),
         ));
     }
-    Ok(truth_repeat_tally(&document, physical_config))
+    // Con el recuento, el `execution_id` de la cabecera, que el juez completo
+    // compara con el del manifiesto general (DT-054).
+    Ok((
+        truth_repeat_tally(&document, physical_config),
+        Some(document.header.execution_id.clone()),
+    ))
 }
 
 /// El tracto que una copia lleva en un locus, tal como la verdad lo publica:
