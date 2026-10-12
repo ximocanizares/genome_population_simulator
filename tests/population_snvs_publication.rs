@@ -4,7 +4,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::execution::{
-    ExecutionAuthorizations, execute_validated_config, execute_validated_config_with_authorizations,
+    ExecutionAuthorizations, execute_validated_config,
+    execute_validated_config_with_authorizations, preflight_validated_config_with_authorizations,
 };
 use genome_population_simulator::identity::{SequenceId, derive_matrix_variant_id};
 use genome_population_simulator::integrity::identify_file;
@@ -695,5 +696,68 @@ length = 20
         "must reject the semantic/canonical mismatch, not a stale checksum: {}",
         error.render_human()
     );
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// Una matriz suministrada con una posición que el contrato no escribe así
+/// (`^[1-9][0-9]*$`: sin cero inicial ni signo) se rechaza **al validar**, con
+/// el diagnóstico de entrada que ya usan las posiciones inválidas. Antes,
+/// `"08"` y `"+8"` pasaban `validate` y la ejecución fallaba después con un
+/// diagnóstico engañoso («efectivo activo ausente»).
+#[test]
+fn a_supplied_matrix_position_must_be_canonical_when_validating() {
+    let root = temporary();
+    fs::create_dir_all(&root).expect("root");
+    let fasta = root.join("reference.fa");
+    fs::write(&fasta, b">chr1\nACGTACGTACGTACGTACGT\n").expect("reference");
+    let config = root.join("supplied.toml");
+    let input = root.join("input.tsv");
+    fs::write(
+        &config,
+        format!(
+            r#"config_kind = "general"
+schema_version = "2"
+seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+[population_snvs]
+mode = "supplied"
+input_path = "{}"
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "{}"
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 20
+"#,
+            input.display(),
+            fasta.display()
+        ),
+    )
+    .expect("config");
+    let matrix = |position: &str| {
+        format!(
+            "contig\tposition\tref\talt\tpopulation_id\talt_af\tsource_id\nchr1\t{position}\tT\tC\tP1\t0.1\tstudy\n"
+        )
+    };
+    // Control positivo: la misma matriz con la posición canónica se acepta.
+    fs::write(&input, matrix("8")).expect("input");
+    let validate = || {
+        preflight_validated_config_with_authorizations(
+            &load_and_validate_config(&config).expect("configuración"),
+            ExecutionAuthorizations::default(),
+        )
+    };
+    validate().expect("control positivo: posición canónica");
+    for position in ["08", "+8", "0"] {
+        fs::write(&input, matrix(position)).expect("input");
+        let error = validate().expect_err("una posición no canónica se rechaza al validar");
+        assert_eq!(error.code(), "GPS-CONF-008", "posición {position}");
+        assert_eq!(
+            error.context()["detail"],
+            format!("InvalidPosition {{ row_index: 0, value: \"{position}\" }}"),
+            "posición {position}"
+        );
+    }
     fs::remove_dir_all(root).expect("cleanup");
 }

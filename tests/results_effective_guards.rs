@@ -2238,6 +2238,40 @@ fn without_the_vcf(effective: &mut Value, manifest: &mut Value) {
         .retain(|artifact| artifact["id"] != "truth-vcf");
 }
 
+/// El borde de `normalization.tolerance` en el juez de la pareja: el máximo
+/// 1e-6 se acepta, y el primer valor por encima y el primer negativo por debajo
+/// de 0 se rechazan con su motivo exacto.
+#[test]
+fn the_effective_normalization_tolerance_is_judged_at_its_edges() {
+    let package = publish_rich();
+    assert_cases(
+        Judge::Pair,
+        &package,
+        &[
+            eff(
+                "tolerancia justo por encima de 1e-6",
+                "normalization.tolerance inválida",
+                "/normalization/tolerance",
+                json!(next_up(1e-6)),
+            ),
+            eff(
+                "tolerancia negativa mínima",
+                "normalization.tolerance inválida",
+                "/normalization/tolerance",
+                json!(-f64::from_bits(1)),
+            ),
+        ],
+    );
+    assert_accepted(
+        Judge::Pair,
+        &package,
+        &[
+            ok("tolerancia 1e-6", "/normalization/tolerance", json!(1e-6)),
+            ok("tolerancia 0", "/normalization/tolerance", json!(0.0)),
+        ],
+    );
+}
+
 #[test]
 fn the_effective_config_must_be_the_one_the_toml_resolves() {
     let package = publish_rich();

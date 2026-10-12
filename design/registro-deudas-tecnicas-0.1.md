@@ -34,7 +34,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026); tanda 3, matriz de SNV (08/10/2026); tanda 4, manifiesto de evento (08/10/2026); tanda 5, verdad (09/10/2026); tanda 6, primera parte de `results.rs`: microsatélites, tartamudeo y PCR (10/10/2026); tanda 7, segunda parte de `results.rs`: la configuración efectiva (11/10/2026) |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026); punto ciego estructural cerrado (04/10/2026); nueve jueces más vigilados (05/10/2026); tanda 1 de cobertura, jueces pequeños (08/10/2026); tanda 2, jueces medianos (08/10/2026); tanda 3, matriz de SNV (08/10/2026); tanda 4, manifiesto de evento (08/10/2026); tanda 5, verdad (09/10/2026); tanda 6, primera parte de `results.rs`: microsatélites, tartamudeo y PCR (10/10/2026); tanda 7, segunda parte de `results.rs`: la configuración efectiva (11/10/2026); tanda 8, tercera parte de `results.rs`: estadísticas iniciales de las poblaciones y auditoría de la matriz (12/10/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | **Cerrada (06/10/2026)**, borradas; los dos huecos que dejaban, cubiertos con pruebas nuevas de la vía de parejas |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | **Cerrada (06/10/2026)** |
@@ -88,6 +88,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-052 | La contabilidad de bases de tracto no la juzga nadie al publicar: su juez no está cableado y, aunque lo estuviera, no ata las cotas al TOML | Media | 10/10/2026 | **Cerrada (10/10/2026)**, en un cambio propio tras DT-051 |
 | DT-053 | Las copias realizadas de cada alelo no se atan al sorteo rehecho con la semilla | Baja | 10/10/2026 | Abierta; decidido no arreglarla por ahora |
 | DT-054 | Nadie compara el `execution_id` de la cabecera de la verdad y del VCF con el del manifiesto general: un TOML copiado cambiado de forma coherente pasaba con la verdad de la ejecución original | Media | 11/10/2026 | **Cerrada (11/10/2026)**, en el mismo cambio que DT-052 |
+| DT-055 | El juez de la pareja efectiva/manifiesto no comprueba dos desigualdades de las estadísticas iniciales que la arquitectura fija (los genotipos realizados cuentan solo observaciones completas); las caza después el juez completo | Baja | 12/10/2026 | Abierta |
 
 ---
 
@@ -1611,6 +1612,175 @@ cuenta la puerta. DT-040 (catálogo de azar con
 tartamudeo clonal), DT-041 (esquema del manifiesto sin perfil con PCR), DT-043, DT-046
 y DT-053 no se tocan y ninguna prueba nueva choca con ellas: el evento técnico que se
 prueba es el sin amplificación y sin tartamudeo, con el catálogo v3.
+
+**Tanda 8, tercera parte de `results.rs` (12/10/2026): 75 sin disparar menos (de 327
+a 252); ninguna guarda borrada, las comprobaciones siguen en 721.** `results.rs` es el
+juez de los recursos publicados, de la configuración efectiva y del manifiesto general.
+Esta tanda toca las estadísticas iniciales de las poblaciones (lo que el manifiesto
+publica sobre cuántas copias de cada alelo salieron y cuántos genotipos de cada clase),
+la auditoría de la normalización de frecuencias y la parte del juez físico que relee la
+matriz de SNV: 84 guardas sin disparar al empezar; quedan **9**, todas anotadas junto a
+la guarda como inalcanzables con su porqué real.
+
+| Función | Sin disparar antes | Hoy |
+|---|---|---|
+| `validate_initial_population_statistics` (la raíz) | 7 | 1 |
+| `validate_initial_population_statistics_provenance` (procedencia y restricciones SNV explícitas) | 7 | 0 |
+| `validate_initial_population_statistics_population` | 6 | 0 |
+| `validate_initial_population_statistics_locus` | 38 | 0 |
+| `validate_serialized_normalization_audit` | 16 | 0 |
+| `validate_physical_population_snvs` (el juez físico de la matriz) | 10 | 8 |
+| **Total** | **84** | **9** |
+
+- *Cubiertas con prueba y motivo exacto (75).* `tests/results_population_snvs_guards.rs`
+  (13 pruebas) parte de un paquete **publicado de verdad** por el programa (referencia
+  simulada de dos secuencias, matriz generada de tres loci, tres poblaciones con
+  ploidías 2, 2 y 3 y los dos modelos genotípicos) y altera **un solo punto del
+  manifiesto**; el juez lee el manifiesto antes que nada, de modo que el rechazo sale del
+  lector del manifiesto y, si la guarda no rechazara, el caso cae después en la
+  comparación efectiva/manifiesto con **otro** texto (esto es lo que discrimina la
+  auditoría, cuyas guardas comparten un único motivo). Los casos «aceptado» se aplican a
+  los dos documentos por igual. Cada tabla lleva control positivo y comprueba que la
+  alteración alteró. Para las ramas que el generador no produce, la base añade un locus
+  **sintético** (tres alelos; o sin una sola copia observada, para la frecuencia
+  realizada +0.0/-0.0 comparada por bits) o una población sintética (ploidías 1 y 10);
+  lo dice el nombre de cada función. Lado aceptado fijado: ploidías 1 y 10, fase 9,
+  coeficiente de endogamia 0 y 1, frecuencias y probabilidades 0 y 1, tolerancias 1e-12
+  (aceptado a 5e-13, rechazado a 1.5e-12), tolerancia de la auditoría 0 y 1e-6, posición 1,
+  observaciones genotípicas iguales a los individuos, dos copias ausentes por deleción, la
+  clave de unicidad de restricciones, loci y grupos difiriendo en una sola componente.
+  El juez físico se alcanza con el juez completo: una matriz presentada como
+  reutilizada que el TOML genera, y otra que el TOML ni declara (con el TOML copiado
+  alterado y el identificador de ejecución rehecho: la derivación es pública), además de
+  tres rechazos que antes solo disparaban otras pruebas sin afirmar su texto (el
+  enlace de los documentos frente al par publicado, por auditoría y por origen, y el par
+  con otro TSV y su identidad rehecha en el catálogo).
+- *Inalcanzables (9).* Ningún paquete publicado y manipulado llega a ellas; la prueba
+  `unreachable_physical_snv_guards_are_shadowed_by_other_checks` ejecuta el intento y
+  **no las discrimina** (otra comprobación rechaza antes, con su texto).
+  - *Sombreadas por la lectura de la referencia y de la efectiva (4 + 1 de la
+    tolerancia):* el artefacto FASTA ausente de la referencia o del catálogo, en la rama
+    de reutilización y en la otra (dos guardas por rama), con y sin referencia final por
+    inserción (`read_physical_reference`, `judge_inserted_reference` y la validación de la
+    referencia efectiva lo rechazan antes), y la tolerancia de normalización (la efectiva
+    ya se ató al TOML por bits).
+  - *Sombreadas por el lector del manifiesto (3):* metadatos sin identificador o fuera del
+    catálogo y TSV ausente del catálogo.
+  - *Sombreada por la validación de la población (1):* el identificador de una población
+    estadística (lo exige antes `validate_initial_population_statistics_population`).
+  - Quedan también inalcanzables **por llamante** las del ayudante compartido
+    `validate_manifest_population_snvs` cuando lo llama la efectiva: llega ya igualada
+    al manifiesto, que el mismo ayudante rechazó primero.
+- *Pendientes: ninguno.* Ninguna guarda exigía cambiar código de producción (solo
+  comentarios).
+
+**Defecto encontrado y cerrado en la ronda 2 (12/10/2026, baja).** El juez de la pareja
+efectiva/manifiesto aceptaba una posición de la auditoría escrita `"08"` o `"+8"`, que el
+esquema del manifiesto prohíbe (`^[1-9][0-9]*$`): la lectura usaba `str::parse::<u64>`. El
+mismo patrón laxo estaba en el lector del TSV de la matriz suministrada
+(`prepare_population_snvs`): con `"08"` o `"+8"` **`validate` pasaba** y `run` fallaba después con
+un diagnóstico engañoso («efectivo activo ausente»). Por decisión del responsable se arregló
+en los dos sitios con una función común, `parse_canonical_position` (`src/population_snvs.rs`):
+exige un primer carácter de 1 a 9 antes de leer el número, de modo que rechaza el cero
+inicial, el signo y el 0. En el TSV el rechazo es el `InvalidPosition` (GPS-CONF-008) que ya
+usaban las posiciones inválidas, y sale en `validate`. Pruebas con motivo exacto para `"08"`,
+`"+8"` y `"0"`: la auditoría en `the_normalization_audit_groups_are_judged`; el TSV en
+`a_supplied_matrix_position_must_be_canonical_when_validating` (`validate` real, con control
+positivo) y en dos filas nuevas de la tabla de `prepare_population_snvs`. **La lectura de la auditoría en
+los metadatos (`validate_normalization_audit_document`, la vía de la reutilización) se
+arregló también**, con la misma función y su `audit_error("position")`; prueba con motivo
+exacto para `"08"`, `"+8"` y `"0"` en `the_audit_judge_rejects_an_identity_that_does_not_fit_the_matrix_or_the_reference`
+(el mutante que vuelve al `parse` laxo muere). **Sin tocar, y no son validadores:** las dos
+relecturas de un texto que el bucle anterior ya validó con `parse_canonical_position`
+(`prepare_population_snvs`, y el orden de grupos, que usa `unwrap_or(u64::MAX)` solo para
+ordenar), y el `parse` de la posición de un registro VCF en `src/results.rs`
+(`unwrap_or(0)`), que mide bases de un VCF que el propio programa escribió y no juzga
+la forma del texto.
+
+**Mitades equivalentes demostradas (32 mutantes que sobreviven, de los que 9 son los de
+las inalcanzables).**
+  - 13 son mitades `is_finite` (un decimal no finito, `1e999`, lo lee `as_f64` como
+    `None` y lo rechaza antes la lectura con su propio motivo; la premisa y cada sitio los
+    fija `non_finite_decimals_never_reach_the_finite_halves`).
+  - 2 son `>` frente a `>=` en las tolerancias de 1e-12 de las sumas de frecuencias y de
+    probabilidades: la diferencia de dos `f64` con 1.0 es múltiplo de 2^-52 (o 2^-53
+    por debajo) y 1e-12 no lo es, así que nunca vale exactamente 1e-12.
+  - 6 son las mitades de la lista cerrada de claves (longitud y clave desconocida) de
+    la restricción explícita, del grupo de la auditoría y de su valor: todas las claves
+    son obligatorias y se exigen después con el mismo motivo. **En la raíz, la procedencia
+    y la población sí se distinguen** (quitar o renombrar la procedencia, los algoritmos,
+    el modelo o los loci cambia el motivo del rechazo posterior): casos añadidos tras la
+    primera pasada, que dejó vivos seis mutantes.
+  - 1 es `index <= 0` frente a `index == 0` (un índice `usize` no es negativo).
+  - 1 es la mitad `metadata_sha256` del enlace del par físico: el lector del manifiesto
+    ya exige que sea el resumen del artefacto del catálogo y los bytes se acaban de
+    verificar contra él; anotada junto a la guarda.
+
+**Verificación por mutación.** Sobre cinco copias fuera del repositorio (el arnés se
+niega a trabajar bajo `/home/ximo/devel`, cada copia con su directorio de compilación y
+su copia de seguridad fuera de git), **un mutante por ejecución**, con la huella SHA antes
+(`6138a3f136…`), mutada y restaurada de cada uno (coincidieron todas entre «antes» y
+«restaurada», con `touch` tras restaurar y comprobación final de que las cinco copias
+son idénticas). Primera pasada contra el binario de pruebas nuevo: 422 mutantes distintos
+(335 generados: cada motivo, cada guarda entera, cada mitad de cada disyunción, cada
+operador y cada literal entero; 78 escritos a mano para las derivaciones que alimentan
+guardas —extremos cerrados y abiertos de los rangos, cada ploidía límite, las
+tolerancias, los desbordes con `wrapping_*`, las componentes de las claves de unicidad,
+el orden de grupos y valores, el origen y la existencia de la fuente física—; 9 más
+reescritos para los que no compilaban). Resultado: **376 mueren**, **14 no compilan**
+(los 9 que importaban se reescribieron y mueren; los otros 5 son mitades `is_finite`
+mal formadas) y **32 sobreviven**, todos equivalentes o inalcanzables (arriba). La
+primera pasada dejó vivos 7 que **no lo eran** (las dos mitades de la lista de claves de
+la raíz, de la procedencia y de la población; la posición 1 de la auditoría, que un
+literal `> 1` rechazaba; y la suma desbordada `observadas + ausentes`), que se cubrieron
+con casos nuevos y mueren. Los 14 mutantes del juez físico que sobrevivían al binario
+nuevo se corrieron contra la **batería entera**, de uno en uno sobre copias con su propio
+directorio temporal: 9 mueren por pruebas ajenas, 3 mueren con casos nuevos (los textos
+del par físico y el origen del enlace, que nadie afirmaba) y 2 sobreviven (la tolerancia
+inalcanzable y la mitad `metadata_sha256`).
+
+**Ronda 2 (revisión adversarial, 12/10/2026).** (1) Se quitó el caso «posición con un cero
+a la izquierda» del juez físico: exigía el rechazo del enlace, que solo salía porque el
+juez de la pareja **aceptaba** el `"08"` (ver arriba el defecto, ya cerrado); la mitad de la
+auditoría que discriminaba la sigue discriminando «otra decisión de normalización». (2) Se
+cerró el `"08"` y el `"+8"` en la auditoría y en el TSV suministrado. (3) **Los documentos
+sintéticos y varios casos «aceptados» no cumplían el contrato**: la arquitectura fija que los
+genotipos realizados cuentan solo observaciones completas, y el locus de tres alelos, la
+población sintética, «dos copias ausentes por deleción» y «tantas observaciones como
+individuos» las incumplían aunque el docstring dijera lo contrario. Ahora la población
+sintética saca los recuentos de los alelos de sus genotipos, el locus de tres alelos cuadra
+(A = 2, G = 3, C = 1 con un individuo A/G, otro A/C y otro G/G), los casos aceptados fijan
+los genotipos que los cumplen y `assert_architecture_inequalities` lo comprueba sobre la
+base y sobre cada caso aceptado. El caso «tantas observaciones como individuos» se quitó: el
+paquete ya trae el límite y lo cubre el control positivo (la prueba lo afirma). El juez de
+la pareja **no** comprueba esas dos desigualdades; por decisión del responsable no se
+añaden y se registran como DT-055. (4) Los límites, que se probaban lejos del borde, se
+prueban **justo fuera**: `next_up(1.0)`, `next_up(1e-6)`, el negativo más pequeño
+representable (`-5e-324`) y la primera desviación representable por encima de 1e-12 (4504
+epsilon, frente a 4503 que se acepta), en la tolerancia y la frecuencia de referencia de la
+auditoría, en los valores de la auditoría, en las frecuencias objetivo y realizada del
+locus, en la probabilidad y el recuento esperados, en las dos sumas y en el coeficiente de
+endogamia. (5) `publish_files` crea ahora la guarda que borra el directorio antes de
+crearlo. (6) Los comentarios de las mitades `is_finite` se movieron al brazo `f_diploid` y se
+corrigieron: NaN y los infinitos nunca están en `0.0..=1.0`; en el filtro del recuento
+esperado (que sí aceptaría `+inf`) solo vale la premisa de la lectura. (7) Registrada en
+DT-045 la simplificación de leer la tolerancia de la configuración reconstruida.
+
+**Verificación por mutación de la ronda 2** (tres copias fuera del repositorio, un mutante
+por ejecución, huella antes `3583e33589…` en `results.rs` y `4b138c2fe4…` en
+`population_snvs.rs`, igual restaurada; `touch` tras restaurar): 30 mutantes de límites
+(cada rango `0.0..=1.0` por arriba y por abajo, `0.0..=1e-6`, `>= 0.0`, las dos tolerancias
+de 1e-12 en 1.4e-12 y 1.9e-12; los supervivientes son solo los de las líneas de
+comentario, que el generador también toca) más la vuelta al `parse` laxo en los dos sitios
+y cuatro del ayudante (`b'0'..=b'9'`, `b'1'..=b'8'`, admitir `+`, aceptarlo todo): **mueren
+todos los que tocan código**. Se repitieron los 77 escritos a mano y 5 reescritos de la
+primera ronda contra las pruebas nuevas: mueren todos salvo los equivalentes ya demostrados.
+
+**Alcance de «0 pendientes» en esta tanda.** Se refiere a las guardas del alcance que
+cuenta la puerta. DT-045 (las catorce guardas muertas de la reutilización de la matriz en
+`src/population_snvs.rs`), DT-049 y DT-053 no se tocan y ninguna prueba nueva choca con
+ellas: la reutilización de la matriz se prueba solo hasta la presentación como
+reutilizada.
 
 ---
 
@@ -4232,6 +4402,14 @@ restauración reciba la lista ya extraída. El total del juez bajaría a unas 12
 comprobaciones con 11 sin disparar. Las otras inalcanzables de la tanda 3 (cotas
 de redondeo, conversiones, invariantes entre recorridos) no se eliminan así.
 
+**Otra simplificación propuesta, de la tanda 8 de DT-001 (12/10/2026, sin hacer):**
+el juez físico de la matriz de SNV de `src/results.rs`
+(`validate_physical_population_snvs`) lee la tolerancia de normalización de la
+efectiva publicada, y esa lectura tiene una guarda inalcanzable (la efectiva ya se
+ató al TOML por bits). Podría leerla de la configuración ya reconstruida
+(`physical_config.normalization().tolerance()`), como hace la rama de
+reutilización, y esa inalcanzable desaparecería.
+
 ## DT-046. Referencias cruzadas internas del manifiesto de evento no atadas por su propio juez
 
 **Gravedad: baja.** Halladas en la tanda 4 de DT-001 (08/10/2026) al cubrir
@@ -4863,3 +5041,26 @@ verdad rehecha (y su huella), la del VCF. Falla contra el código anterior
 antes y restaurada `5a2b3d5a…7a18`): anular la comparación de la verdad (mutada
 `76cc2f52…549e`) y anular la del VCF (mutada `e0fd338b…bded`) mueren los dos, y
 solo por esta prueba.
+
+## DT-055. El juez de la pareja no comprueba que los genotipos realizados cuenten solo observaciones completas
+
+**Gravedad: baja.** Hallada por la revisión adversarial de la tanda 8 de DT-001
+(12/10/2026). La arquitectura (`design/arquitectura-0.1.md`, F2.3.5) fija que las
+estadísticas iniciales cuentan en los genotipos realizados **solo observaciones
+completas**. De ahí salen dos desigualdades por locus que el juez de la pareja
+efectiva/manifiesto (`validate_initial_population_statistics_locus` en
+`src/results.rs`) **no comprueba**:
+
+1. por alelo, la suma de dosis por recuento realizado de cada genotipo no supera el
+   recuento realizado de ese alelo;
+2. las observaciones genotípicas completas por la ploidía no superan las copias
+   observadas.
+
+Las caza después el juez completo, que rehace las estadísticas desde el TOML, la
+semilla y la matriz y las compara con las publicadas (`validate_physical_initial_population_statistics`),
+de modo que un paquete publicado de verdad nunca las incumple y un paquete
+manipulado no se acepta. Pero un documento que solo vea el juez de la pareja sí
+puede incumplirlas. Decisión del responsable: **registrarlo, no añadir las
+comprobaciones**. La prueba `tests/results_population_snvs_guards.rs` no consagra
+ningún documento que las incumpla: la base y cada caso «aceptado» pasan por
+`assert_architecture_inequalities`.

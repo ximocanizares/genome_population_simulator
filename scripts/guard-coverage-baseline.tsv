@@ -443,10 +443,16 @@
 # `parse_general_manifest_v1_object` y `retag_v1_pair_error`, todo con `#[allow(dead_code)]` y
 # sin ningún llamante): 66 comprobaciones, todas sin disparar, y 685 líneas. No es una
 # regresión: es lo que la puerta declara con la nota.
+# **El 12/10/2026 (tanda 8 de DT-001, estadísticas iniciales y auditoría de la matriz)
+# `src/results.rs` pasa de 327 a 252 sin disparar; las comprobaciones siguen en 721.** Son
+# 75 menos de las 84 del alcance (las estadísticas iniciales de las poblaciones, la
+# auditoría de la normalización y el juez físico de la matriz de SNV), que cubre
+# `tests/results_population_snvs_guards.rs` con su motivo exacto. Las 9 que quedan están
+# anotadas junto a la guarda como inalcanzables, con su porqué real.
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
-src/results.rs	721	327
+src/results.rs	721	252
 src/event_manifest.rs	147	8
 src/truth_validation.rs	121	32
 src/truth_schema.rs	69	8

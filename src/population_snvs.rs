@@ -731,17 +731,12 @@ fn prepare_population_snvs(
                 value: row.field(1).to_owned(),
             })
         })?;
-        let position = row
-            .field(2)
-            .parse::<u64>()
-            .ok()
-            .filter(|value| *value > 0)
-            .ok_or_else(|| {
-                rejected(PopulationSnvsPreparationError::InvalidPosition {
-                    row_index,
-                    value: row.field(2).to_owned(),
-                })
-            })?;
+        let position = parse_canonical_position(row.field(2)).ok_or_else(|| {
+            rejected(PopulationSnvsPreparationError::InvalidPosition {
+                row_index,
+                value: row.field(2).to_owned(),
+            })
+        })?;
         let reference_base = parse_snv_base(row.field(3), row_index, "ref")?;
         let alternate = parse_snv_base(row.field(4), row_index, "alt")?;
         if reference_base == alternate {
@@ -1738,11 +1733,8 @@ pub fn validate_normalization_audit_document(
         {
             return Err(audit_error("population_id no pertenece a la matriz"));
         }
-        let position = position_text
-            .parse::<u64>()
-            .ok()
-            .filter(|position| *position > 0)
-            .ok_or_else(|| audit_error("position"))?;
+        let position =
+            parse_canonical_position(position_text).ok_or_else(|| audit_error("position"))?;
         let reference_base =
             parse_snv_base(reference_text, 0, "ref").map_err(|_| audit_error("ref"))?;
         let sequence_id =
@@ -1962,6 +1954,17 @@ fn sha256_bytes(bytes: &[u8]) -> String {
     let mut digest = Sha256::new();
     digest.update(bytes);
     format!("{:x}", digest.finalize())
+}
+
+/// Una posición de 1 base tal como la escribe el contrato (`^[1-9][0-9]*$`):
+/// sin signo, sin ceros a la izquierda y mayor que cero. `str::parse::<u64>`
+/// admite `"+8"` y `"08"`, que el esquema prohíbe, y por eso no basta.
+pub(crate) fn parse_canonical_position(text: &str) -> Option<u64> {
+    // Con el primer carácter en 1..=9 solo queda un signo o un dígito de más,
+    // y `parse` rechaza lo que no sea un número: no hace falta mirar el resto.
+    matches!(text.as_bytes().first(), Some(b'1'..=b'9'))
+        .then(|| text.parse::<u64>().ok())
+        .flatten()
 }
 
 fn parse_snv_base(
@@ -4215,6 +4218,16 @@ chr2\t4\tA\tG\tP2\t0.1
             "position",
             "position negative",
         );
+        check(
+            &|a| a[0]["position"] = json!("08"),
+            "position",
+            "position with a leading zero",
+        );
+        check(
+            &|a| a[0]["position"] = json!("+8"),
+            "position",
+            "position with a plus sign",
+        );
         check(&|a| a[0]["ref"] = json!("N"), "ref", "ref not ACGT");
         check(&|a| a[0]["ref"] = json!("AC"), "ref", "ref two bases");
         check(
@@ -4965,6 +4978,22 @@ chr2\t4\tA\tG\tP2\t0.1
                 PopulationSnvsPreparationError::InvalidPosition {
                     row_index: 0,
                     value: "0".to_owned(),
+                },
+            ),
+            (
+                "position with a leading zero",
+                vec!["chr1\t08\tC\tT\tP1\t0.5"],
+                PopulationSnvsPreparationError::InvalidPosition {
+                    row_index: 0,
+                    value: "08".to_owned(),
+                },
+            ),
+            (
+                "position with a plus sign",
+                vec!["chr1\t+8\tC\tT\tP1\t0.5"],
+                PopulationSnvsPreparationError::InvalidPosition {
+                    row_index: 0,
+                    value: "+8".to_owned(),
                 },
             ),
             (

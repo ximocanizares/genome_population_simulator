@@ -3852,6 +3852,12 @@ fn validate_physical_population_snvs(
                  falta indicar la ruta de population_snvs.metadata.json",
             )
         })?;
+        // Inalcanzable, esta guarda y la siguiente: `validate_published_resources_v3` ya leyó la
+        // referencia (`read_physical_reference`, y `judge_inserted_reference` si hay inserción) por el
+        // `fasta_artifact_id` del mismo objeto y contra el mismo catálogo, y la validación de la
+        // referencia efectiva exige que el campo exista; un identificador ausente o ajeno al catálogo
+        // lo rechazan esas comprobaciones antes de llegar aquí.
+        // Intento ejecutado: `unreachable_physical_snv_guards_are_shadowed_by_other_checks`.
         let reference_id = simulation_reference_object(effective, effective_path)?
             .get("fasta_artifact_id")
             .and_then(Value::as_str)
@@ -3884,6 +3890,11 @@ fn validate_physical_population_snvs(
         }
         return Ok(Some(prepared));
     }
+    // Inalcanzables, las dos primeras (metadatos sin identificador y ausentes del catálogo): el
+    // lector del manifiesto (`validate_manifest_population_snvs`, que `validate_effective_population_snvs`
+    // aplica también a la efectiva ya igualada al manifiesto) exige para un modo que no es `reuse` un
+    // `metadata_artifact_id` de texto no vacío que el catálogo tenga con la clase de metadatos de la matriz.
+    // Intento ejecutado: `unreachable_physical_snv_guards_are_shadowed_by_other_checks`.
     let metadata_id = link
         .get("metadata_artifact_id")
         .and_then(Value::as_str)
@@ -3892,10 +3903,16 @@ fn validate_physical_population_snvs(
         .iter()
         .find(|artifact| artifact.id == metadata_id)
         .ok_or_else(|| effective_error(effective_path, "metadata SNV ausente del catálogo"))?;
+    // Inalcanzable: el lector del manifiesto exige, en cuanto hay metadatos publicados, el TSV
+    // `population-snvs-tsv` en el catálogo con su clase (`require_artifact_kind`).
+    // Intento ejecutado: `unreachable_physical_snv_guards_are_shadowed_by_other_checks`.
     let matrix = artifacts
         .iter()
         .find(|artifact| artifact.id == "population-snvs-tsv")
         .ok_or_else(|| effective_error(effective_path, "TSV SNV ausente del catálogo"))?;
+    // Inalcanzable, esta guarda y la siguiente: ver la rama de reutilización de arriba; la referencia
+    // ya se leyó por el mismo `fasta_artifact_id` y el mismo catálogo.
+    // Intento ejecutado: `unreachable_physical_snv_guards_are_shadowed_by_other_checks`.
     let reference_id = simulation_reference_object(effective, effective_path)?
         .get("fasta_artifact_id")
         .and_then(Value::as_str)
@@ -3914,6 +3931,10 @@ fn validate_physical_population_snvs(
             &matrix_bytes,
             reference,
             &reference_artifact.digest,
+            // Inalcanzable: la efectiva ya se ató al TOML copiado
+            // (`validate_effective_targets_against_configuration` compara `normalization.tolerance`, como
+            // f64 y bit a bit, con la que el TOML resuelve), y la validación de la efectiva exige el campo.
+            // Intento ejecutado: `unreachable_physical_snv_guards_are_shadowed_by_other_checks`.
             effective
                 .get("normalization")
                 .and_then(|value| value.get("tolerance"))
@@ -3926,6 +3947,11 @@ fn validate_physical_population_snvs(
         .map_err(|error| {
             effective_error(effective_path, format!("par SNV físico inválido: {error}"))
         })?;
+    // Equivalente, la primera mitad (`metadata_sha256`): el lector del manifiesto exige que sea el del
+    // artefacto de metadatos del catálogo, `read_verified_artifact_bytes` acaba de comprobar que esos bytes
+    // tienen ese resumen, y la efectiva es idéntica al manifiesto; el resumen que se calcula aquí es el
+    // mismo. Las otras dos mitades (origen y auditoría) sí las ejercita
+    // `the_physical_judge_ties_the_documents_to_the_published_pair`.
     if link.get("metadata_sha256").and_then(Value::as_str) != Some(metadata_sha256.as_str())
         || link.get("mode").and_then(Value::as_str) != Some(provenance.as_str())
         || link.get("normalization_audit") != Some(&normalization_audit)
@@ -7189,6 +7215,9 @@ fn validate_initial_population_statistics(value: &Value) -> Result<(), &'static 
     let mut population_ids = BTreeSet::new();
     for population in populations {
         validate_initial_population_statistics_population(population)?;
+        // Inalcanzable: `validate_initial_population_statistics_population` (la línea de arriba) ya
+        // rechazó una población cuyo `population_id` no sea un texto no vacío.
+        // Intento ejecutado: `unreachable_physical_snv_guards_are_shadowed_by_other_checks`.
         let population_id = population
             .get("population_id")
             .and_then(Value::as_str)
@@ -7262,6 +7291,10 @@ fn validate_initial_population_statistics_provenance(
             "explicit_alternate",
             "incompatible",
         ];
+        // Equivalentes, cada una por separado, las dos mitades de la lista cerrada de claves (la longitud y la
+        // clave desconocida): todas las claves son obligatorias y la propia condición las exige con este mismo
+        // texto, de modo que una clave que falta o que se renombró la rechaza otra mitad con el mismo motivo,
+        // y una de más la rechazan la longitud y la clave desconocida a la vez.
         if constraint.len() != CONSTRAINT_FIELDS.len()
             || constraint
                 .keys()
@@ -7377,6 +7410,7 @@ fn validate_initial_population_statistics_model(
     let kind = model.get("kind").and_then(Value::as_str);
     match kind {
         Some("hwe") if model.len() == 1 => Ok(()),
+        // Equivalente, la mitad `is_finite` del coeficiente (ver `validate_initial_population_statistics_locus`).
         Some("f_diploid")
             if ploidy == 2
                 && model.len() == 2
@@ -7521,6 +7555,16 @@ fn validate_initial_population_statistics_locus(
             .get("realized_frequency")
             .and_then(Value::as_f64)
             .ok_or_else(|| reason("frecuencia realizada inválida"))?;
+        // Equivalentes, las mitades `is_finite` de esta condición, de la de las sumas (`requested_sum`,
+        // `expected_probability_sum`) y de los filtros de la probabilidad y del recuento esperado.
+        // Las de esta condición y la del filtro de la probabilidad: NaN y los infinitos no pertenecen nunca
+        // a `0.0..=1.0`, así que el propio rango ya los rechaza con el mismo motivo. Las sumas lo son de
+        // valores ya acotados a [0, 1], y por tanto finitas. En el filtro del recuento esperado (`>= 0.0`,
+        // que sí aceptaría `+inf`) y para todas, además, la premisa de la lectura: un decimal no finito
+        // (`1e999`) lo lee `as_f64` como `None` y lo rechaza antes, con su propio motivo (fijada por
+        // `non_finite_decimals_never_reach_the_finite_halves`). Y `>` frente a `>=` en las tolerancias de
+        // 1e-12 de las dos sumas: la diferencia de dos `f64` con 1.0 es múltiplo de 2^-52 (o 2^-53 por
+        // debajo de 1), y 1e-12 no lo es, de modo que nunca vale exactamente 1e-12.
         if !requested.is_finite()
             || !realized.is_finite()
             || !(0.0..=1.0).contains(&requested)
@@ -7674,6 +7718,10 @@ fn validate_serialized_normalization_audit(
             "decision",
             "values",
         ];
+        // Equivalentes, cada una por separado, las dos mitades de la lista cerrada de claves del grupo (y las del
+        // valor, más abajo), y las mitades `is_finite` de los números (ver `validate_initial_population_statistics_locus`):
+        // todas las claves se exigen después con el mismo motivo (`detail`), así que una que falta o se renombró
+        // la rechaza otra comprobación, y una de más la rechazan la longitud y la clave desconocida a la vez.
         if group.len() != GROUP_FIELDS.len()
             || group
                 .keys()
@@ -7694,8 +7742,7 @@ fn validate_serialized_normalization_audit(
         let position = group
             .get("position")
             .and_then(Value::as_str)
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|value| *value > 0)
+            .and_then(crate::population_snvs::parse_canonical_position)
             .ok_or_else(|| reason(detail))?;
         let reference = group
             .get("ref")
