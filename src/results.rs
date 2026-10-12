@@ -1543,6 +1543,8 @@ pub fn validate_published_event_manifests(
     manifest_bytes: &[u8],
 ) -> Result<(), Diagnostic> {
     let records = parse_general_manifest_bytes(manifest_path, manifest_bytes)?;
+    // Inalcanzables, esta lectura y la comprobación de la raíz de debajo: `parse_general_manifest_bytes`, justo
+    // arriba, ya leyó estos mismos bytes como JSON y exigió que la raíz fuera un objeto.
     let document: Value = serde_json::from_slice(manifest_bytes)
         .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
     let object = document
@@ -1557,6 +1559,8 @@ pub fn validate_published_event_manifests(
     };
     let mut linked_event_artifacts = BTreeSet::new();
     let mut linked_fastq_artifacts = BTreeSet::new();
+    // Inalcanzables, la lista y la forma de cada enlace: `validate_manifest_events`, que corre dentro de
+    // `parse_general_manifest_bytes`, ya exigió una lista de objetos.
     for event in events
         .as_array()
         .ok_or_else(|| manifest_error(manifest_path, "events no es una lista"))?
@@ -1568,6 +1572,8 @@ pub fn validate_published_event_manifests(
         let state = required_non_empty_text(link, "state", manifest_path)?;
         let manifest_id = required_non_empty_text(link, "manifest_artifact_id", manifest_path)?;
         linked_event_artifacts.insert(manifest_id.to_owned());
+        // Inalcanzable: `validate_manifest_events` ya exigió, con `require_artifact_kind`, que el enlace esté en
+        // el catálogo con la clase `event_manifest`.
         let artifact = catalog.get(manifest_id).ok_or_else(|| {
             manifest_error(manifest_path, "el artefacto del manifiesto de evento falta")
         })?;
@@ -1582,6 +1588,8 @@ pub fn validate_published_event_manifests(
         let bytes = fs::read(&event_path)
             .map_err(|error| io_error(&event_path, "read_event_manifest", error))?;
         validate_event_manifest_bytes(Path::new(&artifact.path), &bytes)?;
+        // Inalcanzable: `validate_event_manifest_bytes`, justo arriba, ya leyó estos mismos bytes como JSON.
+        // Intento ejecutado: `unreachable_physical_guards_are_shadowed_by_other_checks` (un evento que no es JSON).
         let event_document: Value = serde_json::from_slice(&bytes).map_err(|error| {
             manifest_error(
                 manifest_path,
@@ -1596,6 +1604,9 @@ pub fn validate_published_event_manifests(
                 "el enlace general no coincide con el manifiesto de evento",
             ));
         }
+        // Inalcanzables, `reference.fasta` y `outputs` de abajo, y el `artifact` y el `id` de cada salida
+        // completa: el juez del manifiesto de evento, que corre justo arriba, exige estos campos con su forma.
+        // Intento ejecutado: `unreachable_event_catalog_guards_are_shadowed_by_the_event_judge`.
         let reference = event_document
             .get("reference")
             .and_then(Value::as_object)
@@ -1645,6 +1656,8 @@ fn validate_event_artifact_against_catalog(
     catalog: &BTreeMap<&str, &ArtifactRecord>,
     manifest_path: &Path,
 ) -> Result<(), Diagnostic> {
+    // Inalcanzables, la forma de este artefacto y su identificador: el juez del manifiesto de evento ya exige un
+    // objeto con `id` en `reference.fasta` y en cada salida completa. Intento ejecutado: `unreachable_event_catalog_guards_are_shadowed_by_the_event_judge`.
     let object = value
         .as_object()
         .ok_or_else(|| manifest_error(manifest_path, "artefacto de evento inválido"))?;
@@ -1691,12 +1704,16 @@ pub fn resolve_manifest_reference(
             .with("detail", error.to_string())
     })?;
     let artifacts = parse_general_manifest_bytes(manifest_path, &bytes)?;
+    // Inalcanzable: solo falta el directorio padre en la raíz del sistema de ficheros o en la ruta vacía, y la
+    // lectura de arriba falla antes con un directorio o con nada.
     let parent = manifest_path.parent().ok_or_else(|| {
         manifest_error(
             manifest_path,
             "el manifiesto no tiene un directorio padre para resolver recursos",
         )
     })?;
+    // Inalcanzables, esta lectura y la lista `references` de debajo: `parse_general_manifest_bytes`, justo arriba,
+    // ya leyó estos bytes y exigió la lista (`validate_references`).
     let document: Value = serde_json::from_slice(&bytes).map_err(|error| {
         manifest_error(
             manifest_path,
@@ -1723,6 +1740,8 @@ pub fn resolve_manifest_reference(
                 ),
             )
         })?;
+    // Inalcanzable: `validate_references` ya exigió que el FASTA de cada referencia esté en el catálogo con la
+    // clase `reference_fasta`.
     let fasta = artifacts
         .iter()
         .find(|artifact| artifact.id == fasta_artifact_id && artifact.kind == "reference_fasta")
@@ -1753,6 +1772,8 @@ pub fn resolve_manifest_reference(
         .get("effective_config_artifact_id")
         .and_then(Value::as_str)
         .ok_or_else(|| manifest_error(manifest_path, "falta effective_config_artifact_id"))?;
+    // Inalcanzable: el lector del manifiesto ya exigió que `effective_config_artifact_id`, si no es nulo, esté en
+    // el catálogo con la clase `effective_config`.
     let effective = artifacts
         .iter()
         .find(|artifact| artifact.id == effective_id && artifact.kind == "effective_config")
@@ -2373,6 +2394,9 @@ fn validate_published_resources_v3(
         .iter()
         .map(|artifact| (artifact.id.as_str(), artifact.path.as_str()))
         .collect::<BTreeMap<_, _>>();
+    // Inalcanzables, esta lectura y la comprobación de la raíz: `effective_schema_version` (en
+    // `validate_published_resources`) y `validate_effective_config_against_manifest_bytes` ya leyeron estos bytes
+    // y exigieron un objeto. Intento ejecutado: `unreachable_physical_guards_are_shadowed_by_other_checks`.
     let effective: Value = serde_json::from_slice(effective_bytes)
         .map_err(|error| effective_error(effective_path, format!("JSON no legible: {error}")))?;
     let effective = effective
@@ -2386,6 +2410,8 @@ fn validate_published_resources_v3(
         manifest_bytes,
         effective_path,
     )?;
+    // Inalcanzables, el texto de la semilla y su análisis: `validate_effective_seed` ya exigió 64 hexadecimales
+    // en minúscula, que es lo que `RootSeed::parse` admite. Intento ejecutado: `unreachable_physical_guards_are_shadowed_by_other_checks`.
     let root_seed = RootSeed::parse(
         "effective-config.seed.root",
         effective["seed"]["root"]
@@ -2467,6 +2493,8 @@ fn validate_published_resources_v3(
         effective_path,
         manifest_path,
     )?;
+    // Inalcanzable: `validate_effective_authorizations` ya exigió dos booleanos en la efectiva. Intento ejecutado:
+    // `unreachable_physical_guards_are_shadowed_by_other_checks`.
     let allow_empty_snv_matrix = effective
         .get("authorizations")
         .and_then(|value| value.get("allow_empty_snv_matrix"))
@@ -2576,18 +2604,29 @@ fn validate_published_resources_v3(
         declared_reference,
     )]);
 
+    // **Las guardas de este bucle que no tienen caso son inalcanzables**, cada una por su motivo (junto a ella);
+    // lo que sí alcanza un paquete publicado y alterado son el orden de selección, el mapa que no es JSON y el
+    // catálogo derivado con otras secuencias que las del plan. Intento ejecutado de las demás:
+    // `unreachable_physical_guards_are_shadowed_by_other_checks`.
     for reduction_value in effective_array(effective, "reduced_references", effective_path)? {
+        // Inalcanzable: `validate_effective_reduction` ya exigió que cada reducción sea un objeto.
         let reduction = reduction_value
             .as_object()
             .ok_or_else(|| effective_error(effective_path, "una reducción no es objeto"))?;
         let id = effective_non_empty_text(reduction, "id", effective_path)?;
         let source_id = effective_non_empty_text(reduction, "source_reference_id", effective_path)?;
+        // Inalcanzable: F1 solo permite reducir la referencia inicial declarada (la admisión del TOML rechaza una
+        // reducción de otra reducción) y `validate_effective_targets_against_configuration` ya ató
+        // `source_reference_id` al TOML copiado, así que la fuente siempre es la referencia declarada, que está
+        // en `references`.
         let source = references.get(source_id).ok_or_else(|| {
             effective_error(
                 effective_path,
                 format!("la referencia fuente física {source_id} no existe"),
             )
         })?;
+        // Inalcanzable: `derive_subseed` no puede fallar con identificadores ya válidos (solo lo haría un
+        // componente de más de 4 GiB, como en `derive_execution_id`).
         let derived_subseed = derive_subseed(
             root_seed,
             RuntimeSubseedScope::ReferenceReduction {
@@ -2596,6 +2635,9 @@ fn validate_published_resources_v3(
             },
         )
         .map_err(|error| physical_error(effective_path, "derive_reduction_subseed", &error))?;
+        // Inalcanzable: la efectiva ya está atada al TOML copiado, que resuelve esta misma subsemilla con esta
+        // misma derivación (`selection_subseed` es una de las claves que compara
+        // `validate_effective_targets_against_configuration`).
         if effective_non_empty_text(reduction, "selection_subseed", effective_path)?
             != derived_subseed.to_hex()
         {
@@ -2604,6 +2646,8 @@ fn validate_published_resources_v3(
                 format!("selection_subseed de {id} no reproduce el ámbito canónico"),
             ));
         }
+        // Inalcanzable: `EligibleSequence::new` solo rechaza una longitud nula, y la referencia declarada ya pasó
+        // el juez de su FASTA con longitudes positivas.
         let eligible = source
             .sequences()
             .iter()
@@ -2624,6 +2668,9 @@ fn validate_published_resources_v3(
         )?;
         let region_size_bases =
             effective_positive_u64(reduction, "region_size_bases", effective_path)?;
+        // Inalcanzables, esta selección, el identificador derivado y el plan: la admisión del TOML y la efectiva
+        // (suma del catálogo derivado igual a `target.bases`) rechazan antes todo lo que haría fallar la
+        // selección o el plan.
         let mut rng = derived_subseed.local_rng();
         let selection = select_reduced_reference(
             source.id(),
@@ -2650,6 +2697,7 @@ fn validate_published_resources_v3(
             .iter()
             .map(Value::as_u64)
             .collect::<Option<Vec<_>>>()
+            // Inalcanzable: `validate_effective_reduction` exige enteros positivos en `selection_order`.
             .ok_or_else(|| effective_error(effective_path, "selection_order inválido"))?;
         let expected_order = plan
             .segments()
@@ -2662,6 +2710,9 @@ fn validate_published_resources_v3(
                 format!("selection_order de {id} no coincide con la subsemilla"),
             ));
         }
+        // Inalcanzables, esta fuente, la construcción y la fuente del mapa de más abajo: la referencia declarada se
+        // leyó con sus bases (`CatalogBases::Materialized`, porque la efectiva tiene reducciones y se compara base
+        // a base) y el plan sale de esa misma referencia.
         let expected_derived = build_reduced_reference(
             source_for(source, None)
                 .map_err(|error| physical_error(effective_path, "reduction_source", &error))?
@@ -2681,6 +2732,7 @@ fn validate_published_resources_v3(
         )?;
         compare_reference_bases(&expected_derived, &derived, effective_path, id)?;
         let map_id = effective_non_empty_text(reduction, "map_artifact_id", effective_path)?;
+        // Inalcanzable: `validate_effective_reduction` ya exigió que el mapa esté en el catálogo del manifiesto.
         let map_relative = artifact_paths.get(map_id).ok_or_else(|| {
             effective_error(effective_path, format!("mapa físico ausente: {map_id}"))
         })?;
@@ -2699,6 +2751,9 @@ fn validate_published_resources_v3(
                 format!("mapa físico {map_id} no coincide con subsemilla y selección"),
             ));
         }
+        // Inalcanzable: el mapa acaba de compararse con `reduction_map_document(&plan)`, que es el que este mismo
+        // plan produce, y la derivada se comparó base a base con la que el plan construye; un mapa igual al que
+        // el plan describe cumple su contrato.
         validate_reduction_map_document(
             source_for(source, None)
                 .map_err(|error| physical_error(effective_path, "reduction_source", &error))?
@@ -3124,6 +3179,8 @@ fn judge_inserted_reference(
     }
     let expected = Reference::new(
         ReferenceId::parse(derived_id, "published-resource-validation")
+            // Inalcanzable: `derived_id` es el `id` de `inserted_reference`, que `validate_effective_targets_against_configuration`
+            // ya ató al identificador derivado que resuelve el TOML copiado, y la admisión del TOML valida su sintaxis.
             .map_err(|error| physical_error(effective_path, "inserted_reference_id", &error))?,
         ReferenceOrigin::TractInsertion {
             source_reference_id: supplied.id().clone(),
@@ -3256,6 +3313,13 @@ fn validate_physical_technical_event(
     let Some(technical_event) = effective.get("technical_event") else {
         return Ok(());
     };
+    // **Inalcanzables todas las guardas de esta función que leen la configuración efectiva** (la forma del
+    // evento técnico, su identificador, los de los individuos, sus bibliotecas y la derivación de su plan de
+    // identidades) **y las que leen el manifiesto general o el de evento** (el enlace, su artefacto, su
+    // lectura): la efectiva ya las pasó en `validate_effective_technical_event`, el manifiesto general en
+    // `parse_general_manifest_bytes` y el de evento en `validate_event_manifest_bytes`, que corren antes. Lo
+    // que sí alcanza un paquete alterado son las comparaciones del final de la función. Intento ejecutado de
+    // cada una: `unreachable_physical_guards_are_shadowed_by_other_checks`.
     let technical_event = technical_event
         .as_object()
         .ok_or_else(|| effective_error(effective_path, "technical_event inválido"))?;
@@ -3382,6 +3446,38 @@ fn validate_physical_technical_event(
         .and_then(Value::as_object)
         .and_then(|artifacts| artifacts.get("chimera"));
     validate_f4_coverage_against_effective(&event, technical_event, reference, effective_path)?;
+    // **El perfil técnico y el catálogo de azar que el manifiesto general anota del evento son los de la
+    // configuración efectiva** (DT-056). La efectiva ya está atada al TOML copiado, y el manifiesto de evento ya
+    // se compara con ella más abajo; pero estos dos campos del manifiesto general solo los juzgaba el lector (que
+    // admite las dos listas cerradas) y el esquema externo v4: un manifiesto general que dijera otro perfil u
+    // otro catálogo de azar que los de la ejecución se aceptaba.
+    let general_technical = general
+        .get("technical_events")
+        .and_then(Value::as_array)
+        .and_then(|events| events.first())
+        .and_then(Value::as_object);
+    let general_profile = general_technical.and_then(|technical| technical.get("profile"));
+    let effective_profile = technical_event.get("profile");
+    // Las dos mitades (identificador y huella) se implican: el lector del manifiesto exige el par entero de
+    // uno de los dos perfiles, de modo que ninguna prueba puede cambiar solo una y llegar hasta aquí.
+    if general_profile.and_then(|profile| profile.get("id"))
+        != effective_profile.and_then(|profile| profile.get("id"))
+        || general_profile.and_then(|profile| profile.get("sha256"))
+            != effective_profile.and_then(|profile| profile.get("sha256"))
+    {
+        return Err(effective_error(
+            effective_path,
+            "el perfil técnico del manifiesto general no es el de la configuración efectiva",
+        ));
+    }
+    if general_technical.and_then(|technical| technical.get("rng_catalog"))
+        != technical_event.get("rng_catalog")
+    {
+        return Err(effective_error(
+            effective_path,
+            "el catálogo de azar del manifiesto general no es el de la configuración efectiva",
+        ));
+    }
     // **El bloque del tartamudeo clonal del manifiesto de evento es el de la
     // configuración efectiva, byte a byte** (REQ-VAL-61). Los dos salen de la
     // misma función del productor. La efectiva ya está atada a lo que el TOML
@@ -3483,6 +3579,18 @@ fn validate_physical_biological_contamination_summary(
     event_id: &EventId,
     effective_path: &Path,
 ) -> Result<(), Diagnostic> {
+    // **Inalcanzables todas las guardas que leen la configuración efectiva** (el objeto de contaminación, el
+    // rango, las receptoras, las bibliotecas y las cohortes): Lo ha validado ya `validate_effective_technical_event`, que corre dentro de `validate_effective_config_against_manifest_bytes`. **Y las que releen el resumen
+    // publicado como número, entero o identificador** (`sampled_percent` y los siete recuentos, la forma de cada
+    // registro, la receptora y su biblioteca, el aporte de cada donante), **y las cuentas que repiten las del
+    // juez del manifiesto de evento** (el redondeo del objetivo, la conservación de las parejas, la suma de los
+    // aportes y su desbordamiento): `validate_event_manifest_bytes` corre antes y las exige con el mismo
+    // criterio. Tampoco pueden fallar las derivaciones de subsemillas ni el remuestreo del porcentaje, que solo
+    // dependen de identificadores y de un rango ya válidos. Lo que sí alcanza un paquete alterado: el resumen
+    // vacío con un rango positivo, el rango del resumen, la subsemilla, el porcentaje muestreado, que el
+    // donante esté en la población (secuenciado y de la receptora) y que el resumen cubra las receptoras. De la
+    // guarda del donante, la mitad `donor == recipient` es inalcanzable: el juez del evento la rechaza antes.
+    // Intento ejecutado de las inalcanzables: `unreachable_physical_guards_are_shadowed_by_other_checks`.
     let contamination =
         effective_object(technical_event, "biological_contamination", effective_path)?;
     let range = effective_object(contamination, "percent_range", effective_path)?;
@@ -3765,6 +3873,9 @@ fn validate_f4_coverage_against_effective(
     reference: &Reference,
     effective_path: &Path,
 ) -> Result<(), Diagnostic> {
+    // Inalcanzables, el objetivo de cobertura efectivo y la lista y la forma de cada entrada de cobertura del
+    // evento: el primero lo ha validado ya la efectiva (`validate_effective_technical_event`) y las segundas el
+    // juez del manifiesto de evento (`validate_event_manifest_bytes`). Intento ejecutado: `unreachable_physical_guards_are_shadowed_by_other_checks`.
     let target = effective_object(technical_event, "target", effective_path)?;
     let target_x = target
         .get("coverage_wgs")
@@ -3984,6 +4095,13 @@ fn validate_physical_initial_population_statistics(
         }
         return Ok(());
     }
+    // **Inalcanzables** (DT-001, tanda 9), cada una por su motivo: la falta de matriz con poblaciones iniciales
+    // (la efectiva ya exigió estadísticas para las cohortes), las autorizaciones que no son objeto o con un
+    // booleano que no lo es (`validate_effective_authorizations` y el lector del manifiesto ya los exigieron) y la
+    // reconstrucción de las estadísticas (la matriz que llega aquí ya pasó el par físico de ficheros, por huella
+    // y por metadatos, y se rehace con el mismo TOML y la misma semilla que la publicaron). Intento ejecutado:
+    // `unreachable_physical_guards_are_shadowed_by_other_checks`. La de las estadísticas declaradas sin
+    // poblaciones, en cambio, sí se alcanza (`statistics_without_initial_populations_are_rejected`).
     let matrix = matrix.ok_or_else(|| {
         effective_error(
             effective_path,
@@ -4540,6 +4658,16 @@ fn validate_physical_vcf_output(
     effective_path: &Path,
     manifest_path: &Path,
 ) -> Result<(), Diagnostic> {
+    // **Inalcanzables todas las guardas de esta función que miran el manifiesto**: su lectura, su raíz, su versión,
+    // que `vcf_outputs` coincida con la activación efectiva, que el catálogo lleve exactamente los artefactos
+    // esperados y que el artefacto esperado exista. `parse_general_manifest_bytes` (versión, forma y catálogo) y
+    // `validate_effective_vcf_against_manifest` (la activación, el modo y el índice) corren antes y las exigen con
+    // el mismo criterio. Lo que sí alcanza un paquete alterado es la identidad de cada artefacto VCF **y la ruta
+    // canónica del catálogo**: el lector del manifiesto no la exige y la identidad se comprueba sobre la ruta
+    // canónica, no sobre la del catálogo, de modo que un catálogo que enlace el VCF (o su índice) a otro fichero
+    // solo lo rechaza esa mitad (`the_physical_resources_are_rebuilt_and_their_identity_is_kept`). La mitad de
+    // la clase, en cambio, sí es inalcanzable: el lector exige la clase de cada enlace.
+    // Intento ejecutado: `unreachable_physical_guards_are_shadowed_by_other_checks`.
     let manifest: Value = serde_json::from_slice(manifest_bytes)
         .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
     let manifest = manifest
@@ -5121,6 +5249,11 @@ fn read_physical_sequence_catalog(
     effective_path: &Path,
     bases: CatalogBases,
 ) -> Result<Reference, Diagnostic> {
+    // Inalcanzables, la forma de cada secuencia, el FASTA ausente del catálogo, la reconstrucción de la ficha
+    // (`reference_from_summary`) y el recuento de bases desconocidas de abajo: `validate_effective_reference` y
+    // `validate_effective_reduction` ya exigieron objetos y enteros, el manifiesto ya exigió que el FASTA esté en
+    // el catálogo, y la ficha acaba de validarse contra estas mismas expectativas. Intento ejecutado:
+    // `unreachable_physical_guards_are_shadowed_by_other_checks`.
     let mut expectations = Vec::with_capacity(sequences.len());
     for sequence in sequences {
         let sequence = sequence
@@ -5431,6 +5564,11 @@ fn validate_generated_reference(
             },
         )
         .collect::<Vec<_>>();
+    // **Inalcanzables todas las guardas de lectura de esta función** (cada secuencia, su clase, la composición y
+    // la fracción de bases desconocidas) **y el error de la regeneración**: `validate_effective_reference` ya
+    // exigió objetos, una clase conocida y una composición con sus cuatro frecuencias y una `N` en [0, 1], y
+    // `generate_reference_with_regions` solo falla con una especificación que ese mismo juez ya rechazó.
+    // Intento ejecutado: `unreachable_physical_guards_are_shadowed_by_other_checks`.
     let sequences = effective_array(reference, "sequences", effective_path)?;
     let mut specs = Vec::with_capacity(sequences.len());
     for sequence in sequences {
@@ -5521,6 +5659,8 @@ fn effective_sequence_class(
     match sequence.get("class").and_then(Value::as_str) {
         Some("chromosome") => Ok(SequenceClass::Chromosome),
         Some("scaffold") => Ok(SequenceClass::Scaffold),
+        // Inalcanzable: `validate_effective_reference` y `read_physical_sequence_catalog` (el único otro llamante,
+        // con el mismo documento) ya exigieron una clase conocida. Intento ejecutado: `unreachable_physical_guards_are_shadowed_by_other_checks`.
         _ => Err(effective_error(path, "clase de secuencia inválida")),
     }
 }
@@ -6979,6 +7119,10 @@ fn validate_manifest_events(
         const FIELDS: [&str; 3] = ["event_id", "state", "manifest_artifact_id"];
         validate_closed_object(object, &FIELDS, "events[]", path)?;
         let event_id = required_non_empty_text(object, "event_id", path)?;
+        // **Casi redundante con la segunda lectura del identificador, unas líneas más abajo** (DT-001, tanda 9):
+        // dan el mismo rechazo con el mismo texto, pero lo que hay entre ellas (el orden y el estado) puede
+        // rechazar antes con otro motivo; esta lectura es la que manda cuando el identificador y el estado son
+        // inválidos a la vez (caso en `the_event_links_are_judged`). La segunda, en cambio, es inalcanzable.
         EventId::parse(event_id.to_owned(), "manifest.events")
             .map_err(|error| manifest_error(path, error.render_human()))?;
         if previous.is_some_and(|previous: &str| previous >= event_id) {
@@ -6992,6 +7136,9 @@ fn validate_manifest_events(
         };
         let artifact_id = required_non_empty_text(object, "manifest_artifact_id", path)?;
         require_artifact_kind(catalog, artifact_id, "event_manifest", path)?;
+        // Inalcanzable, esta búsqueda: `require_artifact_kind`, justo arriba, ya exigió que el enlace esté en el
+        // catálogo (que se construyó de estos mismos registros). Y, de la misma manera, la segunda lectura del
+        // identificador del evento, que ya se leyó con éxito unas líneas más arriba.
         let artifact = records
             .iter()
             .find(|artifact| artifact.id == artifact_id)
@@ -7078,6 +7225,8 @@ fn validate_manifest_technical_events(
             "technical_events[].artifacts",
             path,
         )?;
+        // Redundante con la comprobación de abajo (DT-001, tanda 9): un resumen que no es objeto, tratado como
+        // objeto vacío, no tiene `rate` y lo rechaza la condición siguiente con **el mismo texto**.
         let chimera = artifacts
             .get("chimera")
             .and_then(Value::as_object)
@@ -7869,6 +8018,9 @@ fn validate_effective_population_snvs(
     if effective_value.is_null() {
         return Ok(());
     }
+    // Inalcanzables, que no sea un objeto y que falte el identificador de los metadatos: la efectiva es igual al
+    // manifiesto (comprobación de arriba), y el lector del manifiesto ya exigió un objeto y un identificador de
+    // artefacto en los modos `supplied` y `generated`. Intento ejecutado: `unreachable_physical_guards_are_shadowed_by_other_checks`.
     let object = effective_value
         .as_object()
         .ok_or_else(|| effective_error(effective_path, "population_snvs inválido"))?;
@@ -7891,6 +8043,9 @@ fn validate_effective_authorizations(
     let effective_value = effective
         .get("authorizations")
         .ok_or_else(|| effective_error(effective_path, "falta authorizations"))?;
+    // Inalcanzable, la falta de `authorizations` en el manifiesto: `validate_manifest_authorizations`, dentro de
+    // `parse_general_manifest_bytes`, ya la exigió. Y la de la efectiva la rechaza antes la lista cerrada de
+    // campos de la efectiva (`campos ausentes o desconocidos`). Intento ejecutado: `unreachable_physical_guards_are_shadowed_by_other_checks`.
     let manifest_value = manifest
         .get("authorizations")
         .ok_or_else(|| manifest_error(manifest_path, "falta authorizations"))?;
@@ -7971,6 +8126,7 @@ fn validate_effective_vcf_against_manifest(
             "la configuración efectiva VCF exige exactamente un enlace en el manifiesto",
         ));
     }
+    // Inalcanzable: `validate_vcf_outputs` ya exigió que cada enlace sea un objeto.
     let output = outputs[0]
         .as_object()
         .ok_or_else(|| effective_error(effective_path, "enlace VCF no es objeto"))?;
@@ -7991,6 +8147,8 @@ fn validate_effective_vcf_against_manifest(
     }
     match mode {
         VcfOutputMode::Text => {
+            // Inalcanzable: `validate_vcf_outputs` ya rechazó un VCF de texto con índice
+            // (`VCF de texto no admite índice`), con la misma condición.
             if !output.get("index_kind").is_some_and(Value::is_null)
                 || !output.get("index_artifact_id").is_some_and(Value::is_null)
             {
@@ -8006,6 +8164,14 @@ fn validate_effective_vcf_against_manifest(
                 VcfIndexKind::Tbi => ("tbi", "vcf_tbi_index"),
                 VcfIndexKind::Csi => ("csi", "vcf_csi_index"),
             };
+            // **Las tres mitades son redundantes entre sí** (DT-001, tanda 9). El lector del manifiesto ya ata la
+            // clase del artefacto de índice al `index_kind` del enlace (la primera y la tercera dicen lo mismo) y
+            // ya exige que el catálogo no lleve artefactos sin rol (si el enlace nombra otro identificador, el
+            // canónico sobra o falta, y la tercera lo ve). Por eso quitar **una** cualquiera no hace morir ninguna
+            // prueba, y quitar la primera y la segunda juntas tampoco (la tercera basta sola). Mueren las otras
+            // tres combinaciones: la primera y la tercera, la segunda y la tercera, y las tres. Las ejercita
+            // `the_effective_vcf_link_and_the_authorizations_are_judged_against_the_manifest` (un índice `csi`
+            // para una referencia que cabe en `tbi`, y el índice con otro identificador).
             if output.get("index_kind").and_then(Value::as_str) != Some(index_kind)
                 || output.get("index_artifact_id").and_then(Value::as_str)
                     != Some(VCF_INDEX_ARTIFACT_ID)
@@ -8026,6 +8192,7 @@ fn expected_vcf_index_kind(
     effective_path: &Path,
 ) -> Result<VcfIndexKind, Diagnostic> {
     let sequences = effective_array(reference, "sequences", effective_path)?;
+    // Inalcanzable: `validate_effective_reference` ya exigió al menos una secuencia.
     if sequences.is_empty() {
         return Err(effective_error(
             effective_path,
@@ -9179,6 +9346,8 @@ fn validate_manifest_authorizations(value: Option<&Value>, path: &Path) -> Resul
 }
 
 fn validate_authorizations_value(value: &Value) -> Result<(), &'static str> {
+    // Redundante con la condición de abajo (DT-001, tanda 9): un valor que no es objeto, tratado como objeto
+    // vacío, no tiene dos claves y lo rechaza la condición siguiente con **el mismo texto**.
     let object = value
         .as_object()
         .ok_or_else(|| reason("authorizations inválido"))?;

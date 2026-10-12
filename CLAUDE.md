@@ -104,6 +104,25 @@ El implementador puede rechazar un arreglo propuesto por el revisor si demuestra
 que no basta; ha ocurrido y tenía razón. Lo que no puede es rechazarlo sin
 demostrarlo.
 
+### Regla de corte: qué reabre una ronda
+
+Decidida por el responsable el 12 de octubre de 2026, tras varias tandas de
+cobertura que se alargaron a dos y tres rondas por hallazgos menores.
+
+- **Solo un hallazgo medio o grave reabre ronda**: un defecto real del
+  programa, o una prueba que consagra algo contrario al contrato o que no puede
+  fallar por lo que dice cubrir.
+- **Los menores no reabren ronda**: comentarios o textos del registro
+  inexactos, límites que otra comprobación ya caza, equivalentes sin anotar.
+  El agente raíz los aplica al hacer el commit si son triviales, o se anotan
+  como deuda.
+- **Una sola revisión adversarial por tanda o hito.** Si la ronda siguiente solo
+  corrige hallazgos menores, basta la verificación del agente raíz.
+- **Un objetivo sin final natural se cierra con un criterio escrito**, no cuando
+  ya no queda nada que encontrar. Para DT-001: se da por cerrada al terminar la
+  tanda 9 del juez de los recursos publicados, con lo que quede anotado como
+  inalcanzable.
+
 ### El defecto recurrente número uno
 
 **Pruebas que no pueden fallar por el defecto que dicen cubrir.** Apareció diez
@@ -130,7 +149,12 @@ comprobación caza antes la discrepancia. Cuando pase, hace falta un fixture
 
 - **Bucles de sondeo** (`until ...; do :; done`). Consumen un núcleo, falsean
   cualquier medida de tiempo o CPU y rebotan notificaciones obsoletas. Ha
-  ocurrido dos veces; una falseó un rendimiento en un 66 %.
+  ocurrido dos veces; una falseó un rendimiento en un 66 %. **También con
+  `sleep` dentro** (`until <condición>; do sleep 30; done`): no consume CPU,
+  pero si la condición nunca se cumple espera para siempre. El 12 de octubre de
+  2026 uno esperó 13 horas a un fichero que se quedó en 38 de 40 líneas y dejó
+  parado al agente que lo esperaba. Para esperar, se ejecuta el trabajo y se
+  aguarda su notificación.
 - **Commits o push sin autorización explícita.** No hay permiso permanente.
 - **Etiquetar una puerta con un comando que no se ejecutó.**
 

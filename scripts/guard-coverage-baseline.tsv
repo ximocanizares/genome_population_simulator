@@ -449,10 +449,31 @@
 # auditoría de la normalización y el juez físico de la matriz de SNV), que cubre
 # `tests/results_population_snvs_guards.rs` con su motivo exacto. Las 9 que quedan están
 # anotadas junto a la guarda como inalcanzables, con su porqué real.
+# **El 12/10/2026 (DT-001, tanda 9, tercera parte de `results.rs`) `src/results.rs` baja, en su copia aislada,
+# de 327 a 243 sin disparar; las comprobaciones siguen en 721.** Es lo que queda de
+# `results.rs` fuera de las tandas 6, 7 y 8: el lector del manifiesto general, el juez
+# de los manifiestos de evento, `resolve_manifest_reference` y los jueces físicos de
+# `validate_published_resources` (referencias y reducciones, VCF, cobertura y
+# contaminación biológica). Las dispara `tests/results_manifest_guards.rs` (18 pruebas
+# sobre paquetes publicados de verdad, alterados en un solo punto, con el motivo exacto) y
+# cada una murió al anularla en una copia. De las 185 del alcance quedan 102, **todas
+# anotadas junto a la guarda como inalcanzables** (o redundantes) con su porqué real, y
+# una prueba que ejecuta el intento y comprueba que el rechazo viene de la otra
+# comprobación. Medido sin la tanda 8 (que baja por su lado): las 90 de la tanda 8, las 22
+# de microsatélites y contabilidad de tracto (tanda 6) y las 29 de la configuración efectiva
+# de la tanda 7 siguen sin tocar. Es un suelo, no una prueba de que fallaría.
+# Integrada por el agente raíz sobre la tanda 8: `src/results.rs` queda en 721 / 168.
+# **El 12/10/2026 (ronda 2 de la revisión de la tanda 9, DT-056) `src/results.rs` pasa de 721 a
+# 723 comprobaciones y de 168 a 153 sin disparar.** Entran las dos del arreglo de DT-056 (el perfil técnico
+# y el catálogo de azar del manifiesto general frente a la configuración efectiva), que dispara
+# `the_general_manifest_carries_the_profile_and_the_catalog_of_the_effective_config` con su motivo exacto;
+# bajan 15 que la ronda cubre con prueba (la contabilidad de tracto releída, la matriz de SNV, los
+# lectores compartidos y las estadísticas sin poblaciones) y no queda en `results.rs` ninguna guarda
+# sin disparar y sin anotar. No es una regresión: es lo que la puerta declara con la nota.
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
-src/results.rs	721	252
+src/results.rs	723	153
 src/event_manifest.rs	147	8
 src/truth_validation.rs	121	32
 src/truth_schema.rs	69	8
