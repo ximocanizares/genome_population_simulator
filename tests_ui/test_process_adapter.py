@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from process_adapter import (  # noqa: E402
     SUPPORTED_BINARY_VERSION,
     ValidatedSession,
     check_binary_version,
+    default_binary,
     diagnostic_summary,
     run_toml,
     validate_toml,
@@ -274,6 +276,45 @@ class ProcessAdapterTests(unittest.TestCase):
         self.assertIn(
             "Poblaciones · population_snvs.input_path", diagnostic_summary(result.diagnostics)
         )
+
+
+class DefaultBinaryTests(unittest.TestCase):
+    """El binario propuesto por omisión es el optimizado salvo que esté desfasado."""
+
+    def _build(self, root: Path, kind: str, mtime: float) -> Path:
+        directory = (
+            root / "target" / "x86_64-unknown-linux-gnu" / "release"
+            if kind == "release"
+            else root / "target" / "debug"
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        binary = directory / SUPPORTED_BINARY_NAME
+        binary.write_bytes(b"")
+        os.utime(binary, (mtime, mtime))
+        return binary
+
+    def test_the_release_binary_is_chosen_when_it_is_not_older(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            self._build(root, "debug", 1_000)
+            release = self._build(root, "release", 2_000)
+            self.assertEqual(default_binary(root), release)
+
+    def test_a_release_binary_older_than_the_debug_one_is_not_chosen(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            self._build(root, "release", 1_000)
+            debug = self._build(root, "debug", 2_000)
+            self.assertEqual(default_binary(root), debug)
+
+    def test_without_a_release_binary_the_debug_path_is_proposed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            self.assertEqual(
+                default_binary(root), root / "target" / "debug" / SUPPORTED_BINARY_NAME
+            )
+            release = self._build(root, "release", 1_000)
+            self.assertEqual(default_binary(root), release)
 
 
 if __name__ == "__main__":

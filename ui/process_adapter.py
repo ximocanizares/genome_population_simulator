@@ -13,8 +13,28 @@ from typing import Any, Sequence
 
 SUPPORTED_BINARY_NAME = "genome-population-simulator"
 SUPPORTED_BINARY_VERSION = "0.2.0"
-DEFAULT_BINARY = Path(__file__).resolve().parents[1] / "target" / "debug" / SUPPORTED_BINARY_NAME
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def default_binary(root: Path = PROJECT_ROOT) -> Path:
+    """Elige el binario que el cuaderno propone por omisión.
+
+    La versión optimizada va unas 45 veces más rápida que la de depuración y
+    publica los mismos bytes. Se prefiere si existe y no es más antigua que la
+    de depuración: si alguien recompiló solo la de depuración después de
+    cambiar el código, la optimizada estaría desfasada.
+    """
+
+    release = root / "target" / "x86_64-unknown-linux-gnu" / "release" / SUPPORTED_BINARY_NAME
+    debug = root / "target" / "debug" / SUPPORTED_BINARY_NAME
+    if release.is_file() and (
+        not debug.is_file() or release.stat().st_mtime >= debug.stat().st_mtime
+    ):
+        return release
+    return debug
+
+
+DEFAULT_BINARY = default_binary()
 
 
 class ProcessAdapterError(RuntimeError):
