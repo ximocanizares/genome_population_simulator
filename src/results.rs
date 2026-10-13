@@ -6860,7 +6860,11 @@ fn parse_general_manifest_bytes_unretagged(
         .iter()
         .map(|record| (record.id.as_str(), record.kind.as_str()))
         .collect::<BTreeMap<_, _>>();
-    if state == UnitState::Complete {
+    // Una ejecución completa publica siempre la verdad. Una fallida puede
+    // conservarla con el resto de su unidad genotípica (DT-038), y entonces
+    // rige el mismo contrato de clase, ruta y categoría `minimum`.
+    let truth_expected = state == UnitState::Complete || catalog.contains_key("truth-jsonl");
+    if truth_expected {
         require_truth_artifact(&records, path)?;
     }
 
@@ -6936,7 +6940,7 @@ fn parse_general_manifest_bytes_unretagged(
         require_artifact_kind(&catalog, "population-snvs-tsv", "population_snvs_tsv", path)?;
         expected_minimum.insert("population-snvs-tsv");
     }
-    if state == UnitState::Complete {
+    if truth_expected {
         expected_minimum.insert("truth-jsonl");
     }
     if !events.is_empty() {

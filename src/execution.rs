@@ -203,6 +203,13 @@ fn execute_validated_config_with_effective_document(
     let mut event_links: Option<Vec<ManifestEventLink>> = None;
     let mut realized_tract_output = crate::results::RealizedTractOutput::default();
     let mut inserted_publication: Option<PublishedInsertion> = None;
+    // La unidad genotípica (DT-038) con los registros de cada artefacto **tal
+    // como se validaron al escribirlos**: la verdad por un lado y, por otro, la
+    // matriz de SNV y el VCF con su índice. Las referencias de las que depende
+    // ya tienen sus propios registros (`reference_artifact` y
+    // `inserted_publication`).
+    let mut truth_record: Option<ArtifactRecord> = None;
+    let mut genotype_records: Vec<ArtifactRecord> = Vec::new();
     let started = (|| -> Result<(), Diagnostic> {
         configuration_input = Some(copy_configuration_input(effective, &mut workspace)?);
         reference_artifact = Some(write_reference(
@@ -258,6 +265,18 @@ fn execute_validated_config_with_effective_document(
             simulation_artifact,
             &mut workspace,
         )?;
+        genotype_records.extend(
+            workspace
+                .artifacts()
+                .iter()
+                .filter(|artifact| {
+                    matches!(
+                        artifact.id.as_str(),
+                        "population-snvs-tsv" | "population-snvs-metadata"
+                    )
+                })
+                .cloned(),
+        );
         if let (Some(link), Some(initial_individuals)) = (
             &mut population_snvs,
             &prepared_execution.initial_individuals,
@@ -356,7 +375,7 @@ fn execute_validated_config_with_effective_document(
         }
         let reduction_outputs =
             reduction_outputs(effective, &published_reductions, source_artifact);
-        let truth = write_execution_truth(
+        let (truth, written_truth) = write_execution_truth(
             &mut workspace,
             execution_id.as_str(),
             reference,
@@ -368,6 +387,7 @@ fn execute_validated_config_with_effective_document(
                 .ok_or_else(|| internal("execute", "missing configuration artifact"))?,
             effective,
         )?;
+        truth_record = Some(written_truth);
         // Las bases de tracto realizadas se cuentan **donde se producen**: la
         // de la verdad sobre el documento recién construido, la del VCF sobre
         // los registros recién escritos. Ninguna de las dos pasa por la cota.
@@ -381,6 +401,8 @@ fn execute_validated_config_with_effective_document(
                 publish_truth_vcf_within(&mut workspace, reference, &truth, mode, cap.as_ref())?;
             realized_tract_output.vcf_bases = published.tract_bases;
             realized_tract_output.vcf_by_locus = published.tract_bases_by_locus;
+            genotype_records.push(published.vcf.clone());
+            genotype_records.extend(published.index.clone());
             vcf_outputs.push(VcfManifestLink {
                 state: UnitState::Complete,
                 reference_id: published.reference_id,
@@ -536,6 +558,40 @@ fn execute_validated_config_with_effective_document(
                 reduction.map_artifact_id = None;
                 reduction.source_fasta_artifact_id = None;
             }
+            // DT-038, la **unidad genotípica**: la verdad, la matriz de SNV que
+            // cita, el VCF con su índice si se pidió y la referencia de la
+            // simulación (la suministrada o, con inserción, la final con su
+            // mapa). Se conserva **entera o nada**, con la misma regla que una
+            // reducción: cada artefacto en disco tiene que ser byte a byte el
+            // que se validó al escribirlo. Si el VCF se pidió y no llegó a
+            // publicarse, la unidad entera queda fuera: una verdad sin su VCF
+            // no es lo que se pidió, y además podría superar el tope de bases
+            // de tracto que el VCF hizo saltar. Como en las reducciones, no se
+            // repite el juicio final: una verdad que el juez final rechaza por
+            // un defecto del productor, con los bytes intactos, se conserva.
+            //
+            // La verdad cita por su huella la copia de la configuración (las
+            // fuentes `explicit` de los eventos directos y `random` de los
+            // loci de repetición), así que la unidad exige también que esa
+            // copia se conserve, con **la misma** comprobación con que el
+            // paquete fallido decide conservarla. Es lo único que la unidad
+            // cita fuera de sí misma: la matriz y sus metadatos citan la
+            // referencia de la simulación, y el VCF, la verdad y la referencia.
+            let genotype_unit_kept = truth_record.is_some()
+                && (effective.vcf_output().is_none() || !vcf_outputs.is_empty())
+                && configuration_input.as_ref().is_some_and(|input| {
+                    valid_failure_configuration_copy(&workspace, effective, &input.copy)
+                })
+                && truth_record
+                    .iter()
+                    .chain(&genotype_records)
+                    .chain(reference_artifact.iter())
+                    .chain(
+                        inserted_publication
+                            .iter()
+                            .flat_map(|inserted| [&inserted.fasta, &inserted.map]),
+                    )
+                    .all(|record| workspace.disk_still_matches(record));
             let failure_references = manifest_references
                 .iter()
                 .filter(|reference| {
@@ -544,25 +600,41 @@ fn execute_validated_config_with_effective_document(
                         .find(|reduction| reduction.id == reference.id)
                     {
                         Some(reduction) => reduction.state == UnitState::Complete,
-                        // Sin evento solo sobrevive la suministrada, y solo si
-                        // alguna reducción se conserva y la nombra de origen.
+                        // Sin evento ni unidad genotípica solo sobrevive la
+                        // suministrada, y solo si alguna reducción se conserva
+                        // y la nombra de origen.
                         None => {
                             event_links.is_some()
+                                || genotype_unit_kept
                                 || (!kept.is_empty() && reference.id == effective.reference_id())
                         }
                     }
                 })
                 .cloned()
                 .collect::<Vec<_>>();
-            // **Con lecturas ya publicadas, la referencia final se conserva con
-            // su mapa** (DTC-098): las lecturas salieron de ella, y el paquete
+            // **Con lecturas o verdad ya publicadas, la referencia final se
+            // conserva con su mapa** (DTC-098): salieron de ella, y el paquete
             // fallido tiene que poder relacionarla con la suministrada
-            // (REQ-MAN-07). Sin evento no se conserva nada de ella.
-            let failure_insertion = event_links
-                .as_ref()
+            // (REQ-MAN-07). Sin ninguna de las dos no se conserva nada de ella.
+            let failure_insertion = (event_links.is_some() || genotype_unit_kept)
+                .then_some(())
                 .and(inserted_publication.as_ref())
                 .zip(reference_artifact.as_ref());
-            publish_controlled_failure(
+            let genotype_unit = genotype_unit_kept.then(|| FailedGenotypeUnit {
+                artifact_ids: truth_record
+                    .iter()
+                    .chain(&genotype_records)
+                    .map(|record| record.id.clone())
+                    .collect(),
+                population_snvs: population_snvs.as_ref(),
+                vcf_outputs: &vcf_outputs,
+                repeat_draws: prepared_execution
+                    .initial_individuals
+                    .as_ref()
+                    .map_or(&[][..], InitialIndividualsMaterialization::repeat_draws),
+                realized_tract_output: &realized_tract_output,
+            });
+            let first = publish_controlled_failure(
                 &mut workspace,
                 execution_id.as_str(),
                 effective,
@@ -571,9 +643,45 @@ fn execute_validated_config_with_effective_document(
                 event_links.as_deref(),
                 &failure_references,
                 failure_insertion,
-                &cause,
-            )?;
-            workspace.publish()?;
+                genotype_unit.as_ref(),
+                std::slice::from_ref(&cause),
+            );
+            // DT-039, **el último recurso**. Si el primer paquete fallido no
+            // pasa sus jueces —porque alguien alteró en disco un artefacto que
+            // conservaba, como la referencia suministrada—, se publica uno
+            // mínimo: la copia de la configuración si sigue intacta, las
+            // reducciones marcadas `failed`, ningún evento ni unidad
+            // genotípica, y en los diagnósticos la causa y detrás el fallo
+            // secundario. Se devuelve **siempre la causa original**; si ni
+            // siquiera el mínimo o la publicación salen, con el código del
+            // fallo secundario como contexto.
+            if let Err(secondary) = first {
+                for reduction in &mut manifest_reductions {
+                    reduction.state = UnitState::Failed;
+                    reduction.fasta_artifact_id = None;
+                    reduction.map_artifact_id = None;
+                    reduction.source_fasta_artifact_id = None;
+                }
+                if publish_controlled_failure(
+                    &mut workspace,
+                    execution_id.as_str(),
+                    effective,
+                    authorizations,
+                    &manifest_reductions,
+                    None,
+                    &[],
+                    None,
+                    None,
+                    &[cause.clone(), secondary.clone()],
+                )
+                .is_err()
+                {
+                    return Err(cause.with("secondary_failure_code", secondary.code()));
+                }
+            }
+            if let Err(secondary) = workspace.publish() {
+                return Err(cause.with("secondary_failure_code", secondary.code()));
+            }
             Err(cause)
         }
     }
@@ -593,7 +701,7 @@ fn write_execution_truth(
     reference_artifact: &ArtifactRecord,
     configuration_input: &ConfigurationInputRecord,
     effective: &EffectiveConfig,
-) -> Result<TruthDocument, Diagnostic> {
+) -> Result<(TruthDocument, ArtifactRecord), Diagnostic> {
     let document = match (population_snvs, initial_individuals) {
         (Some(prepared), Some(individuals)) => {
             let matrix_digest = prepared_matrix_digest(prepared, workspace)
@@ -707,8 +815,8 @@ fn write_execution_truth(
         (None, None) => empty_truth_document(execution_id, reference, reference_artifact, None)?,
         _ => return Err(internal("truth", "matrix and initial individuals diverged")),
     };
-    write_truth_artifact(workspace, &document)?;
-    Ok(document)
+    let record = write_truth_artifact(workspace, &document)?;
+    Ok((document, record))
 }
 
 /// Huella del contenido de la referencia.
@@ -799,6 +907,8 @@ fn prepared_matrix_digest(
         })
 }
 
+/// Un fallo del evento técnico y, si pudo escribirse, el enlace con estado
+/// `failed` a su manifiesto de evento fallido (DT-036).
 struct TechnicalEventAssemblyFailure {
     cause: Diagnostic,
     link: Option<ManifestEventLink>,
@@ -833,9 +943,13 @@ impl TechnicalEventArtifact {
     }
 }
 
-/// Ensambla el único evento técnico real de F3 exclusivamente desde FASTQ ya
-/// cerrados y validados por el `ExecutionWorkspace`. El manifiesto de evento
-/// se vuelve un artefacto más del catálogo antes de que la raíz lo enlace.
+/// Publica el único evento técnico real de F3 y devuelve su enlace.
+///
+/// Si el ensamblado falla, el evento **queda enlazado igualmente**, con estado
+/// `failed` y un manifiesto de evento fallido que registra la causa
+/// (REQ-SAL-21, DT-036). Solo si ni siquiera ese manifiesto puede escribirse
+/// —o si falla la derivación de identidades, sin la cual no hay manifiesto
+/// posible— el fallo sale sin enlace y el paquete fallido no nombra el evento.
 fn publish_technical_event(
     workspace: &mut ExecutionWorkspace,
     effective: &EffectiveConfig,
@@ -851,11 +965,45 @@ fn publish_technical_event(
         event.individual_ids(),
     )
     .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+    assemble_technical_event(
+        workspace,
+        effective,
+        event,
+        &identities,
+        reference,
+        reference_fasta,
+        initial_individuals,
+    )
+    .map_err(|cause| {
+        let link = write_failed_event_manifest(
+            workspace,
+            effective,
+            event,
+            &identities,
+            reference_fasta,
+            &cause,
+        )
+        .ok();
+        Box::new(TechnicalEventAssemblyFailure { cause, link })
+    })
+}
+
+/// Ensambla el evento exclusivamente desde FASTQ ya cerrados y validados por
+/// el `ExecutionWorkspace`. El manifiesto de evento se vuelve un artefacto más
+/// del catálogo antes de que la raíz lo enlace.
+fn assemble_technical_event(
+    workspace: &mut ExecutionWorkspace,
+    effective: &EffectiveConfig,
+    event: &crate::application::EffectiveTechnicalEvent,
+    identities: &crate::technical_identity::TechnicalIdentityPlan,
+    reference: &Reference,
+    reference_fasta: &ArtifactRecord,
+    initial_individuals: Option<&InitialIndividualsMaterialization>,
+) -> Result<ManifestEventLink, Diagnostic> {
     let individuals = initial_individuals
         .ok_or_else(|| {
             technical_event_error("initial_individuals", "faltan individuos materializados")
-        })
-        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?
+        })?
         .individuals()
         .iter()
         .map(|value| {
@@ -866,12 +1014,8 @@ fn publish_technical_event(
         })
         .collect::<BTreeMap<_, _>>();
     let libraries = identities.libraries().collect::<Vec<_>>();
-    let profile = resolve_f4_technical_profile(event.profile()).map_err(|error| {
-        Box::new(TechnicalEventAssemblyFailure {
-            cause: technical_event_error("technical_profile", error.to_string()),
-            link: None,
-        })
-    })?;
+    let profile = resolve_f4_technical_profile(event.profile())
+        .map_err(|error| technical_event_error("technical_profile", error.to_string()))?;
     let mut udis = BTreeMap::new();
     let demultiplexing_libraries = event
         .libraries()
@@ -891,15 +1035,13 @@ fn publish_technical_event(
                 udi,
             ))
         })
-        .collect::<Result<Vec<_>, Diagnostic>>()
-        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
 
     // El padrón fija el puesto de cada individua antes de recorrer nada, de
     // modo que el orden del inventario no dependa de en qué orden se generen
     // las parejas. Es lo que permite que una clave guarde un puesto en lugar de
     // repetir el identificador de su individua un millón de veces.
-    let roster = crate::identity::IndividualRoster::new(individuals.keys().cloned())
-        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+    let roster = crate::identity::IndividualRoster::new(individuals.keys().cloned())?;
     // El plan de tartamudeo se resuelve **una vez** y se presta a cada
     // muestreador. Las parejas se regeneran varias veces —por la
     // contaminación—, y un plan reconstruido en cada pasada podría no ser el
@@ -923,33 +1065,26 @@ fn publish_technical_event(
     for library in &libraries {
         let (individual, population_id) =
             individuals.get(library.individual_id()).ok_or_else(|| {
-                Box::new(TechnicalEventAssemblyFailure {
-                    cause: technical_event_error(
-                        "technical_event.individual_ids",
-                        "un individuo seleccionado no tiene verdad materializada",
-                    ),
-                    link: None,
-                })
+                technical_event_error(
+                    "technical_event.individual_ids",
+                    "un individuo seleccionado no tiene verdad materializada",
+                )
             })?;
         let seat = roster.seat(individual.id()).ok_or_else(|| {
-            Box::new(TechnicalEventAssemblyFailure {
-                cause: technical_event_error(
-                    "technical_event.individual_ids",
-                    "una individua seleccionada no figura en el padrón",
-                ),
-                link: None,
-            })
+            technical_event_error(
+                "technical_event.individual_ids",
+                "una individua seleccionada no figura en el padrón",
+            )
         })?;
         let mut sampler = paired_sampler(
             reference,
             individual,
-            &identities,
+            identities,
             profile,
             event,
             &stutter_plan,
             &pcr_plan,
-        )
-        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        )?;
         if let Some(settings) = pcr_plan.settings() {
             let haplotype_copies = individual
                 .sequences()
@@ -972,29 +1107,18 @@ fn publish_technical_event(
         }
         let mut keys = Vec::new();
         for pair in &mut sampler {
-            let pair = pair.map_err(|error| {
-                Box::new(TechnicalEventAssemblyFailure {
-                    cause: wgs_paired_sampler_error(error, individual.id()),
-                    link: None,
-                })
-            })?;
-            keys.push(
-                CleanPairKey::new(seat, pair.pre_hop_identity().pre_hop_instance_id()).map_err(
-                    |cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }),
-                )?,
-            );
+            let pair = pair.map_err(|error| wgs_paired_sampler_error(error, individual.id()))?;
+            keys.push(CleanPairKey::new(
+                seat,
+                pair.pre_hop_identity().pre_hop_instance_id(),
+            )?);
         }
         // El informe del tartamudeo se recoge **de la primera pasada**, igual
         // que el de la quimera: las regeneraciones posteriores repiten las
         // mismas decisiones y contarlas otra vez las duplicaría.
         stutter_accumulator
             .merge(&sampler.stutter_report())
-            .map_err(|error| {
-                Box::new(TechnicalEventAssemblyFailure {
-                    cause: technical_event_error("stutter", format!("{error:?}")),
-                    link: None,
-                })
-            })?;
+            .map_err(|error| technical_event_error("stutter", format!("{error:?}")))?;
         // Los recuentos de la amplificación se recogen **de la primera
         // pasada**, igual que los de quimera y tartamudeo: las regeneraciones
         // posteriores repiten las mismas familias y contarlas otra vez las
@@ -1002,12 +1126,7 @@ fn publish_technical_event(
         pcr_accumulator.merge(&sampler.pcr_report());
         realized_chimera_pairs = realized_chimera_pairs
             .checked_add(sampler.chimera_report().realized_pairs())
-            .ok_or_else(|| {
-                Box::new(TechnicalEventAssemblyFailure {
-                    cause: technical_event_error("chimera", "contador de quimeras desbordado"),
-                    link: None,
-                })
-            })?;
+            .ok_or_else(|| technical_event_error("chimera", "contador de quimeras desbordado"))?;
         clean_libraries.push(
             CleanLibraryPairs::new(
                 individual.id().clone(),
@@ -1017,10 +1136,7 @@ fn publish_technical_event(
                 keys,
             )
             .map_err(|error| {
-                Box::new(TechnicalEventAssemblyFailure {
-                    cause: technical_event_error("biological_contamination", format!("{error:?}")),
-                    link: None,
-                })
+                technical_event_error("biological_contamination", format!("{error:?}"))
             })?,
         );
     }
@@ -1030,23 +1146,13 @@ fn publish_technical_event(
         event.biological_contamination(),
         &clean_libraries,
     )
-    .map_err(|error| {
-        Box::new(TechnicalEventAssemblyFailure {
-            cause: technical_event_error("biological_contamination", format!("{error:?}")),
-            link: None,
-        })
-    })?;
+    .map_err(|error| technical_event_error("biological_contamination", format!("{error:?}")))?;
     let mut materializer = BiologicalContaminationMaterializer::new(
         effective.reproducibility().root_seed(),
         event.event_id().clone(),
         &clean_libraries,
     )
-    .map_err(|error| {
-        Box::new(TechnicalEventAssemblyFailure {
-            cause: technical_event_error("biological_contamination", format!("{error:?}")),
-            link: None,
-        })
-    })?;
+    .map_err(|error| technical_event_error("biological_contamination", format!("{error:?}")))?;
     let mut error_quality = ErrorQualityAccumulator::default();
     let mut biological_manifest = Vec::new();
     // El demultiplexado y la escritura final se preparan antes de generar: la
@@ -1059,12 +1165,7 @@ fn publish_technical_event(
         event.index_hopping_rate(),
         demultiplexing_libraries,
     )
-    .map_err(|error| {
-        Box::new(TechnicalEventAssemblyFailure {
-            cause: technical_event_error("demultiplexing", format!("{error:?}")),
-            link: None,
-        })
-    })?;
+    .map_err(|error| technical_event_error("demultiplexing", format!("{error:?}")))?;
     let mut streams: BTreeMap<crate::identity::LibraryId, FinalPairedFastqStream> = BTreeMap::new();
     for library in &libraries {
         let individual = individuals
@@ -1072,10 +1173,7 @@ fn publish_technical_event(
             .expect("selected above")
             .0;
         let udi = udis.get(library.library_id()).ok_or_else(|| {
-            Box::new(TechnicalEventAssemblyFailure {
-                cause: technical_event_error("technical_event.udi", "biblioteca sin UDI declarado"),
-                link: None,
-            })
+            technical_event_error("technical_event.udi", "biblioteca sin UDI declarado")
         })?;
         let stream = FinalPairedFastqStream::open(
             workspace,
@@ -1084,8 +1182,7 @@ fn publish_technical_event(
             library.library_id(),
             udi,
             event.read_length(),
-        )
-        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        )?;
         streams.insert(library.library_id().clone(), stream);
     }
     // Las parejas que aporta una donante se conocen antes de materializar: el
@@ -1108,27 +1205,23 @@ fn publish_technical_event(
     let mut donor_pairs = BTreeMap::new();
     for (seat, wanted) in &donor_requests {
         let individual_id = roster.individual_id(*seat).ok_or_else(|| {
-            Box::new(TechnicalEventAssemblyFailure {
-                cause: technical_event_error(
-                    "biological_contamination",
-                    "una donante no figura en el padrón",
-                ),
-                link: None,
-            })
+            technical_event_error(
+                "biological_contamination",
+                "una donante no figura en el padrón",
+            )
         })?;
         let collected = RegeneratedPairs::collect(
             individual_id,
             wanted,
             reference,
             &individuals,
-            &identities,
+            identities,
             profile,
             event,
             effective.reproducibility().root_seed(),
             &stutter_plan,
             &pcr_plan,
-        )
-        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        )?;
         donor_pairs.insert(*seat, collected);
     }
     for recipient_plan in contamination_plan.recipients() {
@@ -1136,23 +1229,19 @@ fn publish_technical_event(
             .iter()
             .find(|library| library.individual_id() == recipient_plan.recipient_id())
             .ok_or_else(|| {
-                Box::new(TechnicalEventAssemblyFailure {
-                    cause: technical_event_error("biological_contamination", "receptora ausente"),
-                    link: None,
-                })
+                technical_event_error("biological_contamination", "receptora ausente")
             })?;
         let mut regenerated = RegeneratedPairs::build(
             clean,
             reference,
             &individuals,
-            &identities,
+            identities,
             profile,
             event,
             effective.reproducibility().root_seed(),
             &stutter_plan,
             &pcr_plan,
-        )
-        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        )?;
         let report = materializer
             .emit_materialized_recipient(
                 recipient_plan,
@@ -1202,22 +1291,16 @@ fn publish_technical_event(
                 },
             )
             .map_err(|error| {
-                Box::new(TechnicalEventAssemblyFailure {
-                    cause: technical_event_error("biological_contamination", format!("{error:?}")),
-                    link: None,
-                })
+                technical_event_error("biological_contamination", format!("{error:?}"))
             })?;
         biological_manifest.push(
             recipient_plan
                 .realized_manifest_recipient(&report)
                 .ok_or_else(|| {
-                    Box::new(TechnicalEventAssemblyFailure {
-                        cause: technical_event_error(
-                            "biological_contamination",
-                            "informe realizado incoherente",
-                        ),
-                        link: None,
-                    })
+                    technical_event_error(
+                        "biological_contamination",
+                        "informe realizado incoherente",
+                    )
                 })?,
         );
     }
@@ -1232,42 +1315,31 @@ fn publish_technical_event(
         {
             continue;
         }
-        let udi = udis.get(clean.library_id()).cloned().ok_or_else(|| {
-            Box::new(TechnicalEventAssemblyFailure {
-                cause: technical_event_error("demultiplexing", "UDI de biblioteca ausente"),
-                link: None,
-            })
-        })?;
+        let udi = udis
+            .get(clean.library_id())
+            .cloned()
+            .ok_or_else(|| technical_event_error("demultiplexing", "UDI de biblioteca ausente"))?;
         let mut regenerated = RegeneratedPairs::build(
             clean,
             reference,
             &individuals,
-            &identities,
+            identities,
             profile,
             event,
             effective.reproducibility().root_seed(),
             &stutter_plan,
             &pcr_plan,
-        )
-        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        )?;
         for key in clean.own_pairs() {
             let transformed = regenerated.take(key).ok_or_else(|| {
-                Box::new(TechnicalEventAssemblyFailure {
-                    cause: technical_event_error(
-                        "biological_contamination",
-                        "la clave limpia no se puede regenerar",
-                    ),
-                    link: None,
-                })
+                technical_event_error(
+                    "biological_contamination",
+                    "la clave limpia no se puede regenerar",
+                )
             })?;
             error_quality
                 .record(transformed.report())
-                .map_err(|error| {
-                    Box::new(TechnicalEventAssemblyFailure {
-                        cause: technical_event_error("error_quality", format!("{error:?}")),
-                        link: None,
-                    })
-                })?;
+                .map_err(|error| technical_event_error("error_quality", format!("{error:?}")))?;
             write_demultiplexed_pair(
                 &mut demultiplexer,
                 &mut streams,
@@ -1278,8 +1350,7 @@ fn publish_technical_event(
                     false,
                     transformed.into_observed(),
                 ),
-            )
-            .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+            )?;
         }
     }
     let demultiplexing = EventManifestDemultiplexing::from_report(demultiplexer.take_report());
@@ -1291,27 +1362,17 @@ fn publish_technical_event(
             .get(library.individual_id())
             .expect("selected above")
             .0;
-        let stream = streams.remove(library.library_id()).ok_or_else(|| {
-            Box::new(TechnicalEventAssemblyFailure {
-                cause: technical_event_error("demultiplexing", "biblioteca final ausente"),
-                link: None,
-            })
-        })?;
-        let publication = stream
-            .finish(workspace)
-            .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        let stream = streams
+            .remove(library.library_id())
+            .ok_or_else(|| technical_event_error("demultiplexing", "biblioteca final ausente"))?;
+        let publication = stream.finish(workspace)?;
         let basic_bases = clean_libraries
             .iter()
             .find(|clean| clean.library_id() == library.library_id())
             .and_then(|clean| u64::try_from(clean.own_pairs().len()).ok())
             .and_then(|pairs| pairs.checked_mul(2))
             .and_then(|reads| reads.checked_mul(u64::from(event.read_length())))
-            .ok_or_else(|| {
-                Box::new(TechnicalEventAssemblyFailure {
-                    cause: technical_event_error("coverage", "bases WGS básicas desbordan"),
-                    link: None,
-                })
-            })?;
+            .ok_or_else(|| technical_event_error("coverage", "bases WGS básicas desbordan"))?;
         let target_x = match event.target() {
             EffectiveTechnicalEventTarget::CoverageWgs(value) => value,
             EffectiveTechnicalEventTarget::ReadCount(_) => {
@@ -1326,12 +1387,7 @@ fn publish_technical_event(
             reference.total_length(),
             publication.n_base_count(),
         )
-        .map_err(|error| {
-            Box::new(TechnicalEventAssemblyFailure {
-                cause: technical_event_error("coverage", error.to_string()),
-                link: None,
-            })
-        })?;
+        .map_err(|error| technical_event_error("coverage", error.to_string()))?;
         outputs.extend([
             TechnicalEventArtifact::complete(
                 individual.id().clone(),
@@ -1364,11 +1420,17 @@ fn publish_technical_event(
             n_base_count: publication.n_base_count(),
         });
     }
+    let basic_wgs_coverage_x = coverage
+        .iter()
+        .map(|entry| entry.report.basic_wgs_x())
+        .sum();
     write_event_manifest(
         workspace,
         event,
-        &identities,
+        identities,
         reference_fasta,
+        UnitState::Complete,
+        &[],
         &outputs,
         &coverage,
         &summaries,
@@ -1379,46 +1441,133 @@ fn publish_technical_event(
         demultiplexing,
         realized_chimera_pairs,
         &biological_manifest,
-        // La sección solo existe cuando el evento abre de verdad la etapa
-        // `stutter`: con el tartamudeo apagado, o sin loci declarados, el
-        // manifiesto sale idéntico al de antes de esta ampliación.
-        stutter_plan
-            .is_active()
-            .then(|| crate::event_manifest::EventManifestStutter {
-                settings: stutter_plan.settings().clone(),
-                report: stutter_accumulator.report(),
-                loci: stutter_plan
-                    .loci()
-                    .iter()
-                    .map(|locus| {
-                        (
-                            locus.id().as_str().to_owned(),
-                            locus
-                                .motifs()
-                                .iter()
-                                .map(crate::tandem_repeat::RepeatMotif::length)
-                                .collect(),
-                        )
-                    })
-                    .collect(),
-            }),
-        // La sección solo existe con preparación amplificada: con la
-        // preparación sin PCR, `artifacts.pcr` conserva exactamente los bytes
-        // de antes de esta ampliación.
-        event.pcr().map(|settings| {
-            let report = pcr_accumulator.clone().report();
-            crate::event_manifest::EventManifestPcr {
-                settings: settings.clone(),
-                report,
-                bound: pcr_bound,
-                basic_wgs_coverage_x: coverage
-                    .iter()
-                    .map(|entry| entry.report.basic_wgs_x())
-                    .sum(),
-            }
-        }),
+        event_manifest_stutter(&stutter_plan, stutter_accumulator.report()),
+        event_manifest_pcr(
+            event,
+            pcr_accumulator.report(),
+            pcr_bound,
+            basic_wgs_coverage_x,
+        ),
     )
-    .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))
+}
+
+/// Sección del tartamudeo del manifiesto de evento. Solo existe cuando el
+/// evento abre de verdad la etapa `stutter`: con el tartamudeo apagado, o sin
+/// loci declarados, el manifiesto sale idéntico al de antes de esta ampliación.
+fn event_manifest_stutter(
+    stutter_plan: &crate::stutter::StutterPlan,
+    report: crate::stutter::StutterReport,
+) -> Option<crate::event_manifest::EventManifestStutter> {
+    stutter_plan
+        .is_active()
+        .then(|| crate::event_manifest::EventManifestStutter {
+            settings: stutter_plan.settings().clone(),
+            report,
+            loci: stutter_plan
+                .loci()
+                .iter()
+                .map(|locus| {
+                    (
+                        locus.id().as_str().to_owned(),
+                        locus
+                            .motifs()
+                            .iter()
+                            .map(crate::tandem_repeat::RepeatMotif::length)
+                            .collect(),
+                    )
+                })
+                .collect(),
+        })
+}
+
+/// Sección de la amplificación del manifiesto de evento. Solo existe con
+/// preparación amplificada: sin PCR, `artifacts.pcr` conserva exactamente los
+/// bytes de antes de esta ampliación.
+fn event_manifest_pcr(
+    event: &crate::application::EffectiveTechnicalEvent,
+    report: crate::pcr_amplification::PcrReport,
+    bound: crate::pcr_amplification::PcrResourceBound,
+    basic_wgs_coverage_x: f64,
+) -> Option<crate::event_manifest::EventManifestPcr> {
+    event
+        .pcr()
+        .map(|settings| crate::event_manifest::EventManifestPcr {
+            settings: settings.clone(),
+            report,
+            bound,
+            basic_wgs_coverage_x,
+        })
+}
+
+/// Manifiesto de un evento cuyo ensamblado falló (REQ-SAL-21, DT-036).
+///
+/// Lleva estado `failed`, la causa en `diagnostics` y las 2n salidas FASTQ
+/// marcadas `failed`, sin artefacto y con el código de la causa. Cobertura y
+/// resúmenes van vacíos y todas las cifras realizadas a cero; el modo de
+/// errores, la tasa de quimera y la de salto de índice son las declaradas.
+///
+/// **No conserva ningún FASTQ, ni siquiera los ya cerrados**: cada uno depende
+/// del evento entero —el demultiplexado y la contaminación reparten parejas
+/// entre bibliotecas—, así que un FASTQ suelto de un evento fallido no
+/// describiría nada. Se retiran del catálogo antes de escribir el manifiesto,
+/// y es lo que ya se hacía antes de enlazar el evento fallido (DT-002).
+fn write_failed_event_manifest(
+    workspace: &mut ExecutionWorkspace,
+    effective: &EffectiveConfig,
+    event: &crate::application::EffectiveTechnicalEvent,
+    identities: &crate::technical_identity::TechnicalIdentityPlan,
+    reference_fasta: &ArtifactRecord,
+    cause: &Diagnostic,
+) -> Result<ManifestEventLink, Diagnostic> {
+    let without_fastq = workspace
+        .artifacts()
+        .iter()
+        .filter(|artifact| artifact.kind != "fastq")
+        .map(|artifact| artifact.id.clone())
+        .collect::<BTreeSet<_>>();
+    workspace.retain_only_artifacts(&without_fastq)?;
+    let outputs = identities
+        .libraries()
+        .flat_map(|library| {
+            crate::technical_identity::TechnicalMate::all().map(|mate| TechnicalEventArtifact {
+                individual_id: library.individual_id().clone(),
+                library_id: library.library_id().clone(),
+                mate,
+                id: format!("fastq-{}-r{}", library.library_id().as_str(), mate.number()),
+                state: UnitState::Failed,
+                artifact: None,
+                diagnostic: Some(cause.clone()),
+            })
+        })
+        .collect::<Vec<_>>();
+    write_event_manifest(
+        workspace,
+        event,
+        identities,
+        reference_fasta,
+        UnitState::Failed,
+        std::slice::from_ref(cause),
+        &outputs,
+        &[],
+        &[],
+        EventManifestErrorQuality::from_report(
+            ErrorQualitySettings::default().with_sequencing_errors(event.sequencing_errors()),
+            ErrorQualityAccumulator::default().report(),
+        ),
+        EventManifestDemultiplexing::without_pairs(event.index_hopping_rate()),
+        0,
+        &[],
+        event_manifest_stutter(
+            &effective.stutter_plan(),
+            crate::stutter::StutterAccumulator::default().report(),
+        ),
+        event_manifest_pcr(
+            event,
+            crate::pcr_amplification::PcrAccumulator::default().report(),
+            crate::pcr_amplification::PcrResourceBound::empty(),
+            0.0,
+        ),
+    )
 }
 
 /// Clasifica una pareja y la escribe en el FASTQ de su biblioteca final.
@@ -1689,6 +1838,8 @@ fn write_event_manifest(
     event: &crate::application::EffectiveTechnicalEvent,
     identities: &crate::technical_identity::TechnicalIdentityPlan,
     reference_fasta: &ArtifactRecord,
+    state: UnitState,
+    diagnostics: &[Diagnostic],
     outputs: &[TechnicalEventArtifact],
     coverage: &[EventManifestCoverage<'_>],
     final_fastq_summary: &[EventManifestFinalFastqSummary<'_>],
@@ -1728,7 +1879,7 @@ fn write_event_manifest(
         .collect::<Vec<_>>();
     let document = EventManifest {
         event,
-        state: UnitState::Complete,
+        state,
         identities,
         reference: EventManifestReference {
             reference_id: identities.reference_id(),
@@ -1744,7 +1895,7 @@ fn write_event_manifest(
         biological_contamination,
         stutter,
         pcr,
-        diagnostics: &[],
+        diagnostics,
     };
     let bytes = event_manifest_bytes(&document)?;
     let relative_path = event_manifest_relative_path(event.event_id());
@@ -1765,7 +1916,7 @@ fn write_event_manifest(
     )?;
     Ok(ManifestEventLink {
         event_id: event.event_id().as_str().to_owned(),
-        state: UnitState::Complete,
+        state,
         manifest_artifact_id: artifact.id,
         chimera_rate: event.chimera_rate(),
         realized_chimera_pairs,
@@ -1861,6 +2012,17 @@ fn preflight_vcf_samples(effective: &EffectiveConfig) -> Result<(), Diagnostic> 
     Ok(())
 }
 
+/// Lo que un paquete fallido conserva de la unidad genotípica (DT-038).
+struct FailedGenotypeUnit<'a> {
+    /// La verdad, la matriz de SNV y el VCF con su índice, ya comprobados en
+    /// disco. Las referencias viajan aparte, con las demás.
+    artifact_ids: Vec<String>,
+    population_snvs: Option<&'a PopulationSnvsManifestLink>,
+    vcf_outputs: &'a [VcfManifestLink],
+    repeat_draws: &'a [crate::repeat_genotypes::RepeatAlleleDraw],
+    realized_tract_output: &'a crate::results::RealizedTractOutput,
+}
+
 #[allow(clippy::too_many_arguments)] // El cierre DTC-045 necesita todas las relaciones ya validadas.
 fn publish_controlled_failure(
     workspace: &mut ExecutionWorkspace,
@@ -1871,7 +2033,8 @@ fn publish_controlled_failure(
     events: Option<&[ManifestEventLink]>,
     references: &[ManifestReferenceLink],
     insertion: Option<(&PublishedInsertion, &ArtifactRecord)>,
-    cause: &Diagnostic,
+    genotype_unit: Option<&FailedGenotypeUnit<'_>>,
+    diagnostics: &[Diagnostic],
 ) -> Result<(), Diagnostic> {
     let configuration_artifact = workspace
         .artifacts()
@@ -1907,9 +2070,12 @@ fn publish_controlled_failure(
                 .flatten()
                 .map(|event| event.manifest_artifact_id.clone()),
         );
-        if let Some((inserted, _)) = insertion {
-            retained.insert(inserted.map.id.clone());
-        }
+    }
+    if let Some((inserted, _)) = insertion {
+        retained.insert(inserted.map.id.clone());
+    }
+    if let Some(unit) = genotype_unit {
+        retained.extend(unit.artifact_ids.iter().cloned());
     }
     workspace.retain_only_artifacts(&retained)?;
     let artifacts = workspace.artifacts().to_vec();
@@ -1918,12 +2084,15 @@ fn publish_controlled_failure(
         original_path: effective.configuration_input().original_path().to_owned(),
         copy,
     });
-    // Una ejecución fallida no ha publicado tracto alguno: sus cifras
-    // realizadas son cero y la cota sigue siendo la que la configuración fijó.
+    // Sin unidad genotípica el paquete fallido no publica tracto alguno: sus
+    // cifras realizadas son cero y la cota sigue siendo la que la
+    // configuración fijó. Con ella, son los sorteos y las bases de tracto que
+    // la verdad y el VCF conservados llevan de verdad.
+    let no_tract_output = crate::results::RealizedTractOutput::default();
     let repeat_loci = crate::results::repeat_loci_manifest_json(
         effective,
-        &[],
-        &crate::results::RealizedTractOutput::default(),
+        genotype_unit.map_or(&[][..], |unit| unit.repeat_draws),
+        genotype_unit.map_or(&no_tract_output, |unit| unit.realized_tract_output),
     )?;
     let manifest = GeneralManifest {
         execution_id,
@@ -1932,17 +2101,17 @@ fn publish_controlled_failure(
         effective_config: None,
         references,
         reduced_references: reductions,
-        population_snvs: None,
-        vcf_outputs: &[],
+        population_snvs: genotype_unit.and_then(|unit| unit.population_snvs),
+        vcf_outputs: genotype_unit.map_or(&[][..], |unit| unit.vcf_outputs),
         events,
         authorizations,
         artifacts: &artifacts,
-        diagnostics: std::slice::from_ref(cause),
-        // Una ejecución fallida no ha sorteado nada, pero **sí ha declarado**
-        // los loci, y el manifiesto los registra igual que en un éxito: con
-        // cero copias sorteadas y sin frecuencia realizada. Lo que se registra
-        // es la configuración, que existe tanto si la ejecución terminó como
-        // si no.
+        diagnostics,
+        // Sin unidad genotípica no se publica ningún sorteo, pero los loci
+        // **sí están declarados**, y el manifiesto los registra igual que en
+        // un éxito: con cero copias sorteadas y sin frecuencia realizada. Lo
+        // que se registra es la configuración, que existe tanto si la
+        // ejecución terminó como si no.
         repeat_loci: repeat_loci.as_ref(),
     };
     let mut document = general_manifest_document(&manifest);
@@ -3504,6 +3673,9 @@ i5 = "TGCATGCA"
         fs::remove_dir_all(root).ok();
     }
 
+    /// La configuración efectiva inválida se retira, pero la verdad y la
+    /// referencia que cita, ya validadas y sin tocar, se conservan como unidad
+    /// genotípica (DT-038): este escenario no pide VCF ni matriz de SNV.
     #[test]
     fn invalid_effective_document_is_removed_before_failed_fallback_publication() {
         let root = std::env::temp_dir().join(format!(
@@ -3545,27 +3717,31 @@ i5 = "TGCATGCA"
         assert_eq!(manifest["diagnostics"][0]["code"], "GPS-FMT-006");
         assert!(!destination.join("effective-config.json").exists());
         assert!(
-            !destination
+            destination
                 .join("resources/references/ref-main.fa")
-                .exists()
+                .is_file()
         );
-        assert_eq!(manifest["references"], json!([]));
+        assert!(destination.join("outputs/truth.jsonl").is_file());
+        assert_eq!(
+            manifest["references"],
+            json!([{"id": "ref-main", "fasta_artifact_id": "reference-fasta"}])
+        );
         assert_eq!(manifest["reference_reductions"], json!([]));
         assert_eq!(
             manifest["output_categories"]["minimum"],
-            json!(["config-general"])
+            json!(["config-general", "reference-fasta", "truth-jsonl"])
         );
         assert_eq!(manifest["output_categories"]["requested"], json!([]));
-        assert!(
-            manifest["artifacts"]
-                .as_array()
-                .expect("artifact catalog")
-                .iter()
-                .all(|artifact| artifact["id"] == "config-general")
+        assert_eq!(
+            catalog_ids(&manifest),
+            ["config-general", "reference-fasta", "truth-jsonl"]
         );
         fs::remove_dir_all(root).expect("cleanup");
     }
 
+    /// La reducción alterada queda `failed` y sin artefactos; la verdad y la
+    /// referencia suministrada, intactas, se conservan como unidad genotípica
+    /// (DT-038).
     #[test]
     fn physical_resource_failure_marks_reduction_failed_without_partial_artifacts() {
         let root = std::env::temp_dir().join(format!(
@@ -3621,13 +3797,21 @@ i5 = "TGCATGCA"
         assert_eq!(manifest["diagnostics"][0]["code"], "GPS-FMT-006");
         assert!(!destination.join("effective-config.json").exists());
         for relative in [
-            "resources/references/reference-main.fa",
             "resources/references/reference-small.fa",
             "resources/references/reference-small.map.json",
         ] {
             assert!(!destination.join(relative).exists(), "retained {relative}");
         }
-        assert_eq!(manifest["references"], json!([]));
+        assert!(
+            destination
+                .join("resources/references/reference-main.fa")
+                .is_file()
+        );
+        assert!(destination.join("outputs/truth.jsonl").is_file());
+        assert_eq!(
+            manifest["references"],
+            json!([{"id": "reference-main", "fasta_artifact_id": "reference-fasta"}])
+        );
         assert_eq!(
             manifest["reference_reductions"].as_array().unwrap().len(),
             1
@@ -3644,18 +3828,15 @@ i5 = "TGCATGCA"
         assert_eq!(
             manifest["output_categories"],
             json!({
-                           "minimum": ["config-general"],
-                           "defaulted": [],
-                           "requested": [],
-                           "disabled": []
+                "minimum": ["config-general", "reference-fasta", "truth-jsonl"],
+                "defaulted": [],
+                "requested": [],
+                "disabled": []
             })
         );
-        assert!(
-            manifest["artifacts"]
-                .as_array()
-                .expect("artifact catalog")
-                .iter()
-                .all(|artifact| artifact["id"] == "config-general")
+        assert_eq!(
+            catalog_ids(&manifest),
+            ["config-general", "reference-fasta", "truth-jsonl"]
         );
         fs::remove_dir_all(root).expect("cleanup");
     }
@@ -3990,25 +4171,21 @@ genotype_model = "hwe"
         }
     }
 
-    /// REQ-SAL-22, REQ-SAL-23 y REQ-SAL-25. Si el ensamblado del evento falla
-    /// en la **segunda** biblioteca —la validación conjunta de sus mates—, la
-    /// primera ya cerró sus FASTQ, y aun así el paquete fallido no conserva
-    /// ninguno ni nada del evento ni artefactos parciales, pero **sí** las
-    /// reducciones completas y su referencia de origen, y registra la causa (el
-    /// manifiesto solo guarda su código y el mensaje de catálogo, de modo que
-    /// esta prueba no distingue dos fallos internos entre sí; la que sí lo hace
-    /// es la de fallo tras el evento, con un código propio). **No exige**
-    /// `events: null`: que un evento fallido no quede enlazado contradice
-    /// REQ-SAL-21 y está registrado como DT-036, sin fijarlo aquí.
+    /// REQ-SAL-21, REQ-SAL-22, REQ-SAL-23 y REQ-SAL-25 (DT-036). Si el
+    /// ensamblado del evento falla en la **segunda** biblioteca —la validación
+    /// conjunta de sus mates—, la primera ya cerró sus FASTQ y aun así el
+    /// paquete fallido no conserva ninguno. El evento **queda enlazado** con
+    /// estado `failed` y un manifiesto de evento fallido: la causa en sus
+    /// diagnósticos y las cuatro salidas FASTQ `failed`, sin artefacto y con el
+    /// código de la causa. Se conservan además las reducciones completas, su
+    /// referencia de origen y la unidad genotípica, porque este escenario no
+    /// pide VCF. El manifiesto general solo guarda el código y el mensaje de
+    /// catálogo de la causa; la que distingue causas entre sí es la prueba del
+    /// fallo tras el evento, con un código propio.
     #[test]
-    fn a_failed_event_assembly_keeps_the_completed_reductions_but_no_fastq_nor_event() {
+    fn a_failed_event_assembly_links_a_failed_event_manifest_and_keeps_no_fastq() {
         use crate::fastq_output::FORCE_FINAL_PAIR_VALIDATION_FAILURE;
-        let root = std::env::temp_dir().join(format!(
-            "gps-failure-event-assembly-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&root).expect("test root");
+        let root = test_root("event-assembly");
         let config = reductions_config(
             &root,
             &[
@@ -4016,18 +4193,9 @@ genotype_model = "hwe"
                 ("I2", "TGCATGCA", "ACGTACGT"),
             ],
         );
-        let effective = load_and_validate_config(&config).expect("valid config");
         let destination = root.join("result");
         FORCE_FINAL_PAIR_VALIDATION_FAILURE.set(2);
-        let error = execute_validated_config_with_effective_document(
-            &effective,
-            &destination,
-            ExecutionAuthorizations::default(),
-            |_| Ok(()),
-            std::convert::identity,
-            |_| Ok(()),
-        )
-        .expect_err("la validación conjunta de la segunda biblioteca falla");
+        let (error, manifest) = run_failed(&config, &destination, |_| Ok(()));
         assert_eq!(
             FORCE_FINAL_PAIR_VALIDATION_FAILURE.get(),
             0,
@@ -4037,12 +4205,20 @@ genotype_model = "hwe"
             format!("{error:?}").contains("injected final-pair validation failure"),
             "{error:?}"
         );
-        let manifest: serde_json::Value = serde_json::from_slice(
-            &fs::read(destination.join("manifest.json")).expect("manifiesto fallido"),
-        )
-        .expect("JSON");
         assert_eq!(manifest["state"], "failed");
-        assert_eq!(manifest["diagnostics"][0]["code"], error.code());
+        assert_eq!(diagnostic_codes(&manifest), [error.code()]);
+        assert_eq!(
+            manifest["events"],
+            json!([{
+                "event_id": "reads-main",
+                "state": "failed",
+                "manifest_artifact_id": "event-manifest-reads-main"
+            }])
+        );
+        assert_eq!(
+            manifest["technical_events"][0]["event_manifest"]["id"],
+            "event-manifest-reads-main"
+        );
         assert_eq!(
             manifest["references"],
             json!([
@@ -4053,39 +4229,318 @@ genotype_model = "hwe"
         );
         assert_reduction_kept(&manifest, &destination, "ref-small");
         assert_reduction_kept(&manifest, &destination, "ref-small-b");
-        let mut ids = manifest["artifacts"]
-            .as_array()
-            .expect("catalog")
-            .iter()
-            .map(|artifact| artifact["id"].as_str().expect("id").to_owned())
-            .collect::<Vec<_>>();
-        ids.sort();
         assert_eq!(
-            ids,
+            catalog_ids(&manifest),
             [
                 "config-general",
+                "event-manifest-reads-main",
+                "population-snvs-metadata",
+                "population-snvs-tsv",
                 "reference-fasta",
                 "reference-fasta-ref-small",
                 "reference-fasta-ref-small-b",
                 "reference-map-ref-small",
-                "reference-map-ref-small-b"
+                "reference-map-ref-small-b",
+                "truth-jsonl"
             ]
         );
-        let mut pending = vec![destination.clone()];
-        while let Some(directory) = pending.pop() {
-            for entry in fs::read_dir(&directory).expect("read directory") {
-                let path = entry.expect("entry").path();
-                if path.is_dir() {
-                    pending.push(path);
-                } else {
-                    let name = path.to_string_lossy().into_owned();
-                    assert!(
-                        !name.contains("fastq") && !name.contains("/events/"),
-                        "retained {name}"
-                    );
-                }
-            }
+        assert_failed_event_manifest(
+            &read_json(&destination.join("events/reads-main/manifest.json")),
+            error.code(),
+            2,
+        );
+        assert_no_fastq(&destination);
+        assert_external_schema(
+            &destination.join("manifest.json"),
+            "manifest-general-v4.schema.json",
+        );
+        assert_external_schema(
+            &destination.join("events/reads-main/manifest.json"),
+            "manifest-event-v2.schema.json",
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    /// Un manifiesto de evento fallido según DT-036: estado `failed`, la causa
+    /// como único diagnóstico, las 2n salidas `failed` sin artefacto y con su
+    /// código, cobertura y resúmenes vacíos y todas las cifras realizadas a
+    /// cero.
+    fn assert_failed_event_manifest(event: &serde_json::Value, code: &str, libraries: usize) {
+        assert_eq!(event["state"], "failed");
+        assert_eq!(diagnostic_codes(event), [code]);
+        let outputs = event["outputs"].as_array().expect("outputs");
+        assert_eq!(outputs.len(), 2 * libraries, "{outputs:?}");
+        for output in outputs {
+            assert_eq!(output["state"], "failed", "{output}");
+            assert_eq!(output["artifact"], serde_json::Value::Null, "{output}");
+            assert_eq!(output["diagnostic_code"], code, "{output}");
         }
+        assert_eq!(event["coverage"], json!([]));
+        assert_eq!(event["final_fastq_summary"], json!([]));
+        assert_eq!(event["artifacts"]["chimera"]["realized_pairs"], 0);
+        assert_eq!(event["artifacts"]["biological_contamination"], json!([]));
+        for field in ["reassigned_pairs", "discarded_pairs", "unassigned_pairs"] {
+            assert_eq!(event["demultiplexing"][field], 0, "{field}");
+        }
+    }
+
+    fn assert_no_fastq(destination: &Path) {
+        for relative in files_under(destination) {
+            assert!(!relative.contains("fastq"), "retained {relative}");
+        }
+    }
+
+    /// Los cuatro escenarios de evento de `tests/event_manifest_guards.rs`
+    /// —contaminación con salto de índice, amplificación, amplificación con
+    /// tartamudeo clonal y tartamudeo sin amplificar—, con el fallo inyectado
+    /// en la última biblioteca. Devuelve la configuración, el número de
+    /// bibliotecas y los esquemas del manifiesto general y del de evento.
+    fn failed_event_scenario(
+        root: &Path,
+        scenario: &str,
+    ) -> (PathBuf, usize, &'static str, &'static str) {
+        let short_and_long = |short: usize, long: usize| {
+            let short = "CA".repeat(short);
+            let long = "CA".repeat(long);
+            let head = format!("{}{short}GGGG{long}", "G".repeat(60));
+            (
+                format!("{head}{}", "G".repeat(300 - head.len())),
+                format!(
+                    "[[reference.repeat_loci]]\nid = \"STR-SHORT\"\nsequence = \"chr1\"\nstart = 61\nend = {}\nmotif = \"CA\"\n[[reference.repeat_loci.alleles]]\nsequence = \"{short}\"\nfrequency = 1.0\n[[reference.repeat_loci]]\nid = \"STR-LONG\"\nsequence = \"chr1\"\nstart = {}\nend = {}\nmotif = \"CA\"\n[[reference.repeat_loci.alleles]]\nsequence = \"{long}\"\nfrequency = 1.0\n",
+                    60 + short.len(),
+                    65 + short.len(),
+                    64 + short.len() + long.len()
+                ),
+            )
+        };
+        let stutter = |rate: f64| {
+            format!(
+                "[technical_event.stutter]\nenabled = true\n[[technical_event.stutter.motif_length_rates]]\nmotif_length_bases = 2\nrate = {rate:?}\n[[technical_event.stutter.steps]]\nunits = -3\nweight = 0.05\n[[technical_event.stutter.steps]]\nunits = -2\nweight = 0.15\n[[technical_event.stutter.steps]]\nunits = -1\nweight = 0.6\n[[technical_event.stutter.steps]]\nunits = 1\nweight = 0.2\n"
+            )
+        };
+        let pcr = "library_preparation = \"pcr\"\n[technical_event.pcr]\nduplicate_fraction = 0.3\ncycles = 10\nefficiency = 0.9\n";
+        let library_a = "[[technical_event.libraries]]\nindividual_id = \"sample-A\"\ni7 = \"ACGTACGT\"\ni5 = \"TGCATGCA\"\n";
+        let (bases, loci, individuals, event, libraries, schemas) = match scenario {
+            "contamination" => (
+                "A".repeat(1000),
+                String::new(),
+                "individual_count = 2\nploidy = 2\nindividual_ids = [\"sample-A\", \"sample-B\"]",
+                format!(
+                    "individual_ids = [\"sample-A\", \"sample-B\"]\ntarget_coverage_wgs = 1\ncontamination_min_percent = 50\ncontamination_max_percent = 50\ncontamination_recipient_ids = [\"sample-A\"]\nindex_hopping_rate = 1\n{library_a}[[technical_event.libraries]]\nindividual_id = \"sample-B\"\ni7 = \"CGTACGTA\"\ni5 = \"GCATGCAT\"\n"
+                ),
+                2,
+                (
+                    "manifest-general-v4.schema.json",
+                    "manifest-event-v2.schema.json",
+                ),
+            ),
+            "pcr" => (
+                "ACGTTGCAAGCT".repeat(84)[..1000].to_owned(),
+                String::new(),
+                "individual_count = 1\nploidy = 1\nindividual_ids = [\"sample-A\"]",
+                format!(
+                    "individual_ids = [\"sample-A\"]\ntarget_coverage_wgs = 4\nsequencing_errors = \"disabled\"\n{pcr}{library_a}"
+                ),
+                1,
+                (
+                    "manifest-general-v4.schema.json",
+                    "manifest-event-v3.schema.json",
+                ),
+            ),
+            "clonal" => {
+                let (bases, loci) = short_and_long(10, 17);
+                (
+                    bases,
+                    loci,
+                    "individual_count = 1\nploidy = 1\nindividual_ids = [\"sample-A\"]",
+                    format!(
+                        "individual_ids = [\"sample-A\"]\ntarget_coverage_wgs = 20\nsequencing_errors = \"disabled\"\n{pcr}{}{library_a}",
+                        stutter(0.3)
+                    ),
+                    1,
+                    (
+                        "manifest-general-v6.schema.json",
+                        "manifest-event-v3.schema.json",
+                    ),
+                )
+            }
+            "stutter" => {
+                let (bases, loci) = short_and_long(5, 17);
+                (
+                    bases,
+                    loci,
+                    "individual_count = 1\nploidy = 1\nindividual_ids = [\"sample-A\"]",
+                    format!(
+                        "individual_ids = [\"sample-A\"]\ntarget_coverage_wgs = 20\nsequencing_errors = \"disabled\"\n{}{library_a}",
+                        stutter(1.0)
+                    ),
+                    1,
+                    (
+                        "manifest-general-v6.schema.json",
+                        "manifest-event-v3.schema.json",
+                    ),
+                )
+            }
+            other => panic!("unknown scenario {other}"),
+        };
+        fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
+        fs::write(
+            root.join("population-snvs.tsv"),
+            format!(
+                "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t20\t{}\tT\tP1\t0.5\n",
+                &bases[19..20]
+            ),
+        )
+        .expect("SNV matrix");
+        let config = root.join("general.toml");
+        fs::write(
+            &config,
+            format!(
+                r#"config_kind = "general"
+schema_version = "4"
+seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+
+[population_snvs]
+mode = "supplied"
+input_path = "population-snvs.tsv"
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = {}
+{loci}
+[[initial_populations]]
+population_id = "P1"
+genotype_model = "hwe"
+{individuals}
+
+[technical_event]
+event_id = "reads-main"
+{event}"#,
+                bases.len()
+            ),
+        )
+        .expect("config");
+        (config, libraries, schemas.0, schemas.1)
+    }
+
+    /// DT-036 con cada etapa que cambia la forma del manifiesto de evento: la
+    /// contaminación con salto de índice (v2), la amplificación (v3, catálogo
+    /// v5), la amplificación con tartamudeo clonal (v3, catálogo v6, manifiesto
+    /// general v6) y el tartamudeo sin amplificar (v3, catálogo v4). El
+    /// manifiesto de evento fallido, con sus secciones de etapa en cero, y el
+    /// manifiesto general que lo enlaza pasan los **esquemas publicados**
+    /// leídos por el validador externo, no solo los jueces de Rust.
+    #[test]
+    fn failed_event_manifests_of_every_stage_pass_the_published_schemas() {
+        use crate::fastq_output::FORCE_FINAL_PAIR_VALIDATION_FAILURE;
+        for scenario in ["contamination", "pcr", "clonal", "stutter"] {
+            let root = test_root(&format!("event-stage-{scenario}"));
+            let (config, libraries, general_schema, event_schema) =
+                failed_event_scenario(&root, scenario);
+            let destination = root.join("result");
+            FORCE_FINAL_PAIR_VALIDATION_FAILURE.set(u32::try_from(libraries).expect("count"));
+            let (error, manifest) = run_failed(&config, &destination, |_| Ok(()));
+            assert_eq!(FORCE_FINAL_PAIR_VALIDATION_FAILURE.get(), 0, "{scenario}");
+            assert_eq!(manifest["events"][0]["state"], "failed", "{scenario}");
+            let event_path = destination.join("events/reads-main/manifest.json");
+            let event = read_json(&event_path);
+            assert_failed_event_manifest(&event, error.code(), libraries);
+            match scenario {
+                "pcr" | "clonal" => {
+                    assert_eq!(event["artifacts"]["pcr"]["pairs"], 0, "{scenario}");
+                    assert_eq!(event["artifacts"]["pcr"]["families"], 0, "{scenario}");
+                }
+                "contamination" => {
+                    assert_eq!(event["demultiplexing"]["index_hopping_rate"], 1.0);
+                }
+                _ => {}
+            }
+            if matches!(scenario, "clonal" | "stutter") {
+                assert_eq!(
+                    event["artifacts"]["stutter"]["evaluated_tracts"], 0,
+                    "{scenario}"
+                );
+            }
+            assert_no_fastq(&destination);
+            assert_external_schema(&destination.join("manifest.json"), general_schema);
+            assert_external_schema(&event_path, event_schema);
+            fs::remove_dir_all(root).expect("cleanup");
+        }
+    }
+
+    /// DT-036 con un fallo **real**, sin inyección: un inserto impracticable
+    /// para una copia de 255 pb (DT-006) agota la cota de intentos del
+    /// muestreador y da `GPS-DOMAIN-003`. El evento queda enlazado y fallido
+    /// con esa causa en su manifiesto y en cada salida.
+    #[test]
+    fn an_impractical_insert_leaves_the_event_linked_as_failed_with_its_cause() {
+        let root = test_root("event-impractical-insert");
+        let config = root.join("general.toml");
+        fs::write(
+            &config,
+            r#"config_kind = "general"
+schema_version = "2"
+seed = "0f0e0d0c0b0a09080706050403020100f0e0d0c0b0a090807060504030201000"
+[reference]
+kind = "simulated"
+id = "reference-main"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 255
+[population_snvs]
+mode = "generate"
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+[[initial_populations]]
+population_id = "P1"
+individual_count = 1
+individual_ids = ["sample-A"]
+ploidy = 1
+genotype_model = "hwe"
+[technical_event]
+event_id = "reads-main"
+individual_ids = ["sample-A"]
+target_coverage_wgs = 5
+[[technical_event.libraries]]
+individual_id = "sample-A"
+i7 = "ACGTACGT"
+i5 = "TGCATGCA"
+"#,
+        )
+        .expect("config");
+        let destination = root.join("result");
+        let (error, manifest) = run_failed(&config, &destination, |_| Ok(()));
+        assert_eq!(error.code(), "GPS-DOMAIN-003");
+        assert_eq!(diagnostic_codes(&manifest), ["GPS-DOMAIN-003"]);
+        assert_eq!(manifest["events"][0]["state"], "failed");
+        let event_path = destination.join("events/reads-main/manifest.json");
+        assert_failed_event_manifest(&read_json(&event_path), "GPS-DOMAIN-003", 1);
+        assert_no_fastq(&destination);
+        assert_external_schema(
+            &destination.join("manifest.json"),
+            "manifest-general-v4.schema.json",
+        );
+        assert_external_schema(&event_path, "manifest-event-v2.schema.json");
         fs::remove_dir_all(root).expect("cleanup");
     }
 
@@ -4184,56 +4639,983 @@ genotype_model = "hwe"
         fs::remove_dir_all(root).expect("cleanup");
     }
 
-    #[test]
-    fn vcf_index_io_failure_publishes_only_the_controlled_failed_result() {
+    fn test_root(label: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "gps-f2-5-5-index-failure-{}-{}",
+            "gps-failed-package-{label}-{}-{}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&root).expect("test root");
-        let destination = root.join("result");
-        let config = root.join("config.toml");
-        let mut bytes = fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/config/general-seeded.toml"),
-        )
-        .expect("fixture");
-        bytes.extend_from_slice(
- b"\n[population_snvs]\nmode = \"generate\"\n[population_snvs.generate]\ncount_mode = \"exact\"\nlocus_count = 1\nspatial_mode = \"uniform\"\nsubstitution_profile = \"uniform_snv12_v1\"\n[[population_snvs.generate.populations]]\npopulation_id = \"P1\"\nfrequency_model = \"uniform\"\nmin_alt_af = 0.2\nmax_alt_af = 0.8\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"IND_01\"]\nploidy = 2\ngenotype_model = \"hwe\"\n[vcf_output]\nmode = \"bgzf\"\n",
- );
-        fs::write(&config, bytes).expect("VCF config");
-        let effective = load_and_validate_config(&config).expect("valid VCF config");
-        let injected = Diagnostic::io("GPS-IO-001", "Una operación de lectura o escritura falló.")
-            .with("path", "outputs/truth.vcf.gz.tbi")
-            .with("operation", "write_index")
-            .with("detail", "injected index writer failure");
+        root
+    }
 
+    fn read_json(path: &Path) -> serde_json::Value {
+        serde_json::from_slice(&fs::read(path).unwrap_or_else(|error| panic!("{path:?}: {error}")))
+            .expect("JSON")
+    }
+
+    /// Identificadores del catálogo de un manifiesto general, ordenados.
+    fn catalog_ids(manifest: &serde_json::Value) -> Vec<String> {
+        let mut ids = manifest["artifacts"]
+            .as_array()
+            .expect("catalog")
+            .iter()
+            .map(|artifact| artifact["id"].as_str().expect("id").to_owned())
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+
+    fn diagnostic_codes(document: &serde_json::Value) -> Vec<String> {
+        document["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .iter()
+            .map(|diagnostic| diagnostic["code"].as_str().expect("code").to_owned())
+            .collect()
+    }
+
+    /// Rutas relativas de todos los ficheros bajo `root`, ordenadas.
+    fn files_under(root: &Path) -> Vec<String> {
+        let mut files = Vec::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(directory) = pending.pop() {
+            for entry in fs::read_dir(&directory).expect("read directory") {
+                let path = entry.expect("entry").path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else {
+                    files.push(
+                        path.strip_prefix(root)
+                            .expect("relative")
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
+                }
+            }
+        }
+        files.sort();
+        files
+    }
+
+    /// Valida un documento publicado con el validador externo de JSON Schema
+    /// (`jsonschema` de Python), un proceso ajeno al productor de Rust.
+    fn assert_external_schema(path: &Path, schema: &str) {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let output = std::process::Command::new("python3")
+            .arg(root.join("tests/external_jsonschema_validator.py"))
+            .arg(root.join("schemas").join(schema))
+            .arg(path)
+            .output()
+            .expect("external JSON Schema validator");
+        assert!(
+            output.status.success(),
+            "external validator for {path:?} against {schema}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn provoked_failure() -> Diagnostic {
+        Diagnostic::io("GPS-IO-001", "Una operación de lectura o escritura falló.")
+            .with("detail", "fallo provocado antes del manifiesto")
+    }
+
+    /// Ejecuta `config` hasta un fallo controlado, con `before_manifest` como
+    /// gancho previo al manifiesto, y devuelve el error y el manifiesto
+    /// fallido publicado en `destination`.
+    fn run_failed(
+        config: &Path,
+        destination: &Path,
+        before_manifest: impl FnOnce(&mut ExecutionWorkspace) -> Result<(), Diagnostic>,
+    ) -> (Diagnostic, serde_json::Value) {
+        let effective = load_and_validate_config(config).expect("valid config");
+        let error = execute_validated_config_with_effective_document(
+            &effective,
+            destination,
+            ExecutionAuthorizations::default(),
+            |_| Ok(()),
+            std::convert::identity,
+            before_manifest,
+        )
+        .expect_err("the run fails");
+        (error, read_json(&destination.join("manifest.json")))
+    }
+
+    /// Ejecuta `config` sin fallo y devuelve el manifiesto completo.
+    fn run_complete(config: &Path, destination: &Path) -> serde_json::Value {
+        let effective = load_and_validate_config(config).expect("valid config");
+        execute_validated_config(&effective, destination).expect("complete run");
+        read_json(&destination.join("manifest.json"))
+    }
+
+    fn assert_same_bytes(left: &Path, right: &Path, relative: &str) {
+        assert_eq!(
+            fs::read(left.join(relative)).unwrap_or_else(|error| panic!("{relative}: {error}")),
+            fs::read(right.join(relative)).unwrap_or_else(|error| panic!("{relative}: {error}")),
+            "{relative}"
+        );
+    }
+
+    /// Referencia suministrada de 2000 pb, una matriz de SNV generada y dos
+    /// individuos diploides; con un evento técnico sobre los dos si se pide y
+    /// con VCF en el modo pedido.
+    fn genotype_unit_config(root: &Path, with_event: bool, vcf: Option<&str>) -> PathBuf {
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+        let bases = (0..2000)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                char::from(b"ACGT"[(state % 4) as usize])
+            })
+            .collect::<String>();
+        fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
+        let event = if with_event {
+            "\n[technical_event]\nevent_id = \"reads-main\"\nindividual_ids = [\"I1\", \"I2\"]\ntarget_coverage_wgs = 2\nsequencing_errors = \"disabled\"\n[[technical_event.libraries]]\nindividual_id = \"I1\"\ni7 = \"ACGTACGT\"\ni5 = \"TGCATGCA\"\n[[technical_event.libraries]]\nindividual_id = \"I2\"\ni7 = \"TGCATGCA\"\ni5 = \"ACGTACGT\"\n"
+        } else {
+            ""
+        };
+        let vcf = vcf.map_or_else(String::new, |mode| {
+            format!("\n[vcf_output]\nmode = \"{mode}\"\n")
+        });
+        let config = root.join("general.toml");
+        fs::write(
+            &config,
+            format!(
+                r#"config_kind = "general"
+schema_version = "4"
+seed = "00000000000000000000000000000000000000000000000000000000000000cc"
+
+[population_snvs]
+mode = "generate"
+
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 3
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 2000
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 2
+individual_ids = ["I1", "I2"]
+ploidy = 2
+genotype_model = "hwe"
+{event}{vcf}"#
+            ),
+        )
+        .expect("config");
+        config
+    }
+
+    /// Lo que la unidad genotípica de `genotype_unit_config` con VCF BGZF
+    /// publica, aparte de la referencia.
+    const GENOTYPE_UNIT_FILES: [&str; 5] = [
+        "outputs/truth.jsonl",
+        "outputs/truth.vcf.gz",
+        "outputs/truth.vcf.gz.tbi",
+        "population_snvs.tsv",
+        "population_snvs.metadata.json",
+    ];
+
+    /// DT-038, REQ-SAL-25 y DTC-045. Un fallo **después** de publicar el VCF
+    /// conserva la unidad genotípica entera —la verdad, la matriz de SNV, el
+    /// VCF con su índice y la referencia que citan—, con evento y sin él, y
+    /// byte a byte la misma que publica una ejecución completa de la misma
+    /// configuración. Es la mitad de la antigua
+    /// `vcf_index_io_failure_publishes_only_the_controlled_failed_result`, que
+    /// inyectaba este mismo fallo y exigía lo contrario, descartar el VCF.
+    #[test]
+    fn a_failure_after_the_vcf_keeps_the_whole_genotype_unit() {
+        for with_event in [false, true] {
+            let root = test_root("unit-kept");
+            let config = genotype_unit_config(&root, with_event, Some("bgzf"));
+            let complete = root.join("complete");
+            run_complete(&config, &complete);
+            let destination = root.join("result");
+            let (error, manifest) = run_failed(&config, &destination, |_| Err(provoked_failure()));
+            assert_eq!(error.code(), "GPS-IO-001");
+            assert!(format!("{error:?}").contains("fallo provocado"));
+            assert_eq!(manifest["state"], "failed");
+            assert_eq!(diagnostic_codes(&manifest), ["GPS-IO-001"]);
+            let mut expected = vec![
+                "config-general",
+                "population-snvs-metadata",
+                "population-snvs-tsv",
+                "reference-fasta",
+                "truth-jsonl",
+                "truth-vcf",
+                "truth-vcf-index",
+            ];
+            if with_event {
+                expected.push("event-manifest-reads-main");
+                expected.sort_unstable();
+            }
+            let ids = catalog_ids(&manifest);
+            assert_eq!(
+                ids.iter()
+                    .filter(|id| !id.starts_with("fastq-"))
+                    .collect::<Vec<_>>(),
+                expected,
+                "with_event={with_event}"
+            );
+            assert_eq!(
+                ids.iter().filter(|id| id.starts_with("fastq-")).count(),
+                if with_event { 4 } else { 0 }
+            );
+            assert_eq!(
+                manifest["references"],
+                json!([{"id": "ref-main", "fasta_artifact_id": "reference-fasta"}])
+            );
+            assert_eq!(manifest["vcf_outputs"][0]["state"], "complete");
+            assert_eq!(manifest["vcf_outputs"][0]["reference_id"], "ref-main");
+            assert_eq!(manifest["vcf_outputs"][0]["vcf_artifact_id"], "truth-vcf");
+            assert_eq!(
+                manifest["vcf_outputs"][0]["index_artifact_id"],
+                "truth-vcf-index"
+            );
+            assert_eq!(
+                manifest["population_snvs"]["metadata_artifact_id"],
+                "population-snvs-metadata"
+            );
+            assert_eq!(
+                manifest["output_categories"]["requested"],
+                json!(["truth-vcf", "truth-vcf-index"])
+            );
+            for relative in GENOTYPE_UNIT_FILES
+                .into_iter()
+                .chain(["resources/references/ref-main.fa"])
+            {
+                assert_same_bytes(&destination, &complete, relative);
+            }
+            assert_external_schema(
+                &destination.join("manifest.json"),
+                "manifest-general-v4.schema.json",
+            );
+            fs::remove_dir_all(root).expect("cleanup");
+        }
+    }
+
+    /// DT-038. Un fallo **real** al escribir el índice, con el VCF ya escrito
+    /// y validado, deja el VCF pedido sin publicar, y con él cae la unidad
+    /// genotípica entera: ni VCF, ni índice, ni verdad, ni matriz. Es la otra
+    /// mitad de la antigua
+    /// `vcf_index_io_failure_publishes_only_the_controlled_failed_result`.
+    ///
+    /// **No puede fallar contra el código anterior a DT-038**, que no
+    /// conservaba nunca nada de la unidad. Lo que discrimina es una unidad que
+    /// se conservara sin mirar si el VCF pedido llegó a publicarse.
+    #[test]
+    fn a_real_vcf_index_failure_drops_the_whole_genotype_unit() {
+        use crate::vcf_publication::FORCE_INDEX_WRITE_FAILURE;
+        let root = test_root("unit-index");
+        let config = genotype_unit_config(&root, false, Some("bgzf"));
+        let destination = root.join("result");
+        FORCE_INDEX_WRITE_FAILURE.set(true);
+        let (error, manifest) = run_failed(&config, &destination, |_| Ok(()));
+        assert!(
+            !FORCE_INDEX_WRITE_FAILURE.get(),
+            "the injected index failure must have fired"
+        );
+        assert_eq!(error.code(), "GPS-IO-001");
+        assert_eq!(error.exit_code(), 5);
+        assert!(format!("{error:?}").contains("injected index writer failure"));
+        assert_eq!(manifest["state"], "failed");
+        assert_eq!(diagnostic_codes(&manifest), ["GPS-IO-001"]);
+        assert_eq!(manifest["vcf_outputs"], json!([]));
+        assert_eq!(manifest["population_snvs"], serde_json::Value::Null);
+        assert_eq!(manifest["references"], json!([]));
+        assert_eq!(catalog_ids(&manifest), ["config-general"]);
+        assert_eq!(
+            files_under(&destination),
+            ["inputs/config/general.toml", "manifest.json"]
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    /// Cambia el último byte de un artefacto ya escrito y **rehace su entrada
+    /// del catálogo**, de modo que el catálogo del momento del fallo coincide
+    /// con el disco y solo el registro tomado al validar el artefacto delata
+    /// el cambio. Es el escenario saturado que hace decidir a la regla de
+    /// conservación: con una alteración bruta, sin rehacer el catálogo, el
+    /// primer paquete fallido no pasaría sus jueces y el último recurso de
+    /// DT-039 quitaría la unidad de todos modos, decidiera lo que decidiera la
+    /// regla.
+    fn alter_after_validation(workspace: &mut ExecutionWorkspace, id: &str) {
+        let artifact = workspace
+            .artifacts()
+            .iter()
+            .find(|artifact| artifact.id == id)
+            .unwrap_or_else(|| panic!("{id} absent"))
+            .clone();
+        let mut bytes = fs::read(workspace.root().join(&artifact.path)).expect("artifact bytes");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0x01;
+        workspace
+            .replace_artifact_bytes_for_validation_test(id, &bytes)
+            .expect("replace artifact");
+    }
+
+    /// DT-038, la regla de conservación pieza a pieza, con su pareja. Cada
+    /// artefacto de la unidad genotípica —la verdad, la matriz y sus
+    /// metadatos, el VCF, su índice y la referencia suministrada—, cambiado
+    /// **después** de validarse y con el catálogo rehecho, deja fuera la
+    /// unidad entera. La pareja, sin alterar nada, la conserva; sin ella, un
+    /// paquete fallido que no conservara nunca la unidad pasaría la prueba.
+    #[test]
+    fn each_genotype_unit_piece_altered_after_validation_drops_the_whole_unit() {
+        for altered in [
+            None,
+            Some("truth-jsonl"),
+            Some("population-snvs-tsv"),
+            Some("population-snvs-metadata"),
+            Some("truth-vcf"),
+            Some("truth-vcf-index"),
+            Some("reference-fasta"),
+        ] {
+            let root = test_root("unit-piece");
+            let config = genotype_unit_config(&root, false, Some("bgzf"));
+            let destination = root.join("result");
+            let (error, manifest) = run_failed(&config, &destination, move |workspace| {
+                if let Some(id) = altered {
+                    alter_after_validation(workspace, id);
+                }
+                Err(provoked_failure())
+            });
+            assert_eq!(error.code(), "GPS-IO-001", "{altered:?}");
+            assert_eq!(manifest["state"], "failed");
+            let unit_files = GENOTYPE_UNIT_FILES
+                .into_iter()
+                .chain(["resources/references/ref-main.fa"]);
+            if altered.is_some() {
+                assert_eq!(catalog_ids(&manifest), ["config-general"], "{altered:?}");
+                assert_eq!(manifest["vcf_outputs"], json!([]), "{altered:?}");
+                assert_eq!(manifest["population_snvs"], serde_json::Value::Null);
+                assert_eq!(manifest["references"], json!([]), "{altered:?}");
+                for relative in unit_files {
+                    assert!(
+                        !destination.join(relative).exists(),
+                        "{altered:?} retained {relative}"
+                    );
+                }
+            } else {
+                for relative in unit_files {
+                    assert!(destination.join(relative).is_file(), "missing {relative}");
+                }
+            }
+            fs::remove_dir_all(root).expect("cleanup");
+        }
+    }
+
+    /// DT-038 con inserción, la misma regla y su pareja. La referencia final,
+    /// su mapa, la suministrada de la que deriva o la verdad, cambiadas
+    /// **después** de validarse y con el catálogo rehecho, dejan fuera la
+    /// unidad entera, y con ella la sección `reference_insertion`.
+    #[test]
+    fn each_inserted_reference_piece_altered_after_validation_drops_the_whole_unit() {
+        for altered in [
+            None,
+            Some("reference-fasta-ref-main-str"),
+            Some("reference-map-ref-main-str"),
+            Some("reference-fasta"),
+            Some("truth-jsonl"),
+        ] {
+            let root = test_root("unit-insertion-piece");
+            let config = insertion_unit_config(&root);
+            let destination = root.join("result");
+            let (error, manifest) = run_failed(&config, &destination, move |workspace| {
+                if let Some(id) = altered {
+                    alter_after_validation(workspace, id);
+                }
+                Err(provoked_failure())
+            });
+            assert_eq!(error.code(), "GPS-IO-001", "{altered:?}");
+            if altered.is_some() {
+                assert_eq!(catalog_ids(&manifest), ["config-general"], "{altered:?}");
+                assert!(manifest.get("reference_insertion").is_none(), "{altered:?}");
+                assert_eq!(
+                    files_under(&destination),
+                    ["inputs/config/general.toml", "manifest.json"],
+                    "{altered:?}"
+                );
+            } else {
+                assert_eq!(manifest["reference_insertion"]["id"], "ref-main-str");
+                assert!(destination.join("outputs/truth.jsonl").is_file());
+                assert!(
+                    destination
+                        .join("resources/references/ref-main-str.map.json")
+                        .is_file()
+                );
+            }
+            fs::remove_dir_all(root).expect("cleanup");
+        }
+    }
+
+    /// DT-038 con su pareja. Con loci de repetición, la cabecera de la verdad
+    /// cita **la copia de la configuración** por su huella (fuente `random`).
+    /// Si esa copia cambia en disco antes del cierre, el paquete fallido no la
+    /// conserva, y entonces tampoco la verdad que la cita ni el resto de la
+    /// unidad: entera o nada. La pareja, con la copia intacta, conserva las
+    /// dos.
+    #[test]
+    fn an_altered_configuration_copy_drops_the_genotype_unit_that_cites_it() {
+        for tamper in [false, true] {
+            let root = test_root("unit-configuration");
+            let config = repeat_unit_config(&root, SINGLE_REPEAT_ALLELE, None);
+            let destination = root.join("result");
+            let (error, manifest) = run_failed(&config, &destination, move |workspace| {
+                if tamper {
+                    let path = workspace.root().join("inputs/config/general.toml");
+                    let mut bytes = fs::read(&path).expect("configuration copy");
+                    bytes.extend_from_slice(b"\n# tampered\n");
+                    fs::write(&path, bytes).expect("tamper");
+                }
+                Err(provoked_failure())
+            });
+            assert_eq!(error.code(), "GPS-IO-001");
+            assert_eq!(manifest["state"], "failed");
+            if tamper {
+                assert_eq!(manifest["configuration_input"], serde_json::Value::Null);
+                assert!(catalog_ids(&manifest).is_empty(), "{manifest}");
+                assert_eq!(files_under(&destination), ["manifest.json"]);
+            } else {
+                assert_eq!(
+                    manifest["configuration_input"]["artifact_id"],
+                    "config-general"
+                );
+                let truth = fs::read_to_string(destination.join("outputs/truth.jsonl"))
+                    .expect("kept truth");
+                let header = truth.lines().next().expect("header");
+                let copy = manifest["artifacts"]
+                    .as_array()
+                    .expect("catalog")
+                    .iter()
+                    .find(|artifact| artifact["id"] == "config-general")
+                    .expect("configuration copy");
+                let digest = copy["checksum"]["digest"].as_str().expect("copy digest");
+                assert!(
+                    header.contains(digest),
+                    "control: the kept truth cites the kept configuration copy"
+                );
+            }
+            fs::remove_dir_all(root).expect("cleanup");
+        }
+    }
+
+    /// El juez del manifiesto general exige la clase y la ruta de la verdad
+    /// también en un paquete **fallido** que la conserva (DT-038), no solo en
+    /// uno completo. Cada cambio se prueba solo, sobre un manifiesto fallido
+    /// real que el juez acepta sin él.
+    #[test]
+    fn a_failed_manifest_with_a_misclassified_truth_is_rejected() {
+        let root = test_root("judge-truth-class");
+        let config = genotype_unit_config(&root, false, None);
+        let destination = root.join("result");
+        let (_, manifest) = run_failed(&config, &destination, |_| Err(provoked_failure()));
+        assert_eq!(manifest["state"], "failed");
+        let path = destination.join("manifest.json");
+        let judge = |document: &serde_json::Value| {
+            crate::results::parse_general_manifest_bytes(
+                &path,
+                &serde_json::to_vec_pretty(document).expect("bytes"),
+            )
+            .map(|_| ())
+        };
+        judge(&manifest).expect("control: the untouched failed manifest is accepted");
+        for (field, value) in [
+            ("kind", "population_snvs_tsv"),
+            ("path", "outputs/other-truth.jsonl"),
+        ] {
+            let mut altered = manifest.clone();
+            let truth = altered["artifacts"]
+                .as_array_mut()
+                .expect("catalog")
+                .iter_mut()
+                .find(|artifact| artifact["id"] == "truth-jsonl")
+                .expect("kept truth");
+            truth[field] = json!(value);
+            let error = judge(&altered).expect_err(field);
+            assert!(
+                format!("{error:?}").contains(
+                    "truth-jsonl debe tener clase truth_jsonl y ruta outputs/truth.jsonl"
+                ),
+                "{field}: {error:?}"
+            );
+        }
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    /// Referencia de 300 pb con un microsatélite `(CA)50` en 101-200, una
+    /// matriz generada, dos individuos diploides y VCF de texto; los loci y el
+    /// tope de bases de tracto, a elección. Es el escenario de
+    /// `tests/repeat_tract_budget.rs`.
+    fn repeat_unit_config(root: &Path, loci: &str, cap: Option<u64>) -> PathBuf {
+        let bases = format!("{}{}{}", "G".repeat(100), "CA".repeat(50), "G".repeat(100));
+        fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
+        let cap = cap.map_or_else(String::new, |value| {
+            format!("max_tract_output_bases = {value}\n")
+        });
+        let config = root.join("general.toml");
+        fs::write(
+            &config,
+            format!(
+                r#"config_kind = "general"
+schema_version = "4"
+seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+
+[population_snvs]
+mode = "generate"
+
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+{cap}
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = {}
+{loci}
+[[initial_populations]]
+population_id = "P1"
+individual_count = 2
+individual_ids = ["I1", "I2"]
+ploidy = 2
+genotype_model = "hwe"
+
+[vcf_output]
+mode = "text"
+"#,
+                bases.len()
+            ),
+        )
+        .expect("config");
+        config
+    }
+
+    const SINGLE_REPEAT_ALLELE: &str = "\n[[reference.repeat_loci]]\nid = \"STR-1\"\nsequence = \"chr1\"\nstart = 101\nend = 200\nmotif = \"CA\"\n[[reference.repeat_loci.alleles]]\nunits = 45\nfrequency = 1.0\n";
+
+    const THREE_REPEAT_ALLELES: &str = "\n[[reference.repeat_loci]]\nid = \"STR-1\"\nsequence = \"chr1\"\nstart = 101\nend = 200\nmotif = \"CA\"\n[[reference.repeat_loci.alleles]]\nunits = 45\nfrequency = 0.4\n[[reference.repeat_loci.alleles]]\nunits = 40\nfrequency = 0.35\n[[reference.repeat_loci.alleles]]\nunits = 35\nfrequency = 0.25\n";
+
+    /// DT-038 con su pareja. Cuando el tope de bases de tracto detiene el VCF,
+    /// la verdad —que cabía sola— no se conserva: se pidió con su VCF, y sola
+    /// no es la unidad pedida. La pareja, con el tope justo en lo que la
+    /// ejecución completa publica y un fallo provocado después, sí la conserva.
+    #[test]
+    fn the_tract_cap_that_stops_the_vcf_also_drops_the_truth() {
+        let root = test_root("unit-cap");
+        let complete = run_complete(
+            &repeat_unit_config(&root, SINGLE_REPEAT_ALLELE, None),
+            &root.join("complete"),
+        );
+        let total = complete["repeat_loci"]["tract_output"]["realized_total_tract_bases"]
+            .as_u64()
+            .expect("realized total");
+        assert!(
+            complete["repeat_loci"]["tract_output"]["realized_vcf_tract_bases"]
+                .as_u64()
+                .expect("VCF")
+                > 0,
+            "control: the VCF carries tract bases"
+        );
+
+        let exact_root = test_root("unit-cap-exact");
+        let destination = exact_root.join("result");
+        let (error, manifest) = run_failed(
+            &repeat_unit_config(&exact_root, SINGLE_REPEAT_ALLELE, Some(total)),
+            &destination,
+            |_| Err(provoked_failure()),
+        );
+        assert_eq!(error.code(), "GPS-IO-001");
+        assert!(catalog_ids(&manifest).contains(&"truth-jsonl".to_owned()));
+        assert!(destination.join("outputs/truth.vcf").is_file());
+        assert_external_schema(
+            &destination.join("manifest.json"),
+            "manifest-general-v6.schema.json",
+        );
+
+        let tight_root = test_root("unit-cap-tight");
+        let destination = tight_root.join("result");
+        let (error, manifest) = run_failed(
+            &repeat_unit_config(&tight_root, SINGLE_REPEAT_ALLELE, Some(total - 1)),
+            &destination,
+            |_| Ok(()),
+        );
+        assert_eq!(error.code(), "GPS-CONF-008");
+        assert_eq!(catalog_ids(&manifest), ["config-general"]);
+        assert_eq!(manifest["vcf_outputs"], json!([]));
+        assert!(!destination.join("outputs/truth.jsonl").exists());
+        assert_eq!(
+            manifest["repeat_loci"]["tract_output"]["realized_total_tract_bases"],
+            0
+        );
+        assert_external_schema(
+            &destination.join("manifest.json"),
+            "manifest-general-v6.schema.json",
+        );
+        for root in [root, exact_root, tight_root] {
+            fs::remove_dir_all(root).expect("cleanup");
+        }
+    }
+
+    /// Bases de tracto de una verdad y de un VCF de texto publicados, contadas
+    /// por un proceso ajeno al productor (Python) con el mismo criterio que
+    /// `tests/repeat_tract_budget.rs`.
+    fn tract_bases_counted_with_python(destination: &Path) -> (u64, u64) {
+        let script = r##"
+import json, sys
+truth = 0
+for line in open(sys.argv[1]):
+    r = json.loads(line)
+    for piece in r.get("current_pieces", []) + r.get("history", []):
+        if piece.get("kind") == "repeat_allele":
+            truth += len(piece["bases"])
+    for allele in r.get("alleles", []):
+        if allele.get("kind") == "repeat":
+            truth += len(allele["bases"])
+vcf = 0
+for line in open(sys.argv[2]):
+    if line.startswith("#"):
+        continue
+    f = line.rstrip("\n").split("\t")
+    if any(k.startswith("RN=") for k in f[7].split(";")):
+        vcf += len(f[3]) + sum(len(a) for a in f[4].split(","))
+print(truth, vcf)
+"##;
+        let output = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(script)
+            .arg(destination.join("outputs/truth.jsonl"))
+            .arg(destination.join("outputs/truth.vcf"))
+            .output()
+            .expect("independent counter");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8(output.stdout).expect("UTF-8");
+        let mut values = text
+            .split_whitespace()
+            .map(|value| value.parse::<u64>().expect("integer"));
+        (values.next().expect("truth"), values.next().expect("VCF"))
+    }
+
+    /// DT-038 con loci de repetición y el manifiesto general v6. El paquete
+    /// fallido que conserva la unidad publica en `repeat_loci` **los sorteos y
+    /// las bases de tracto reales**, no ceros: la sección entera es la de la
+    /// ejecución completa de la misma configuración, y las bases realizadas
+    /// son las que un contador ajeno encuentra en la verdad y el VCF
+    /// conservados.
+    #[test]
+    fn a_failed_package_with_repeat_loci_publishes_the_realized_tract_bases_it_keeps() {
+        let root = test_root("unit-repeats");
+        let config = repeat_unit_config(&root, THREE_REPEAT_ALLELES, None);
+        let complete = run_complete(&config, &root.join("complete"));
+        let destination = root.join("result");
+        let (error, manifest) = run_failed(&config, &destination, |_| Err(provoked_failure()));
+        assert_eq!(error.code(), "GPS-IO-001");
+        assert_eq!(manifest["schema_version"], "6");
+        assert_eq!(manifest["repeat_loci"], complete["repeat_loci"]);
+        let accounting = &manifest["repeat_loci"]["tract_output"];
+        let (truth, vcf) = tract_bases_counted_with_python(&destination);
+        assert!(truth > 0 && vcf > 0, "control: both documents carry tract");
+        assert_eq!(accounting["realized_truth_tract_bases"], truth);
+        assert_eq!(accounting["realized_vcf_tract_bases"], vcf);
+        assert_eq!(accounting["realized_total_tract_bases"], truth + vcf);
+        assert_eq!(manifest["repeat_loci"]["loci"][0]["drawn_copies"], 4);
+        assert_external_schema(
+            &destination.join("manifest.json"),
+            "manifest-general-v6.schema.json",
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    /// Referencia suministrada de 2000 pb con un microsatélite **insertado**
+    /// (DTC-098), una matriz generada, un individuo diploide y VCF de texto,
+    /// sin evento: la unidad genotípica cita la referencia final.
+    fn insertion_unit_config(root: &Path) -> PathBuf {
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let bases = (0..2000)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                char::from(b"ACGT"[(state % 4) as usize])
+            })
+            .collect::<String>();
+        fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
+        let config = root.join("general.toml");
+        fs::write(
+            &config,
+            r#"config_kind = "general"
+schema_version = "4"
+seed = "00000000000000000000000000000000000000000000000000000000000000aa"
+
+[population_snvs]
+mode = "generate"
+
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "weighted_regions"
+outside_weight = 0.0
+substitution_profile = "uniform_snv12_v1"
+
+[[population_snvs.generate.regions]]
+contig = "chr1"
+start = 1500
+end = 1600
+weight = 1.0
+
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+inserted_reference_id = "ref-main-str"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 2000
+
+[[reference.repeat_loci]]
+id = "STR-INS"
+sequence = "chr1"
+insert_after = 1000
+motif = "CAG"
+reference_units = [10]
+[[reference.repeat_loci.alleles]]
+units = 10
+frequency = 1.0
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 1
+individual_ids = ["I1"]
+ploidy = 2
+genotype_model = "hwe"
+
+[vcf_output]
+mode = "text"
+"#,
+        )
+        .expect("config");
+        config
+    }
+
+    /// DT-038 con inserción de tractos (DTC-098). Sin evento, el paquete
+    /// fallido que conserva la unidad conserva también la referencia final
+    /// —la del VCF y la verdad— con su mapa y la sección
+    /// `reference_insertion`, junto a la suministrada de la que deriva.
+    #[test]
+    fn a_failed_package_with_an_inserted_reference_keeps_the_final_reference_of_its_vcf() {
+        let root = test_root("unit-insertion");
+        let config = insertion_unit_config(&root);
+        let complete = root.join("complete");
+        run_complete(&config, &complete);
+        let destination = root.join("result");
+        let (error, manifest) = run_failed(&config, &destination, |_| Err(provoked_failure()));
+        assert_eq!(error.code(), "GPS-IO-001");
+        assert_eq!(manifest["events"], serde_json::Value::Null);
+        assert_eq!(
+            manifest["references"],
+            json!([
+                {"id": "ref-main", "fasta_artifact_id": "reference-fasta"},
+                {"id": "ref-main-str", "fasta_artifact_id": "reference-fasta-ref-main-str"}
+            ])
+        );
+        assert_eq!(manifest["reference_insertion"]["id"], "ref-main-str");
+        assert_eq!(manifest["vcf_outputs"][0]["reference_id"], "ref-main-str");
+        assert!(catalog_ids(&manifest).contains(&"reference-map-ref-main-str".to_owned()));
+        for relative in [
+            "outputs/truth.jsonl",
+            "outputs/truth.vcf",
+            "resources/references/ref-main-str.fa",
+            "resources/references/ref-main-str.map.json",
+            "resources/references/ref-main.fa",
+        ] {
+            assert_same_bytes(&destination, &complete, relative);
+        }
+        assert_external_schema(
+            &destination.join("manifest.json"),
+            "manifest-general-v6.schema.json",
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    /// Ejecuta `reductions_config` alterando en disco, sin tocar el catálogo,
+    /// la copia de la referencia suministrada justo antes del manifiesto: la
+    /// alteración real de DT-039. El gancho da además su propio error si se
+    /// pide.
+    fn run_with_altered_supplied_reference(
+        with_event: bool,
+        hook_fails: bool,
+    ) -> (Diagnostic, serde_json::Value, PathBuf, PathBuf) {
+        let root = test_root("altered-reference");
+        let individuals: &[(&str, &str, &str)] = if with_event {
+            &[("I1", "ACGTACGT", "TGCATGCA")]
+        } else {
+            &[]
+        };
+        let config = reductions_config(&root, individuals);
+        let destination = root.join("result");
+        let (error, manifest) = run_failed(&config, &destination, move |workspace| {
+            let artifact = workspace
+                .artifacts()
+                .iter()
+                .find(|artifact| artifact.id == "reference-fasta")
+                .expect("supplied reference copy")
+                .clone();
+            let path = workspace.root().join(&artifact.path);
+            let mut bytes = fs::read(&path).expect("FASTA");
+            let start = bytes
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .expect("header")
+                + 1;
+            bytes[start] = if bytes[start] == b'A' { b'C' } else { b'A' };
+            fs::write(&path, bytes).expect("alteration");
+            if hook_fails {
+                Err(provoked_failure())
+            } else {
+                Ok(())
+            }
+        });
+        (error, manifest, destination, root)
+    }
+
+    /// El paquete fallido mínimo de DT-039: solo la copia de la configuración,
+    /// las reducciones `failed` y sin enlaces, ni evento ni unidad genotípica,
+    /// y en los diagnósticos la causa y detrás el fallo secundario.
+    fn assert_minimal_failed_package(
+        manifest: &serde_json::Value,
+        destination: &Path,
+        diagnostics: &[&str],
+    ) {
+        assert_eq!(manifest["state"], "failed");
+        assert_eq!(diagnostic_codes(manifest), diagnostics);
+        assert_eq!(catalog_ids(manifest), ["config-general"]);
+        assert_eq!(
+            files_under(destination),
+            ["inputs/config/general.toml", "manifest.json"]
+        );
+        assert_eq!(manifest["events"], serde_json::Value::Null);
+        assert_eq!(manifest["technical_events"], json!([]));
+        assert_eq!(manifest["references"], json!([]));
+        assert_eq!(manifest["vcf_outputs"], json!([]));
+        assert_eq!(manifest["population_snvs"], serde_json::Value::Null);
+        for id in ["ref-small", "ref-small-b"] {
+            assert_reduction_discarded(manifest, destination, id);
+        }
+        assert_external_schema(
+            &destination.join("manifest.json"),
+            "manifest-general-v4.schema.json",
+        );
+    }
+
+    /// DT-039. Con la copia de la referencia suministrada alterada en disco y
+    /// el gancho dando su propio error, el primer paquete fallido no pasa sus
+    /// jueces (`GPS-IO-002`), con evento y, sin él, por las reducciones que
+    /// conservaría. Se publica entonces el paquete mínimo, y se devuelve **la
+    /// causa original**, no la del fallo secundario.
+    #[test]
+    fn an_altered_supplied_reference_falls_back_to_a_minimal_package_with_the_original_cause() {
+        for with_event in [true, false] {
+            let (error, manifest, destination, root) =
+                run_with_altered_supplied_reference(with_event, true);
+            assert_eq!(error.code(), "GPS-IO-001", "with_event={with_event}");
+            assert!(
+                format!("{error:?}").contains("fallo provocado"),
+                "{error:?}"
+            );
+            assert!(!error.context().contains_key("secondary_failure_code"));
+            assert_minimal_failed_package(&manifest, &destination, &["GPS-IO-001", "GPS-IO-002"]);
+            fs::remove_dir_all(root).expect("cleanup");
+        }
+    }
+
+    /// DT-039 con la alteración sola: la causa es la propia alteración, que el
+    /// juez del manifiesto completo detecta (`GPS-IO-002`), y el paquete
+    /// fallido mínimo se publica igual en vez de no dejar ningún destino.
+    #[test]
+    fn an_altered_supplied_reference_alone_still_publishes_a_minimal_failed_package() {
+        let (error, manifest, destination, root) = run_with_altered_supplied_reference(true, false);
+        assert_eq!(error.code(), "GPS-IO-002");
+        assert_minimal_failed_package(&manifest, &destination, &["GPS-IO-002", "GPS-IO-002"]);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    /// DT-039. Si el paquete fallido no puede publicarse —aquí, porque el
+    /// destino aparece mientras tanto—, se devuelve igualmente la causa
+    /// original, con el código del fallo secundario como contexto.
+    #[test]
+    fn a_failed_package_that_cannot_be_published_still_returns_the_original_cause() {
+        let root = test_root("unpublishable");
+        let config =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/config/general-seeded.toml");
+        let effective = load_and_validate_config(&config).expect("valid config");
+        let destination = root.join("result");
+        let squatter = destination.clone();
         let error = execute_validated_config_with_effective_document(
             &effective,
             &destination,
             ExecutionAuthorizations::default(),
             |_| Ok(()),
             std::convert::identity,
-            |_| Err(injected.clone()),
+            move |_| {
+                fs::create_dir(&squatter).expect("squatter destination");
+                Err(provoked_failure())
+            },
         )
-        .expect_err("the VCF index I/O failure must fail the publication");
-
+        .expect_err("the run fails");
         assert_eq!(error.code(), "GPS-IO-001");
-        assert_eq!(error.exit_code(), 5);
-        let manifest: serde_json::Value = serde_json::from_slice(
-            &fs::read(destination.join("manifest.json")).expect("failed manifest"),
-        )
-        .expect("manifest JSON");
-        assert_eq!(manifest["state"], "failed");
-        assert_eq!(manifest["diagnostics"][0]["code"], "GPS-IO-001");
         assert!(
-            manifest["vcf_outputs"]
-                .as_array()
-                .expect("VCF outputs")
-                .is_empty()
+            format!("{error:?}").contains("fallo provocado"),
+            "{error:?}"
         );
-        assert!(!destination.join("outputs/truth.vcf.gz").exists());
-        assert!(!destination.join("outputs/truth.vcf.gz.tbi").exists());
+        assert_eq!(
+            error
+                .context()
+                .get("secondary_failure_code")
+                .map(String::as_str),
+            Some("GPS-IO-003")
+        );
+        assert!(!destination.join("manifest.json").exists());
         fs::remove_dir_all(root).expect("cleanup");
     }
 

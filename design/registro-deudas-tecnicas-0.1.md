@@ -69,10 +69,10 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-033 | La verificación del paquete F5 publicado acepta manifiestos con enlaces escritos como lista JSON, que el esquema rechaza | Baja | 06/10/2026 | **Cerrada (06/10/2026)** |
 | DT-034 | Lo publicado atribuye las cifras de calibración del tartamudeo solo a Raz et al. (2019), cuando son de Gymrek (2016), cuya licencia exige atribuirlas | Baja | 06/10/2026 | **Cerrada (13/10/2026)** |
 | DT-035 | La puerta del paquete F5 acepta manifiestos que el esquema rechaza en campos que no lee con forma tipada (`attempt_summary`, `quota_ties`, `limits`, `profile`) | Baja | 06/10/2026 | Abierta |
-| DT-036 | Un ensamblado de evento fallido no deja el evento enlazado con su estado (REQ-SAL-21); el campo `link` nunca lleva valor | Media | 06/10/2026 | Abierta |
+| DT-036 | Un ensamblado de evento fallido no deja el evento enlazado con su estado (REQ-SAL-21); el campo `link` nunca lleva valor | Media | 06/10/2026 | **Cerrada (13/10/2026)** |
 | DT-037 | `tests/test_population_snvs_editor.py` está fuera de la puerta de Python y falla 1 de 7 | Baja | 06/10/2026 | **Cerrada (13/10/2026)** |
-| DT-038 | Ante un fallo posterior al evento, el VCF ya publicado y validado se descarta del paquete fallido aunque es independiente | Media | 06/10/2026 | Abierta |
-| DT-039 | Con evento, si se altera el FASTA de la referencia suministrada antes del cierre, la rama de fallo controlado no consigue publicar y se pierde la causa original | Media | 06/10/2026 | Abierta |
+| DT-038 | Ante un fallo posterior al evento, el VCF ya publicado y validado se descarta del paquete fallido aunque es independiente | Media | 06/10/2026 | **Cerrada (13/10/2026)** |
+| DT-039 | Con evento, si se altera el FASTA de la referencia suministrada antes del cierre, la rama de fallo controlado no consigue publicar y se pierde la causa original | Media | 06/10/2026 | **Cerrada (13/10/2026)** |
 | DT-040 | Con tartamudeo clonal, la configuración efectiva publica `technical_event.rng_catalog = "f4-technical-v5"` y su esquema v6 exige `f4-technical-v6`: el validador externo la rechaza | Media | 08/10/2026 | Cerrada (12/10/2026) |
 | DT-041 | Toda ejecución amplificada, con microsatélites o sin ellos, publica un manifiesto general que no pasa su propio esquema: el perfil está fijado al de sin PCR y los catálogos a v3 y v4 | Media | 08/10/2026 | Cerrada (12/10/2026), con el manifiesto general v4 ampliado como excepción expresa a DTC-089 |
 | DT-042 | En el cuaderno, con un evento técnico activo, la celda que reconstruye el formulario falla con `NameError` sobre `TechnicalEventForm`: ningún control del panel de PCR llega al TOML | Media | 08/10/2026 | **Cerrada (13/10/2026)** |
@@ -90,6 +90,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-054 | Nadie compara el `execution_id` de la cabecera de la verdad y del VCF con el del manifiesto general: un TOML copiado cambiado de forma coherente pasaba con la verdad de la ejecución original | Media | 11/10/2026 | **Cerrada (11/10/2026)**, en el mismo cambio que DT-052 |
 | DT-055 | El juez de la pareja efectiva/manifiesto no comprueba dos desigualdades de las estadísticas iniciales que la arquitectura fija (los genotipos realizados cuentan solo observaciones completas); las caza después el juez completo | Baja | 12/10/2026 | Abierta |
 | DT-056 | El juez completo acepta un manifiesto general con otro perfil técnico u otro catálogo de azar que los de la ejecución | Media | 12/10/2026 | Cerrada (12/10/2026) |
+| DT-057 | El juez del manifiesto general acepta paquetes fallidos incoherentes editados a mano: verdad sin matriz de SNV, VCF sin verdad o verdad sin su referencia | Baja | 13/10/2026 | Abierta |
 
 ---
 
@@ -1759,6 +1760,16 @@ resulta ser que **ni siquiera dirían nada si se encendieran**.
 cerrar DT-002. Quedan nueve ignoradas en total, de las cuales **seis** son de
 contratos obsoletos (una en `src/publication.rs`, una en
 `tests/f3_event_assembly.rs`, cuatro en `tests/f3_event_admission.rs`).
+
+**Actualización (13/10/2026):** se borró la de `tests/f3_event_assembly.rs`,
+`controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest`, al
+cerrar DT-036. Codificaba un evento fallido que conservaba los FASTQ ya
+cerrados, y el contrato fijado ahora es el contrario: el evento fallido queda
+enlazado con su manifiesto fallido y **sin ningún FASTQ** (ampliación de
+DTC-045). Con ella se fueron el ayudante `effective_event` y las importaciones
+que solo usaba ella. Quedan ocho ignoradas en total, de las cuales **cinco** son
+de contratos obsoletos (una en `src/publication.rs` y cuatro en
+`tests/f3_event_admission.rs`).
 
 ---
 
@@ -4072,7 +4083,7 @@ comprobaciones propias. No se ha corregido.
 
 ## DT-036. Un ensamblado de evento fallido no deja el evento enlazado con su estado
 
-**Gravedad: media.** Defecto contra REQ-SAL-21, que exige un estado explícito
+**Gravedad: media. Cerrada (13/10/2026)**; ver «Cómo se cerró» al final. Defecto contra REQ-SAL-21, que exige un estado explícito
 para cada evento y que el manifiesto general enlace los estados de sus unidades.
 Hallado el 06/10/2026 al cerrar DT-002. **Sin arreglar**, a resolver en un
 trabajo aparte.
@@ -4096,6 +4107,51 @@ registrada. **Esa prueba deliberadamente no exige `events: null`**, para no
 fijar el defecto. Arreglarlo es una decisión de contrato: o el campo `link` se
 rellena con un evento fallido y su manifiesto, o se quita y el evento fallido se
 declara de otro modo.
+
+### Cómo se cerró (13/10/2026)
+
+**Decisión del responsable (13/10/2026): se rellena `link`.** Cerrada junto con
+DT-038 y DT-039 en un solo cambio; lo que conserva un paquete fallido quedó
+escrito en la ampliación de DTC-045. Ningún esquema cambia.
+
+- `publish_technical_event` (`src/execution.rs`) es ahora un envoltorio: deriva
+  las identidades técnicas y llama a `assemble_technical_event`, que devuelve un
+  `Diagnostic` corriente. Si el ensamblado falla, el envoltorio escribe con
+  `write_failed_event_manifest` un manifiesto de evento `failed`: la causa en
+  `diagnostics`, las 2n salidas FASTQ `failed`, sin artefacto y con el código de
+  la causa, cobertura y resúmenes vacíos y las cifras realizadas a cero, con el
+  modo de errores, la tasa de quimera y la de salto de índice declaradas, que el
+  juez del escritor exige. Antes retira del catálogo los FASTQ ya cerrados:
+  **ninguno se conserva**, porque cada uno depende del evento entero. El enlace
+  resultante, con estado `failed`, es el `link` del fallo, y el paquete fallido
+  enlaza el evento y su manifiesto.
+- De las 34 construcciones del fallo con `link: None` que había en el
+  ensamblado queda una, la de la derivación de identidades, sin la cual no hay
+  manifiesto posible. Si el manifiesto fallido no puede escribirse, el evento sale sin
+  enlace, como antes.
+- `write_event_manifest` recibe el estado y los diagnósticos;
+  `EventManifestDemultiplexing::without_pairs` da el demultiplexado vacío con la
+  tasa declarada.
+
+**Pruebas** (en `src/execution.rs`). Reescrita la que dejaba el evento sin
+enlazar, ahora
+`a_failed_event_assembly_links_a_failed_event_manifest_and_keeps_no_fastq`:
+enlace `failed`, manifiesto de evento con cuatro salidas fallidas y el código de
+la causa, catálogo exacto y ningún FASTQ en disco.
+`failed_event_manifests_of_every_stage_pass_the_published_schemas` recorre la
+contaminación con salto de índice, la amplificación, la amplificación con
+tartamudeo clonal y el tartamudeo sin amplificar, contra los esquemas publicados
+del manifiesto general v4 y v6 y del de evento v2 y v3 con el validador externo.
+`an_impractical_insert_leaves_the_event_linked_as_failed_with_its_cause` es un
+fallo real sin inyección: `GPS-DOMAIN-003`, el inserto impracticable de DT-006.
+Se borró la ignorada de `tests/f3_event_assembly.rs` que codificaba lo contrario
+(DT-003).
+
+**Bytes que cambian**, solo en las ejecuciones cuyo ensamblado de evento falla
+después de derivar las identidades: aparecen `events/<id>/manifest.json`, el
+artefacto `event-manifest-<id>` en el catálogo y en `minimum`, el enlace
+`events` con estado `failed` y una entrada en `technical_events`. Los FASTQ ya
+no estaban, y siguen sin estar.
 
 ---
 
@@ -4123,7 +4179,7 @@ de modo que ahora lo recorre la puerta de Python.
 
 ## DT-038. Un fallo posterior al evento descarta el VCF ya publicado y validado
 
-**Gravedad: media.** Contra REQ-SAL-25 y DTC-045: un fallo no debe invalidar
+**Gravedad: media. Cerrada (13/10/2026)**; ver «Cómo se cerró» al final. Contra REQ-SAL-25 y DTC-045: un fallo no debe invalidar
 retroactivamente artefactos ya publicados y validados que sean independientes, y
 el VCF, una vez escrito y validado, lo es. `publish_controlled_failure`
 (`src/execution.rs`) retiene solo la copia de la configuración, las
@@ -4134,17 +4190,134 @@ revisor de ese cierre: con VCF y evento, la reducción se conserva y el VCF se
 descarta. **Sin arreglar**: exigiría decidir también qué hacer con la verdad y
 la matriz que el VCF cita, que tampoco se retienen.
 
+### Cómo se cerró (13/10/2026)
+
+**Decisión del responsable (13/10/2026): se conserva la «unidad genotípica»
+entera o nada**, con la misma regla que las reducciones desde DT-002. La unidad
+es la verdad, la matriz de SNV (el TSV y sus metadatos, o el enlace de
+reutilización), el VCF y su índice si se pidieron y se publicaron, y la
+referencia de la simulación: la suministrada o, con inserción, también la final
+con su mapa y la sección `reference_insertion`. No cabe un subconjunto: el VCF
+cita la verdad por `GPS_CASE`, y la verdad cita la matriz, la referencia y la
+copia de la configuración por sus huellas.
+
+- La ejecución guarda el registro de cada artefacto de la unidad **en el momento
+  de escribirlo y validarlo** (`write_execution_truth` devuelve ahora también el
+  de la verdad), y en el fallo compara con esos registros los bytes en disco, no
+  con el catálogo. Si alguno no coincide, o si el VCF se pidió y no llegó a
+  publicarse, la unidad entera queda fuera; así no se publica una verdad que,
+  con su VCF, había superado el tope de bases de tracto.
+- La unidad exige además que **la copia de la configuración** se conserve, con
+  la misma comprobación con que el paquete fallido decide conservarla
+  (`valid_failure_configuration_copy`): con eventos directos o loci de
+  repetición la cabecera de la verdad la cita por su huella (fuentes `explicit`
+  y `random`). Lo encontró la revisión adversarial de este cierre: con la copia
+  alterada en disco se publicaba la verdad citando una huella que el paquete ya
+  no contenía. Es lo único que la unidad cita fuera de sí misma; la matriz y sus
+  metadatos citan la referencia de la simulación, y el VCF, la verdad y la
+  referencia.
+- El manifiesto fallido lleva `population_snvs`, `vcf_outputs` y, con la
+  versión 6, un `repeat_loci` con los sorteos y las bases de tracto reales.
+- **Limitación aceptada, como en DT-002**: no se repite el juicio final, de
+  modo que una verdad que el juez final rechaza por un defecto del productor,
+  con los bytes intactos, se conserva.
+- El juez del manifiesto general (`parse_general_manifest_bytes`, en
+  `src/results.rs`) exigía `truth-jsonl` en `minimum` solo con estado
+  `complete`; ahora también cuando el catálogo la contiene, con el mismo
+  contrato de clase y ruta. No añade ninguna comprobación nueva, y la puerta de
+  cobertura de los jueces no cambia de cifras.
+
+**Pruebas** (en `src/execution.rs`). La antigua
+`vcf_index_io_failure_publishes_only_the_controlled_failed_result`, que
+consagraba el defecto, se partió en dos:
+`a_failure_after_the_vcf_keeps_the_whole_genotype_unit` (fallo posterior al
+VCF, con evento y sin él; la unidad, byte a byte igual a la de una ejecución
+completa; el manifiesto, contra el esquema v4) y
+`a_real_vcf_index_failure_drops_the_whole_genotype_unit` (fallo inyectado dentro
+de la escritura del índice con `FORCE_INDEX_WRITE_FAILURE`, en
+`src/vcf_publication.rs` y solo en pruebas). Esta segunda **no puede fallar
+contra el código anterior**, que no conservaba nada, y lo dice su comentario; la
+mata conservar la unidad sin mirar si el VCF pedido se publicó. Nuevas, cada una
+con su pareja que sí conserva la unidad:
+`each_genotype_unit_piece_altered_after_validation_drops_the_whole_unit` y
+`each_inserted_reference_piece_altered_after_validation_drops_the_whole_unit`,
+que cambian cada pieza **rehaciendo también su entrada del catálogo** —el
+escenario saturado: con una alteración bruta el último recurso de DT-039 quita
+la unidad decida lo que decida la regla—;
+`an_altered_configuration_copy_drops_the_genotype_unit_that_cites_it` y
+`the_tract_cap_that_stops_the_vcf_also_drops_the_truth`;
+`a_failed_package_with_repeat_loci_publishes_the_realized_tract_bases_it_keeps`,
+con la sección `repeat_loci` igual a la de la ejecución completa, las bases
+realizadas iguales a las que cuenta un proceso de Python sobre la verdad y el
+VCF conservados y el esquema v6; y
+`a_failed_package_with_an_inserted_reference_keeps_the_final_reference_of_its_vcf`.
+Del juez, `a_failed_manifest_with_a_misclassified_truth_is_rejected` exige la
+clase y la ruta de la verdad también en un paquete fallido. Dejaron de valer, y
+se ajustaron porque ahora conservan la verdad,
+`invalid_effective_document_is_removed_before_failed_fallback_publication` y
+`physical_resource_failure_marks_reduction_failed_without_partial_artifacts`.
+Lo que el juez del manifiesto general sigue sin exigir de la coherencia de un
+paquete fallido editado a mano está en DT-057.
+
+**Bytes que cambian**, en todo fallo controlado posterior a escribir la verdad
+cuya unidad pasa la regla —fallos del evento o posteriores a él, de la
+configuración efectiva, de los jueces finales o del manifiesto—: se conservan
+`outputs/truth.jsonl`, `population_snvs.tsv` y `population_snvs.metadata.json`,
+el VCF y su índice si se publicaron, la referencia suministrada o generada y,
+con inserción, la final con su mapa. En el manifiesto cambian el catálogo,
+`references`, `population_snvs`, `vcf_outputs`, `output_categories`,
+`reference_insertion` y, en la versión 6, `repeat_loci`. No cambia nada en los
+fallos anteriores a la verdad, ni en los que llegan con el VCF pedido y sin
+publicar, ni en ninguna ejecución completa.
+
 ---
 
 ## DT-039. Con evento, alterar la referencia suministrada antes del cierre impide publicar el paquete fallido
 
-**Gravedad: media.** Con un evento ya publicado, si el FASTA de la referencia
+**Gravedad: media. Cerrada (13/10/2026)**; ver «Cómo se cerró» al final. Con un evento ya publicado, si el FASTA de la referencia
 suministrada se altera antes del cierre, la propia rama de fallo controlado no
 consigue publicar: falla con `GPS-FMT-006` «artefacto de evento no coincide con
 el catálogo físico general», **no queda ningún destino y se pierde la causa
 original**. Reproducido por el revisor del cierre de DT-002 con el gancho previo
 al manifiesto. Un fallo controlado debería publicar siempre un paquete fallido
 coherente o, al menos, conservar y devolver la causa original. **Sin arreglar.**
+
+### Cómo se cerró (13/10/2026)
+
+**Precisiones del diseño al registro.** Una alteración real del FASTA en disco
+da `GPS-IO-002`; `GPS-FMT-006` solo sale con el gancho que reescribe también el
+catálogo. Pasa también sin evento si hay reducciones completas, porque también
+entonces se conserva la referencia suministrada. Y si el gancho daba su propio
+error y además se alteraba el FASTA, se devolvía `GPS-IO-002`: se perdía la
+causa y quedaba el provisional `.result.gps-incomplete-*`.
+
+**Decisión del responsable (13/10/2026): un paquete fallido mínimo como último
+recurso, y siempre la causa original.** La arquitectura (§9.3) no trata el
+provisional como entrada hostil; el defecto era no publicar nada y perder la
+causa. Si el primer paquete fallido no pasa sus jueces, la ejecución publica uno
+mínimo: la copia de la configuración si sigue intacta, las reducciones marcadas
+`failed`, ningún evento ni unidad genotípica, y en `diagnostics` la causa y
+detrás el fallo secundario. Devuelve siempre la causa original; si tampoco el
+mínimo se puede publicar, o falla la publicación final, la devuelve con el
+código del fallo secundario en el contexto `secondary_failure_code`. Se descartó
+la alternativa de una cascada de filtros por huella.
+
+**Pruebas** (en `src/execution.rs`).
+`an_altered_supplied_reference_falls_back_to_a_minimal_package_with_the_original_cause`
+recorre el caso con evento y el caso sin evento pero con reducciones, con la
+copia de la referencia suministrada alterada en disco y el gancho con su propio
+error: devuelve ese error, y el paquete mínimo lleva solo la configuración, las
+reducciones `failed` y los diagnósticos `GPS-IO-001` y `GPS-IO-002`, contra el
+esquema v4. `an_altered_supplied_reference_alone_still_publishes_a_minimal_failed_package`
+es solo la alteración. `a_failed_package_that_cannot_be_published_still_returns_the_original_cause`
+ocupa el destino mientras tanto: devuelve la causa con
+`secondary_failure_code = GPS-IO-003`.
+
+**Bytes que cambian**, solo en las ejecuciones cuyo primer paquete fallido no
+pasa sus jueces: antes no quedaba destino y ahora queda el paquete mínimo.
+Cambia además lo que la ejecución **devuelve** —código, mensaje y código de
+salida— cuando falla el paquete fallido o su publicación: la causa original en
+lugar del fallo secundario.
 
 ---
 
@@ -5229,3 +5402,38 @@ Falla contra el código anterior. Se corrige además la consagración de la tand
 el lector **aceptaba** (catálogo v4, v5 y perfil de PCR en un manifiesto de versión 4, que el
 esquema v4 prohíbe y ningún productor escribe) sale de las pruebas del lector; el catálogo v4
 se acepta ahora solo en un paquete de versión 6, que es donde el esquema lo admite.
+
+## DT-057. El juez del manifiesto general acepta paquetes fallidos incoherentes editados a mano
+
+**Gravedad: baja.** Hallada por la revisión adversarial del cierre de DT-036,
+DT-038 y DT-039 (13/10/2026). Desde DT-038 un paquete fallido puede conservar la
+unidad genotípica —la verdad, la matriz de SNV, el VCF con su índice y la
+referencia de la simulación—, siempre entera o nada (ampliación de DTC-045). El
+**productor** la cumple, pero el juez del manifiesto general
+(`parse_general_manifest_bytes`, en `src/results.rs`) no exige esa coherencia:
+solo mira cada enlace por separado. Un manifiesto fallido editado a mano que
+conserve una parte de la unidad sin el resto se acepta.
+
+**Reproducción** (sonda `probe_judge_incoherent_failed_packages` de la revisión,
+sobre el paquete fallido de `genotype_unit_config` sin evento y con VCF BGZF,
+cuyo manifiesto el juez acepta tal cual):
+
+- **verdad sin matriz**: quitar `population_snvs` y sacar del catálogo y de
+  `minimum` el TSV y sus metadatos → **se acepta**;
+- **VCF sin verdad**: sacar `truth-jsonl` del catálogo y de `minimum` → **se
+  acepta**;
+- **verdad sin su referencia**: vaciar `references` y `vcf_outputs` y sacar la
+  referencia, el VCF y el índice → **se acepta**.
+
+Los dos controles de la misma sonda sí se rechazan: la verdad pasada a
+`requested` («minimum/requested no coinciden con los roles normativos») y un
+manifiesto **completo** sin verdad («falta el artefacto obligatorio
+truth-jsonl»).
+
+**Por qué no se arregla ahora.** Ningún productor escribe esos paquetes, y el
+encargo del cierre fijó no añadir comprobaciones nuevas al juez. Lo que sí se
+exige, y lo prueba `a_failed_manifest_with_a_misclassified_truth_is_rejected`
+(`src/execution.rs`), es la clase y la ruta de la verdad en un paquete fallido
+que la conserva. Arreglarla del todo es exigir en el juez la regla de la unidad:
+si hay verdad, la referencia de la simulación, la copia de la configuración y,
+cuando su cabecera cita una matriz, esa matriz; si hay VCF, la verdad.

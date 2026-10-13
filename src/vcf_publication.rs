@@ -30,6 +30,14 @@ pub const VCF_INDEX_ARTIFACT_ID: &str = "truth-vcf-index";
 pub const VCF_TBI_ARTIFACT_PATH: &str = "outputs/truth.vcf.gz.tbi";
 pub const VCF_CSI_ARTIFACT_PATH: &str = "outputs/truth.vcf.gz.csi";
 
+#[cfg(test)]
+thread_local! {
+    /// Hace fallar la escritura del índice dentro de la publicación, con el
+    /// VCF ya escrito: es el fallo real del índice que el paquete fallido
+    /// tiene que tratar como un VCF pedido y no publicado (DT-038).
+    pub(crate) static FORCE_INDEX_WRITE_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VcfPublication {
     pub vcf: ArtifactRecord,
@@ -364,6 +372,14 @@ pub fn publish_truth_vcf_within(
             },
             index_path,
             |file| {
+                #[cfg(test)]
+                if FORCE_INDEX_WRITE_FAILURE.replace(false) {
+                    return Err(vcf_io_detail(
+                        index_path,
+                        "write_index",
+                        "injected index writer failure",
+                    ));
+                }
                 let actual = write_vcf_index(&vcf_path, &header, file)
                     .map_err(|error| vcf_contract_error(index_path, "write_index", error))?;
                 if actual != kind {

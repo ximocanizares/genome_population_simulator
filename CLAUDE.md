@@ -321,10 +321,11 @@ cerrada) y con `tests/test_population_snvs_editor.py` hasta el 13/10/2026
 (DT-037, cerrada: escondía una prueba en rojo).
 
 Fallos preexistentes y ajenos que **no** hay que perseguir: dos en `tests_ui`
-(F2.5 VCF UI y F4.1 evento técnico) y nueve pruebas ignoradas históricas de
+(F2.5 VCF UI y F4.1 evento técnico) y ocho pruebas ignoradas históricas de
 F3/F4 —eran doce hasta que la de normalización con `bcftools` se encendió el
-20 de septiembre de 2026, y once hasta que el 06/10/2026 se borraron dos que
-estaban vaciadas (DT-002)—.
+20 de septiembre de 2026, once hasta que el 06/10/2026 se borraron dos que
+estaban vaciadas (DT-002), y nueve hasta que el 13/10/2026 se borró la que
+pedía conservar los FASTQ de un evento fallido (DT-003)—.
 
 ## 8. Entorno
 

@@ -174,6 +174,16 @@ impl EventManifestDemultiplexing {
         }
     }
 
+    /// Demultiplexado de un evento fallido, que no publica ninguna pareja: la
+    /// tasa de salto es la declarada y todas las cifras realizadas son cero.
+    #[must_use]
+    pub fn without_pairs(index_hopping_rate: f64) -> Self {
+        Self {
+            index_hopping_rate,
+            ..Self::disabled()
+        }
+    }
+
     #[must_use]
     pub fn disabled() -> Self {
         Self {
