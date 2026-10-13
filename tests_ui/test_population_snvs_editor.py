@@ -1,7 +1,6 @@
 import sys
 import unittest
 import json
-import importlib.util
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ui"))
@@ -37,8 +36,8 @@ length = 5
         self.assertEqual(parse_general_toml(render_general_toml(form)), form)
 
     def test_draft_schema_rejects_generate_with_supplied_or_reuse(self):
-        if importlib.util.find_spec("jsonschema") is None:
-            self.skipTest("jsonschema no está instalado en el entorno UI")
+        # `jsonschema` es dependencia de desarrollo declarada: si falta, la
+        # prueba **falla** en vez de saltarse y dejar el contrato sin vigilar.
         from jsonschema import Draft202012Validator
 
         schema = json.loads((Path(__file__).resolve().parents[1] / "schemas/config-general-v2.schema.json").read_text())
@@ -69,6 +68,13 @@ length = 5
                 "population_snvs": {"mode": mode, path: "matrix", "generate": generation},
             }
             self.assertTrue(list(validator.iter_errors(document)))
+            # Control positivo: los mismos documentos sin la tabla `generate`
+            # son válidos, así que el rechazo de arriba es por `generate`.
+            without_generate = {
+                **document,
+                "population_snvs": {"mode": mode, path: "matrix"},
+            }
+            self.assertEqual(list(validator.iter_errors(without_generate)), [])
 
         inverted_af = {
             "config_kind": "general",
@@ -83,7 +89,7 @@ length = 5
 
         inverted_region = {
             "config_kind": "general",
-            "schema_version": "1",
+            "schema_version": "2",
             "reference": reference,
             "population_snvs": {
                 "mode": "generate",
@@ -99,7 +105,7 @@ length = 5
 
         uniform_with_mode = {
             "config_kind": "general",
-            "schema_version": "1",
+            "schema_version": "2",
             "reference": reference,
             "population_snvs": {
                 "mode": "generate",

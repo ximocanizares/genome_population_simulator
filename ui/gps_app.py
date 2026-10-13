@@ -36,6 +36,9 @@ def _():
         repeat_locus_editor_rows,
         repeat_slippage_editor_rows,
         LIBRARY_PREPARATIONS,
+        PCR_DEFAULT_EARLY_CYCLES,
+        PCR_DEFAULT_GC_ATTEMPTS,
+        PCR_DEFAULT_MAX_FAMILY_SIZE,
         PCR_MAXIMUM_CYCLES,
         PCR_MAXIMUM_EARLY_CYCLES,
         PCR_MAXIMUM_EFFICIENCY_CLASSES,
@@ -50,6 +53,8 @@ def _():
         stutter_locus_rate_editor_rows,
         stutter_motif_rate_editor_rows,
         stutter_step_editor_rows,
+        TechnicalEventForm,
+        TechnicalLibraryRow,
     )
     from f5_editor import (
         F5GeneralForm,
@@ -159,6 +164,9 @@ def _():
         render_general_toml,
         run_toml,
         LIBRARY_PREPARATIONS,
+        PCR_DEFAULT_EARLY_CYCLES,
+        PCR_DEFAULT_GC_ATTEMPTS,
+        PCR_DEFAULT_MAX_FAMILY_SIZE,
         PCR_MAXIMUM_CYCLES,
         PCR_MAXIMUM_EARLY_CYCLES,
         PCR_MAXIMUM_EFFICIENCY_CLASSES,
@@ -175,6 +183,8 @@ def _():
         stutter_motif_rate_editor_rows,
         stutter_panel,
         stutter_step_editor_rows,
+        TechnicalEventForm,
+        TechnicalLibraryRow,
         validate_toml,
     )
 
@@ -246,6 +256,9 @@ def _(
     stutter_motif_rate_editor_rows,
     stutter_step_editor_rows,
     LIBRARY_PREPARATIONS,
+    PCR_DEFAULT_EARLY_CYCLES,
+    PCR_DEFAULT_GC_ATTEMPTS,
+    PCR_DEFAULT_MAX_FAMILY_SIZE,
     PCR_MAXIMUM_CYCLES,
     PCR_MAXIMUM_EARLY_CYCLES,
     PCR_MAXIMUM_EFFICIENCY_CLASSES,
@@ -402,7 +415,7 @@ def _(
         value=(
             _selected_pcr.early_cycles
             if _selected_pcr and _selected_pcr.early_cycles is not None
-            else 3
+            else min(PCR_DEFAULT_EARLY_CYCLES, _selected_pcr.cycles if _selected_pcr else 10)
         ),
         label=f"Ciclos explícitos (0 a {PCR_MAXIMUM_EARLY_CYCLES})",
     )
@@ -413,7 +426,7 @@ def _(
         value=(
             _selected_pcr.max_family_size
             if _selected_pcr and _selected_pcr.max_family_size is not None
-            else 64
+            else PCR_DEFAULT_MAX_FAMILY_SIZE
         ),
         label=f"Tamaño máximo de familia (1 a {PCR_MAXIMUM_FAMILY_SIZE})",
     )
@@ -424,7 +437,7 @@ def _(
         value=(
             _selected_pcr.gc_max_attempts
             if _selected_pcr and _selected_pcr.gc_max_attempts is not None
-            else 8
+            else PCR_DEFAULT_GC_ATTEMPTS
         ),
         label=f"Intentos de aceptación por composición (1 a {PCR_MAXIMUM_GC_ATTEMPTS})",
     )

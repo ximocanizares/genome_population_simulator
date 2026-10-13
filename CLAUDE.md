@@ -317,7 +317,8 @@ que demuestra que una comprobación está probada de verdad sigue siendo
 puerta canónica (`unittest`). `pytest` no está instalado ni declarado: no se
 usa. Un fichero de pruebas Python fuera de `tests_ui/` **no lo ejecuta nadie**;
 así pasó con `tests/test_process_adapter.py` del 25/08 al 06/10/2026 (DT-004,
-cerrada) y sigue pasando con `tests/test_population_snvs_editor.py` (DT-037).
+cerrada) y con `tests/test_population_snvs_editor.py` hasta el 13/10/2026
+(DT-037, cerrada: escondía una prueba en rojo).
 
 Fallos preexistentes y ajenos que **no** hay que perseguir: dos en `tests_ui`
 (F2.5 VCF UI y F4.1 evento técnico) y nueve pruebas ignoradas históricas de

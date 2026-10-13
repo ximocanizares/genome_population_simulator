@@ -35,6 +35,31 @@ class RecordingMo:
 class UiContractTests(unittest.TestCase):
     BINARY = ROOT / "target" / "debug" / SUPPORTED_BINARY_NAME
 
+    def test_every_name_a_notebook_cell_receives_is_defined_by_some_cell(self) -> None:
+        """Ningún parámetro de celda queda sin definir (DT-042).
+
+        `marimo check --strict` no lo detecta: una celda que recibe un nombre
+        que ninguna define solo falla al ejecutarse con la rama que lo usa.
+
+        Usa la API privada de marimo (`app._cell_manager`, `cell._cell`): marimo
+        está fijado en `uv.lock`, y si una actualización la mueve, esta prueba
+        es la que hay que adaptar.
+        """
+
+        import builtins
+
+        import gps_app
+
+        cells = [cell._cell for cell in gps_app.app._cell_manager.cells()]
+        defined = {name for cell in cells for name in cell.defs}
+        undefined = {
+            name
+            for cell in cells
+            for name in cell.refs
+            if name not in defined and not hasattr(builtins, name)
+        }
+        self.assertEqual(undefined, set())
+
     def test_current_schema_options_have_controls_and_future_options_do_not(self) -> None:
         schema = json.loads(
             (ROOT / "schemas" / "config-general-v2.schema.json").read_text()

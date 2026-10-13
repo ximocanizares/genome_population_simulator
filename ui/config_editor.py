@@ -318,6 +318,9 @@ STUTTER_CALIBRATED_MOTIF_LENGTH_RATES = {
 # siendo Rust, y `tests/pcr_contract.rs` compara las dos copias junto con las
 # de los tres esquemas. Una copia decimal silenciosa en un solo sitio es lo que
 # sobrevivió al cambio de contrato la vez anterior.
+PCR_DEFAULT_EARLY_CYCLES = 3
+PCR_DEFAULT_MAX_FAMILY_SIZE = 64
+PCR_DEFAULT_GC_ATTEMPTS = 8
 PCR_MAXIMUM_CYCLES = 30
 PCR_MAXIMUM_EARLY_CYCLES = 6
 PCR_MAXIMUM_FAMILY_SIZE = 256
@@ -760,9 +763,20 @@ def pcr_from_editor_rows(
         for row in per_cycle_slip_rows
         if str(row.get("probability", "")).strip()
     ]
+    # Igual que la curva neutra: un valor que coincide con la omisión que el
+    # simulador resuelve **no se declara**. Escribirlo cambiaría los bytes y, en
+    # `early_cycles`, hasta el significado: la omisión es `min(3, cycles)`, y un
+    # 3 explícito con 1 o 2 ciclos hace inválido un documento válido.
+    cycles = int(cycles)
+    if early_cycles is not None and int(early_cycles) == min(PCR_DEFAULT_EARLY_CYCLES, cycles):
+        early_cycles = None
+    if max_family_size is not None and int(max_family_size) == PCR_DEFAULT_MAX_FAMILY_SIZE:
+        max_family_size = None
+    if gc_max_attempts is not None and int(gc_max_attempts) == PCR_DEFAULT_GC_ATTEMPTS:
+        gc_max_attempts = None
     return PcrForm(
         duplicate_fraction=str(duplicate_fraction).strip(),
-        cycles=int(cycles),
+        cycles=cycles,
         efficiency=str(efficiency).strip(),
         early_cycles=None if early_cycles is None else int(early_cycles),
         max_family_size=None if max_family_size is None else int(max_family_size),

@@ -67,15 +67,15 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-031 | Una referencia corta con tasa de quimeras alta aborta como «invariante imposible» en vez de rechazarse como configuración | Baja | 05/10/2026 | **Cerrada (06/10/2026)** |
 | DT-032 | El lector de la verdad acepta como lista JSON objetos que el esquema exige objeto (`"counts":[6,8]`) | Baja | 06/10/2026 | **Cerrada (06/10/2026)** |
 | DT-033 | La verificación del paquete F5 publicado acepta manifiestos con enlaces escritos como lista JSON, que el esquema rechaza | Baja | 06/10/2026 | **Cerrada (06/10/2026)** |
-| DT-034 | Lo publicado atribuye las cifras de calibración del tartamudeo solo a Raz et al. (2019), cuando son de Gymrek (2016), cuya licencia exige atribuirlas | Baja | 06/10/2026 | Abierta |
+| DT-034 | Lo publicado atribuye las cifras de calibración del tartamudeo solo a Raz et al. (2019), cuando son de Gymrek (2016), cuya licencia exige atribuirlas | Baja | 06/10/2026 | **Cerrada (13/10/2026)** |
 | DT-035 | La puerta del paquete F5 acepta manifiestos que el esquema rechaza en campos que no lee con forma tipada (`attempt_summary`, `quota_ties`, `limits`, `profile`) | Baja | 06/10/2026 | Abierta |
 | DT-036 | Un ensamblado de evento fallido no deja el evento enlazado con su estado (REQ-SAL-21); el campo `link` nunca lleva valor | Media | 06/10/2026 | Abierta |
-| DT-037 | `tests/test_population_snvs_editor.py` está fuera de la puerta de Python y falla 1 de 7 | Baja | 06/10/2026 | Abierta |
+| DT-037 | `tests/test_population_snvs_editor.py` está fuera de la puerta de Python y falla 1 de 7 | Baja | 06/10/2026 | **Cerrada (13/10/2026)** |
 | DT-038 | Ante un fallo posterior al evento, el VCF ya publicado y validado se descarta del paquete fallido aunque es independiente | Media | 06/10/2026 | Abierta |
 | DT-039 | Con evento, si se altera el FASTA de la referencia suministrada antes del cierre, la rama de fallo controlado no consigue publicar y se pierde la causa original | Media | 06/10/2026 | Abierta |
 | DT-040 | Con tartamudeo clonal, la configuración efectiva publica `technical_event.rng_catalog = "f4-technical-v5"` y su esquema v6 exige `f4-technical-v6`: el validador externo la rechaza | Media | 08/10/2026 | Cerrada (12/10/2026) |
 | DT-041 | Toda ejecución amplificada, con microsatélites o sin ellos, publica un manifiesto general que no pasa su propio esquema: el perfil está fijado al de sin PCR y los catálogos a v3 y v4 | Media | 08/10/2026 | Cerrada (12/10/2026), con el manifiesto general v4 ampliado como excepción expresa a DTC-089 |
-| DT-042 | En el cuaderno, con un evento técnico activo, la celda que reconstruye el formulario falla con `NameError` sobre `TechnicalEventForm`: ningún control del panel de PCR llega al TOML | Media | 08/10/2026 | Abierta |
+| DT-042 | En el cuaderno, con un evento técnico activo, la celda que reconstruye el formulario falla con `NameError` sobre `TechnicalEventForm`: ningún control del panel de PCR llega al TOML | Media | 08/10/2026 | **Cerrada (13/10/2026)** |
 | DT-043 | El juez acepta en el manifiesto de evento los recuentos realizados de la amplificación (familias, parejas, histograma, linaje) alterados, con las huellas rehechas | Media | 08/10/2026 | Abierta, reducida (10/10/2026): los parámetros de la amplificación ya se atan a la efectiva; quedan los recuentos realizados |
 | DT-044 | REQ-CONF-134 a 138, REQ-DAT-81 a 85 y REQ-MAN-94 no tienen fila en la matriz de trazabilidad | Baja | 08/10/2026 | Abierta |
 | DT-046 | Referencias cruzadas internas del manifiesto de evento no atadas por su propio juez (`id_catalog`, bibliotecas repetidas, receptora y donantes ajenos, UDI repetidos, esquema v2 en los hechos del escritor) | Baja | 08/10/2026 | Abierta |
@@ -4025,6 +4025,31 @@ esquemas.
 toda ejecución con tartamudeo, porque el texto de la fuente va en la salida; por
 eso va aparte del multiplicador configurable de DT-009. No se ha corregido.
 
+**Cerrada el 13/10/2026.** La constante `STUTTER_CALIBRATION_SOURCE`
+(`src/stutter.rs`) dice ahora «Rates: Gymrek (2016), bioRxiv 043448, table 1,
+CC BY 4.0; model form: Raz et al. (2019), Nucleic Acids Research
+47(5):2436-2445, CC BY 4.0»: las cifras a Gymrek, la forma del modelo a Raz.
+El esquema solo exige una cadena no vacía (`"minLength": 1`), de modo que no se
+toca ningún contrato publicado; los documentos de diseño ya lo decían bien.
+Prueba nueva, `calibration_source_credits_the_rates_and_the_model_form`, que
+falla con el texto antiguo (comprobado en una copia: SHA de `src/stutter.rs`
+`e13a972da463` con el arreglo, `c4853599d8ec` con la constante antigua). Las
+huellas que cambian, y solo ellas, son estas; para cada una se comprobó que,
+restituyendo el texto antiguo en los bytes, se recupera la huella de partida:
+
+| Fichero publicado | Escenario | Por qué cambia |
+|---|---|---|
+| `effective-config.json` | con loci y sin PCR; con loci y amplificado | Lleva el texto de la fuente (una vez; dos en el amplificado, por el bloque del tartamudeo clonal) |
+| `events/reads-main/manifest.json` | con loci y sin PCR; con loci y amplificado | Lleva el texto de la fuente (una vez; dos en el amplificado) |
+| `manifest.json` (general) | los mismos dos | Por arrastre: cita la huella y el `size_bytes` de los dos anteriores; no contiene el texto |
+| bloque `technical_event.artifacts.pcr.stutter` de la efectiva | amplificado con loci | Lleva el texto de la fuente |
+
+No cambian: los FASTQ, la verdad, el VCF, la referencia, la matriz, ni nada de
+las ejecuciones sin loci de repetición ni sin evento técnico (las pruebas que
+congelan sus huellas siguen pasando sin tocar). Literales actualizados en
+`tests/technical_catalog_contract.rs` y `tests/clonal_homopolymer_fold.rs`, con
+la nota del motivo junto a las huellas.
+
 ---
 
 ## DT-035. La puerta del paquete F5 acepta formas que el esquema rechaza en campos no tipados
@@ -4082,6 +4107,17 @@ ejecuta nunca desde ella. Lanzado a mano (`python -m unittest
 tests.test_population_snvs_editor`) falla 1 de 7:
 `test_draft_schema_rejects_generate_with_supplied_or_reuse`, con
 `'2' was expected`. **Sin arreglar.**
+
+**Cerrada el 13/10/2026.** Se equivocaba la prueba, no el código. Dos de sus
+documentos de ejemplo declaraban `schema_version: "1"` contra
+`config-general-v2.schema.json`, que fija la constante `"2"`: el de la región
+invertida (que el esquema sí admite, la comprobación cruzada es de Rust) fallaba
+con `'2' was expected`, y el de `frequency_mode` en un modelo uniforme
+**pasaba por la razón equivocada**, porque el esquema ya lo rechazaba por la
+versión. Con la versión `"2"` los dos prueban lo que dicen (comprobado que el
+motivo del rechazo es el `oneOf` de la población). El editor y el esquema no
+cambian. El fichero se movió con `git mv` a `tests_ui/test_population_snvs_editor.py`,
+de modo que ahora lo recorre la puerta de Python.
 
 ---
 
@@ -4369,6 +4405,36 @@ comprobó el 08/10/2026 que los dos fallan por un diagnóstico de Rust
 vacío»), no por este `NameError`. Por la misma razón, la prueba de la interfaz
 del multiplicador (`test_the_control_value_reaches_the_form`) es estructural y
 lo dice en su docstring. **Sin arreglar.**
+
+**Cerrada el 13/10/2026.** `TechnicalEventForm` y `TechnicalLibraryRow` se
+importan de `config_editor` en la celda de importación y se devuelven de ella.
+Se buscó por la misma causa con el análisis de marimo (`refs` frente a `defs` de
+todas las celdas): no faltaba ningún otro nombre. Pruebas: la del multiplicador
+(`test_the_control_value_reaches_the_form`) ya **ejecuta** el cuaderno entero
+con `app.run`, sustituyendo la carga del fichero por un TOML con evento técnico
+y multiplicador, y exige el valor en la vista previa del TOML; y
+`test_every_name_a_notebook_cell_receives_is_defined_by_some_cell` cierra el
+defecto en general. Con la importación quitada en una copia (SHA de
+`ui/gps_app.py` `d8a25dad3727` con el arreglo, `055f28b4b6f9` sin él) la primera
+muere con `NameError: name 'TechnicalEventForm' is not defined` y la segunda con
+los nombres sin definir.
+
+**Ronda 2 (13/10/2026).** Con el arreglo el cuaderno llegó por primera vez a
+exportar la PCR, y se vio que escribía siempre `early_cycles = 3`,
+`max_family_size = 64` y `gc_max_attempts = 8` (los valores iniciales de sus
+controles) cuando el TOML los omitía; con 1 o 2 ciclos el 3 fijo hacía inválido
+un documento válido, porque la omisión real es `min(3, ciclos)`.
+`pcr_from_editor_rows` (`ui/config_editor.py`) no declara ya un valor que
+coincide con la omisión resuelta, como ya hacía con la curva neutra, y el
+control de ciclos tempranos arranca en `min(3, ciclos)`. Prueba
+`test_a_toml_without_the_defaulted_fields_round_trips_without_adding_them`:
+ejecuta el cuaderno con `cycles = 2` sin los tres campos y exige que el TOML
+exportado no los lleve y que el binario valide el importado y el exportado.
+Muere con el control devuelto al 3 fijo (SHA de `ui/gps_app.py` `f65a520cc842`
+→ `5c938a632e5d`) y con la normalización de `early_cycles` desactivada en
+`ui/config_editor.py`. Nota: un TOML que declare explícitamente un valor igual
+a la omisión (por ejemplo `early_cycles = 3` con 10 ciclos) se exporta ya sin
+ese campo; el significado es el mismo.
 
 ---
 

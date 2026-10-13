@@ -73,3 +73,14 @@ microsatélites (`amplificado-loci`, `amplificado-multiplicador` y
 `manifest.json`; los demás escenarios no cambian ni un byte. Las huellas de
 antes y de después están en el cierre de DT-040 del registro de deudas.
 Los ficheros `.sha256` de aquí siguen siendo los de la entrega de DT-009.
+
+*Nota del 13/10/2026.* Con el cierre de DT-034 el texto de la fuente de la
+calibración del tartamudeo atribuye las cifras a Gymrek (2016) además de Raz
+(2019). Cambian de bytes, en los escenarios con microsatélites
+(`sin-pcr-loci`, `amplificado-loci`, `amplificado-multiplicador` y
+`amplificado-sustitucion`), `effective-config.json`, `events/reads-main/manifest.json`
+y, por arrastre, `manifest.json`; los FASTQ, la verdad y los escenarios sin
+microsatélites no cambian. Por eso `linea-base.sha256`, `con-el-multiplicador.sha256`
+y `multiplicador-2.5.sha256` guardan huellas anteriores a ese texto y hoy no se
+reproducirían tal cual en esos tres ficheros. Las huellas de antes y de después
+están en el cierre de DT-034 del registro de deudas.

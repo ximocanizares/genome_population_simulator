@@ -23,6 +23,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ui"))
@@ -660,72 +661,89 @@ class HomopolymerFoldEditorTest(unittest.TestCase):
         panels = PANELS.read_text(encoding="utf-8")
         self.assertIn("pcr_homopolymer_fold_control,", panels)
 
-    def test_the_control_value_reaches_the_form(self) -> None:
-        """**El valor del control es lo que llega al formulario.**
+    def test_a_toml_without_the_defaulted_fields_round_trips_without_adding_them(
+        self,
+    ) -> None:
+        """**Un TOML que omite `early_cycles`, `max_family_size` y
+        `gc_max_attempts` los sigue omitiendo tras pasar por el cuaderno.**
 
-        Lo honesto sería ejecutar la celda del cuaderno que construye el
-        formulario y ver el campo en el TOML. **No se puede**: con un evento
-        técnico activo esa celda falla con `NameError` sobre
-        `TechnicalEventForm`, que el cuaderno nunca importa (DT-042), de modo
-        que hoy ningún control del panel de PCR llega al TOML desde el cuaderno
-        en ejecución. Mientras eso siga así, la prueba es **estructural**: sobre
-        el árbol sintáctico exige que la única llamada a `pcr_from_editor_rows`
-        reciba como argumento del multiplicador exactamente
-        `str(pcr_homopolymer_fold_control.value)`, y que el control arranque
-        con el literal del formulario importado. Caza un cableado que pase `""`
-        o cualquier otra cosa en su lugar; no caza nada que solo se vea al
-        ejecutar. Después comprueba, ya sin el cuaderno, que ese argumento llega
-        al formulario y al TOML.
+        Con `cycles = 2` la omisión de `early_cycles` es `min(3, 2) = 2`; el
+        cuaderno escribía el 3 fijo de su control y el documento exportado dejaba
+        de validar (`GPS-CONF-008`). Ejecuta el cuaderno entero y, si el binario
+        está compilado, valida con él tanto el TOML importado como el exportado.
         """
 
-        tree = ast.parse(NOTEBOOK.read_text(encoding="utf-8"))
-        calls = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "pcr_from_editor_rows"
-        ]
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(len(calls[0].args), 11)
-        self.assertEqual(
-            ast.dump(calls[0].args[10]),
-            ast.dump(
-                ast.parse("str(pcr_homopolymer_fold_control.value)", mode="eval").body
-            ),
+        text = (
+            RUNNABLE.replace("cycles = 12", "cycles = 2")
+            .replace("early_cycles = 4\n", "")
+            .replace("max_family_size = 32\n", "")
+            .replace("gc_max_attempts = 5\n", "")
         )
-        defined = [
-            node.value
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Assign)
-            and isinstance(node.targets[0], ast.Name)
-            and node.targets[0].id == "pcr_homopolymer_fold_control"
-        ]
-        self.assertEqual(len(defined), 1)
-        initial = [
-            keyword.value for keyword in defined[0].keywords if keyword.arg == "value"
-        ]
-        self.assertEqual(len(initial), 1)
-        self.assertIn("_selected_pcr.homopolymer_pcr_fold", ast.unparse(initial[0]))
-        # Y lo que ese argumento lleva llega al formulario y al TOML.
-        pcr = parse_general_toml(SCENARIO).technical_event.pcr
-        rebuilt = pcr_from_editor_rows(
-            "pcr",
-            pcr.duplicate_fraction,
-            pcr.cycles,
-            pcr.efficiency,
-            pcr.early_cycles,
-            pcr.max_family_size,
-            pcr.gc_max_attempts,
-            gc_curve_editor_rows(pcr),
-            efficiency_class_editor_rows(pcr),
-            per_cycle_slip_editor_rows(pcr),
-            "2.82",
+        for key in ("early_cycles", "max_family_size", "gc_max_attempts"):
+            self.assertNotIn(key, text)
+        upload = SimpleNamespace(
+            value=[SimpleNamespace(name="config.toml", contents=text.encode("utf-8"))]
         )
-        self.assertEqual(rebuilt.homopolymer_pcr_fold, "2.82")
-        form = parse_general_toml(SCENARIO)
-        form.technical_event.pcr = rebuilt
-        self.assertIn("homopolymer_pcr_fold = 2.82", render_general_toml(form))
+        sys.path.insert(0, str(ROOT / "ui"))
+        import gps_app
+
+        _, defs = gps_app.app.run(
+            defs={
+                "config_upload": upload,
+                "load_default_config_button": SimpleNamespace(value=False),
+            }
+        )
+        self.assertIsNone(defs["preview_error"])
+        exported = defs["preview_toml"]
+        self.assertIn("cycles = 2", exported)
+        for key in ("early_cycles", "max_family_size", "gc_max_attempts"):
+            self.assertNotIn(key, exported)
+        if not BINARY.exists():
+            return
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / "reference.fa").write_text(f">chr1\n{REFERENCE}\n", encoding="utf-8")
+            (base / "population-snvs.tsv").write_text(
+                "contig\tposition\tref\talt\tpopulation_id\talt_af\n"
+                f"chr1\t20\t{REFERENCE[19]}\t{'G' if REFERENCE[19] == 'T' else 'T'}\tP1\t0.5\n",
+                encoding="utf-8",
+            )
+            for label, toml in (("importado", text), ("exportado", exported)):
+                validation, _ = validate_toml(BINARY, toml, base)
+                self.assertTrue(validation.succeeded, f"{label}: {validation.stdout}")
+
+    def test_the_control_value_reaches_the_form(self) -> None:
+        """**El valor del control llega al TOML, ejecutando el cuaderno.**
+
+        Ejecuta `ui/gps_app.py` entero con `app.run`, sustituyendo solo la
+        carga del fichero por un TOML con un evento técnico de PCR y un
+        multiplicador de homopolímeros declarado. El valor pasa por el control,
+        por la celda que reconstruye el formulario y por el renderizado, y debe
+        aparecer en la vista previa del TOML. Caza un cableado que pase `""` en
+        su lugar y también que la celda falle con un evento técnico activo
+        (DT-042: `NameError` por una importación que faltaba).
+
+        Límite honesto: el control no se manipula, solo arranca con el valor del
+        TOML cargado; no distingue un control cableado de un valor que llegara
+        por otro camino desde el formulario importado.
+        """
+
+        text = self._scenario_with_fold()
+        upload = SimpleNamespace(
+            value=[SimpleNamespace(name="config.toml", contents=text.encode("utf-8"))]
+        )
+        sys.path.insert(0, str(ROOT / "ui"))
+        import gps_app
+
+        _, defs = gps_app.app.run(
+            defs={
+                "config_upload": upload,
+                "load_default_config_button": SimpleNamespace(value=False),
+            }
+        )
+        self.assertIsNone(defs["preview_error"])
+        self.assertIn("[technical_event.pcr]", defs["preview_toml"])
+        self.assertIn("homopolymer_pcr_fold = 2.5", defs["preview_toml"])
 
 
 if __name__ == "__main__":

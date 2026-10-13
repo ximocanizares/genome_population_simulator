@@ -64,16 +64,23 @@ const EVIDENCE: &str = "evidence/dt-009-multiplicador-congelacion/inputs";
 // enlace del evento y por la huella de la efectiva, que cita dos veces. Las
 // huellas nuevas se midieron con el binario corregido; las de antes quedan en
 // el comentario de cada una.
+//
+// **13/10/2026 (DT-034):** el texto de la fuente de la calibración del
+// tartamudeo atribuye ahora las cifras a Gymrek (2016) además de Raz (2019), de
+// modo que cambian la efectiva y el manifiesto de evento de toda ejecución con
+// loci de repetición (`sin-pcr-loci` y `amplificado-loci`), y por arrastre su
+// manifiesto general (huella y `size_bytes` de esos dos). Con el texto antiguo
+// restituido, la efectiva y el manifiesto de evento dan las huellas de partida.
 // ---------------------------------------------------------------------------
 
 const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
     (
         "effective-config.json",
-        "ba63b5208edc7507296f6a3cf67f6d57c9788e6cda3350f9b4cf3d3436a457f7",
+        "61809c4359781e56ac0d419c77c1014a43e83c42b77a34260fbc9e3f4659b975",
     ),
     (
         "events/reads-main/manifest.json",
-        "a7d60d1031aecb12473507647324c40b309a8c208b7c7c251f7945df9dee13b1",
+        "75aedb1c798cc994e91684e9b0623a691e0c8d06b7cec9814fc20517ea4ecaed",
     ),
     (
         "inputs/config/general.toml",
@@ -81,7 +88,7 @@ const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
     ),
     (
         "manifest.json",
-        "d9421eb9fb05a371ec186ea1d405c036f0a31f5dc6aeb408151fe5fcdb1ba8dc",
+        "eaa1a6c1e9e2d2dc5db7cb9dea370951ae4a5ddad63984b0ed8b86c0635ca123",
     ),
     (
         "outputs/fastq/reads-main/sample-A_R1.fastq.gz",
@@ -204,11 +211,11 @@ const AMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
     // 834848fea5745b4d8e7b7e0f41a329bcc4d50a7a91fc28dfb82fcf82392b6b64.
     (
         "effective-config.json",
-        "c195900326ac35fda4ee3e10efce2233882798acee2a79b2d730a239c9b9f2fe",
+        "b9c5280d983d94b50aa08c4cab453ba67e5a260521cd814361d6770272a0b37e",
     ),
     (
         "events/reads-main/manifest.json",
-        "d2c03ea27707b031030d4f59bd72fafe487cf691f11788ab5b7a1cf4e63b4837",
+        "bc59706c711f5bdcabefddc8f39b00ac4ddcda3cf998c4f26aabfd198ec30576",
     ),
     (
         "inputs/config/general.toml",
@@ -218,7 +225,7 @@ const AMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
     // a40a8cbb245653eacbbf04449d1db2b66a8877ac8e4ec971f80f95b91caf0de5.
     (
         "manifest.json",
-        "2368b402656a0bd881b4943897bc91249d9e53353c3c87104c59de9e13ddeb23",
+        "679a61e0c7924f7256b049a41adeb80a5dda0aa4c1ff274c482d370acb1badf2",
     ),
     (
         "outputs/fastq/reads-main/sample-A_R1.fastq.gz",

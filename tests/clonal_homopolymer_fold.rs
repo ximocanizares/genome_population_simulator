@@ -59,6 +59,12 @@ const SCENARIO_SNVS: &str = include_str!(
 // lo que el código nuevo produce y no podría fallar por el defecto que dice
 // cubrir. No se actualizan para que callen: un cambio aquí significa que el
 // valor por omisión ha dejado de ser la calibración tal cual.
+//
+// **Excepción, 13/10/2026 (DT-034):** el manifiesto de evento y el bloque del
+// tartamudeo clonal de la efectiva cambian de huella solo porque el texto de la
+// fuente de la calibración ahora atribuye las cifras a Gymrek (2016) además de
+// Raz (2019). Comprobado: con el texto antiguo restituido, los bytes dan las
+// huellas de partida. Los FASTQ y la verdad no se mueven.
 // ---------------------------------------------------------------------------
 
 const FROZEN: [(&str, &str); 6] = [
@@ -84,7 +90,7 @@ const FROZEN: [(&str, &str); 6] = [
     ),
     (
         "events/reads-main/manifest.json",
-        "d2c03ea27707b031030d4f59bd72fafe487cf691f11788ab5b7a1cf4e63b4837",
+        "bc59706c711f5bdcabefddc8f39b00ac4ddcda3cf998c4f26aabfd198ec30576",
     ),
 ];
 
@@ -93,7 +99,7 @@ const FROZEN: [(&str, &str); 6] = [
 /// efectiva. La efectiva entera no se congela porque registra la ruta del
 /// TOML, que aquí es un directorio temporal; el bloque no la lleva.
 const FROZEN_EFFECTIVE_BLOCK: &str =
-    "2f4f35ae3e1995f57d8bb32135ac45e1aa935784b67db90235baacb4740f66dc";
+    "91c01cb95f5b63d920660c6bb843b7ccbdc08bbecb4dc9bfd233f516f6016539";
 
 fn temporary() -> PathBuf {
     std::env::temp_dir().join(format!(

@@ -149,8 +149,7 @@ pub const STUTTER_WITH_PCR_MOTIF_LENGTH_RATES: [f64; STUTTER_MOTIF_LENGTH_MAX] =
 /// Procedencia de esas cifras. Viaja con los valores a la configuración
 /// efectiva y al manifiesto: unos números embebidos sin su fuente no se
 /// distinguen de unos inventados.
-pub const STUTTER_CALIBRATION_SOURCE: &str =
-    "Raz et al. (2019), Nucleic Acids Research 47(5):2436-2445, CC BY 4.0";
+pub const STUTTER_CALIBRATION_SOURCE: &str = "Rates: Gymrek (2016), bioRxiv 043448, table 1, CC BY 4.0; model form: Raz et al. (2019), Nucleic Acids Research 47(5):2436-2445, CC BY 4.0";
 /// Especie de la calibración.
 pub const STUTTER_CALIBRATION_SPECIES: &str = "human";
 /// Tecnología de la calibración.
@@ -1559,6 +1558,17 @@ mod tests {
     };
     use crate::randomness::RandomWordSource;
     use crate::tandem_repeat::RepeatMotif;
+
+    /// DT-034: la licencia CC BY 4.0 de Gymrek (2016) exige atribuir las cifras,
+    /// y la forma del modelo es de Raz (2019); el texto publicado cita a ambos.
+    #[test]
+    fn calibration_source_credits_the_rates_and_the_model_form() {
+        let source = super::STUTTER_CALIBRATION_SOURCE;
+        assert!(source.contains("Gymrek (2016)"), "{source}");
+        assert!(source.contains("table 1"), "{source}");
+        assert!(source.contains("Raz et al. (2019)"), "{source}");
+        assert_eq!(source.matches("CC BY 4.0").count(), 2, "{source}");
+    }
 
     /// Fuente instrumentada: cuenta las palabras que se le piden.
     ///
