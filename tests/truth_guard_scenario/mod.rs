@@ -335,9 +335,8 @@ end = 302
 }
 
 /// Las líneas de la verdad que el programa publica para ese escenario, con o
-/// sin locus de repetición. **Sin él es la versión 4** y la leen los dos
-/// lectores; **con él es la 5**, que el lector por flujo rechaza entera
-/// (DT-015, abierta), de modo que esas pruebas usan solo el lector completo.
+/// sin locus de repetición. **Sin él es la versión 4; con él, la 5.** Los dos
+/// lectores leen las dos (DT-015, cerrada el 13/10/2026).
 pub fn publish(repeats: bool) -> Vec<Value> {
     let root: PathBuf = std::env::temp_dir().join(format!(
         "gps-truth-guards-{}-{}",
@@ -438,7 +437,7 @@ pub fn both(bytes: &[u8]) -> [Result<(), TruthValidationError>; 2] {
     ]
 }
 
-/// Solo el lector completo: la verdad de la versión 5 no la admite el de flujo.
+/// Solo el lector completo.
 pub fn full(bytes: &[u8]) -> Result<(), TruthValidationError> {
     validate_and_reconstruct_truth_jsonl(&mut Cursor::new(bytes.to_vec()), &reference()).map(|_| ())
 }

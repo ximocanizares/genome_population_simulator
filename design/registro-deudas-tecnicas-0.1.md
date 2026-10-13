@@ -48,7 +48,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-012 | El barrido de opciones comprueba que el control existe, no que atienda a la opción | Baja | 27/09/2026 | Abierta |
 | DT-013 | El generador de alelos no se puede usar sobre una referencia que construye el propio programa | Media | 29/09/2026 | **Cerrada (01/10/2026)** |
 | DT-014 | El esquema de la verdad de F5 admite todavía la copia entera del haplotipo en un alelo que F5 nunca publica | Baja | 30/09/2026 | Abierta |
-| DT-015 | El validador de la verdad por flujo rechaza toda verdad con alelos de repetición | Baja | 30/09/2026 | Abierta |
+| DT-015 | El validador de la verdad por flujo rechaza toda verdad con alelos de repetición | Baja | 30/09/2026 | Cerrada (13/10/2026) |
 | DT-016 | El tracto de un microsatélite compuesto no se coloca en una referencia simulada | Media | 01/10/2026 | **Cerrada (01/10/2026)** |
 | DT-017 | El juez de los recursos publicados cita el esquema efectivo v4 en sus rechazos aunque el documento sea v6 | Baja | 01/10/2026 | Abierta, corregida para la regeneración de la referencia simulada |
 | DT-018 | Una copia con cambios de base aplicados fuera de orden de posición aborta la ejecución al reconstruir la verdad | **Grave** | 02/10/2026; redefinida el 03/10/2026 | **Cerrada (03/10/2026)** |
@@ -82,7 +82,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-045 | El juez de la matriz de SNV tiene catorce comprobaciones de código muerto y un conjunto redundante, porque repite lo que `parse_metadata_json` ya exige | Baja | 08/10/2026 | Abierta; encargo aparte |
 | DT-047 | El contrato de la verdad admite un cambio de base de segmento cubierto por una deleción del mismo segmento y la réplica del juez lo rechaza como «no se reproduce» | Baja | 09/10/2026 | **Cerrada (09/10/2026)**: el error estaba en el contrato |
 | DT-048 | El juez no exige que el estado heredado de una copia recorra la referencia una vez y en orden creciente (colinealidad): acepta rotaciones y duplicaciones | Media | 09/10/2026 | **Cerrada (09/10/2026)**: el juez exige que los segmentos recorran la referencia una vez y en orden |
-| DT-049 | El lector por flujo de la verdad no aplica a los casos genotípicos el paso léxico del contrato | Media-baja | 09/10/2026 | Abierta (junto a DT-015) |
+| DT-049 | El lector por flujo de la verdad no aplica a los casos genotípicos el paso léxico del contrato | Media-baja | 09/10/2026 | Cerrada (13/10/2026) |
 | DT-050 | En memoria, el juez de la verdad aceptaba una copia con un segmento de otra secuencia en medio | Baja | 09/10/2026 | **Cerrada (09/10/2026)**, en el mismo cambio que DT-048 |
 | DT-051 | El juez de los recursos publicados no ata los loci de repetición publicados (manifiesto y configuración efectiva) al TOML copiado: acepta alterar secuencias, frecuencias, pureza, intervalos, topes y mínimos | Media | 10/10/2026 | **Cerrada (10/10/2026)**, en un cambio propio tras la tanda 6 |
 | DT-052 | La contabilidad de bases de tracto no la juzga nadie al publicar: su juez no está cableado y, aunque lo estuviera, no ata las cotas al TOML | Media | 10/10/2026 | **Cerrada (10/10/2026)**, en un cambio propio tras DT-051 |
@@ -2432,7 +2432,7 @@ de inserción y de deleción.
 
 ## DT-015. El validador de la verdad por flujo rechaza toda verdad con alelos de repetición
 
-**Gravedad: baja.** Hoy no afecta a ninguna ejecución: esa vía solo la usan
+**Gravedad: baja. Cerrada (13/10/2026), junto a DT-049.** Hoy no afecta a ninguna ejecución: esa vía solo la usan
 las pruebas. Pero es una función pública que dice validar cualquier verdad y no
 lo hace.
 
@@ -2467,6 +2467,38 @@ un cambio del validador que merece su propio encargo.
 Que la lectura por flujo compruebe la cabecera sin la regla de promoción,
 acumule si ha visto algún alelo de repetición y aplique la regla al terminar,
 con una prueba que lea por flujo una verdad `"5"` publicada.
+
+*Cómo se cerró.* La lectura por flujo comprueba la cabecera y cada copia con
+`validate_structure_with_version(VersionRule::AnyKnown)`, es decir, sin la regla de
+promoción (solo exigen una versión conocida, la `"4"` o la `"5"`);
+acumula si alguna copia o algún caso lleva un alelo de repetición y, al terminar,
+aplica `validate_schema_version`, la misma regla (ahora una función) que usa el
+lector completo, con el mismo error. Lo prueban
+`the_published_repeat_truth_is_accepted_by_both_readers` (verdad `"5"`
+publicada, aceptada por los dos lectores) y
+`the_version_rule_is_enforced_by_both_readers_in_both_directions` (`"5"` sin
+repeticiones, `"4"` con ellas y `"9"` se rechazan igual en los dos),
+`a_copy_without_repeat_inside_a_v5_truth_is_accepted_by_both_readers` (una
+copia sin repetición dentro de una verdad `"5"`, la segunda causa del defecto),
+`a_repeat_allele_erased_by_a_later_deletion_still_makes_the_truth_v5` (un alelo
+de repetición del historial que una deleción posterior borra de las piezas
+vigentes sigue haciendo la verdad `"5"`, y no hay caso que lo exija),
+`a_v5_truth_without_cases_is_judged_for_its_missing_cases_by_both_readers` y
+`a_repeat_case_that_no_copy_carries_is_rejected_for_its_version_by_both_readers`
+(esta última cubre el acumulador de los casos, que cambia el error y no la
+aceptación). Una versión distinta de `"4"` y `"5"` se rechaza ya en la
+cabecera, en el mismo punto que el lector completo
+(`an_unknown_version_is_rejected_in_the_header_before_any_other_defect`).
+Mutadas sobre copia, cada una la mata alguna de estas pruebas: quitar la
+regla final, aplicarla en la cabecera o en la copia aislada, quitar cada
+acumulador y quitar el rechazo temprano de la versión desconocida.
+
+**Diferencia que se conserva a propósito.** El desajuste entre la `"4"` y la
+`"5"` solo puede decidirse al final, cuando se han visto todos los registros;
+con un segundo defecto en el documento los errores de los dos lectores pueden
+diferir (por ejemplo, una `"5"` sin repeticiones con la convención de
+coordenadas mala: el completo da `UnsupportedVersion` y el de flujo
+`UnsupportedCoordinateConvention`). La aceptación coincide siempre.
 
 ---
 
@@ -4655,6 +4687,18 @@ más de 64 caracteres, y un alelo de deleción cuyo evento fuente empieza en 421
 vez de 420, que el lector completo rechaza. Las tablas léxicas de
 `tests/truth_schema_guards.rs` se prueban por eso sobre el documento en memoria, no
 con los dos lectores.
+
+*Cómo se cerró (13/10/2026).* El paso léxico se factorizó en
+`validate_lexical_header`, `validate_lexical_record` y
+`validate_lexical_genotype` (`src/truth_schema.rs`), y el lector por flujo llama
+a la última con cada caso (la cabecera y las copias ya lo recibían, por pasar
+por `validate_structure`). Lo prueba
+`the_lexical_step_is_applied_to_each_case_by_both_readers`, con los tres casos
+reproducidos (`case_id` con espacio, de 65 caracteres y deleción con evento
+fuente en 421), que los dos lectores rechazan con el mismo error; quitar la
+llamada léxica la mata. **Sigue siendo cierto** que las tablas de
+`tests/truth_schema_guards.rs` se prueban solo en memoria: `TruthDocument` no
+se serializa a JSONL, así que no se pasaron por el lector por flujo.
 
 ## DT-050. En memoria, el juez de la verdad aceptaba una copia con un segmento de otra secuencia en medio
 

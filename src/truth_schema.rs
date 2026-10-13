@@ -454,6 +454,16 @@ pub fn records_carry_repeat_alleles(records: &[TruthRecord]) -> bool {
     })
 }
 
+/// Qué regla de versiones aplica `validate_structure_with_version`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum VersionRule {
+    /// La del contrato: la versión que corresponde a lo que el documento
+    /// publica (la 5 con alelos de repetición, la 4 sin ellos).
+    Promoted,
+    /// Solo que sea una versión conocida, la 4 o la 5.
+    AnyKnown,
+}
+
 impl TruthDocument {
     /// Cierto cuando algún registro publica un alelo de repetición.
     #[must_use]
@@ -462,24 +472,35 @@ impl TruthDocument {
     }
 
     pub fn validate_structure(&self) -> Result<(), TruthContractError> {
+        self.validate_structure_with_version(VersionRule::Promoted)
+    }
+
+    /// Igual que `validate_structure`, pero con la regla de versiones a
+    /// elegir. El lector por flujo comprueba la cabecera y cada copia por
+    /// separado, cuando todavía no sabe si el documento llevará alelos de
+    /// repetición: rechaza en el acto una versión desconocida, en el mismo
+    /// punto que el lector completo, y deja el desajuste entre la 4 y la 5
+    /// para el final (`validate_schema_version`).
+    pub(crate) fn validate_structure_with_version(
+        &self,
+        rule: VersionRule,
+    ) -> Result<(), TruthContractError> {
         let h = &self.header;
         validate_lexical_document(self)?;
         if h.document_kind != TRUTH_DOCUMENT_KIND {
             return Err(rejected(TruthContractError::UnsupportedDocumentKind));
         }
-        // **La versión se promueve por lo que se publica, no por lo que se
-        // declara.** Un documento que lleve al menos un alelo de repetición es
-        // de la versión 5 y uno que no lleve ninguno sigue siendo de la 4. Se
-        // exige en las dos direcciones: sin la segunda, una promoción disparada
-        // por la mera declaración del locus pasaría inadvertida.
-        let carries_repeats = self.carries_repeat_alleles();
-        let expected = if carries_repeats {
-            TRUTH_SCHEMA_VERSION_WITH_REPEATS
-        } else {
-            TRUTH_SCHEMA_VERSION
-        };
-        if h.schema_version != expected {
-            return Err(rejected(TruthContractError::UnsupportedVersion));
+        match rule {
+            VersionRule::Promoted => {
+                validate_schema_version(h, self.carries_repeat_alleles())?;
+            }
+            VersionRule::AnyKnown => {
+                if h.schema_version != TRUTH_SCHEMA_VERSION
+                    && h.schema_version != TRUTH_SCHEMA_VERSION_WITH_REPEATS
+                {
+                    return Err(rejected(TruthContractError::UnsupportedVersion));
+                }
+            }
         }
         if h.coordinate_convention != TRUTH_COORDINATE_CONVENTION {
             return Err(rejected(
@@ -556,7 +577,14 @@ impl TruthDocument {
 }
 
 fn validate_lexical_document(document: &TruthDocument) -> Result<(), TruthContractError> {
-    let h = &document.header;
+    validate_lexical_header(&document.header)?;
+    for record in &document.records {
+        validate_lexical_record(record)?;
+    }
+    Ok(())
+}
+
+fn validate_lexical_header(h: &TruthHeader) -> Result<(), TruthContractError> {
     valid_id("execution_id", &h.execution_id)?;
     valid_id("reference_id", &h.reference_id)?;
     valid_sha(&h.reference_content_sha256)?;
@@ -564,139 +592,170 @@ fn validate_lexical_document(document: &TruthDocument) -> Result<(), TruthContra
         valid_source(&digest.source)?;
         valid_sha(&digest.sha256)?;
     }
-    for record in &document.records {
-        match record {
-            TruthRecord::HaplotypeCopy(copy) => {
-                for value in [
-                    &copy.identity.reference_id,
-                    &copy.identity.individual_id,
-                    &copy.identity.sequence_id,
-                ] {
-                    valid_id("copy_identity", value)?;
+    Ok(())
+}
+
+/// Paso léxico de un registro. Lo comparten el lector completo y el lector
+/// por flujo, para que sea una sola regla.
+pub(crate) fn validate_lexical_record(record: &TruthRecord) -> Result<(), TruthContractError> {
+    match record {
+        TruthRecord::HaplotypeCopy(copy) => {
+            for value in [
+                &copy.identity.reference_id,
+                &copy.identity.individual_id,
+                &copy.identity.sequence_id,
+            ] {
+                valid_id("copy_identity", value)?;
+            }
+            if copy.identity.copy_index > 9 || copy.phase > 9 {
+                return Err(rejected(TruthContractError::InvalidLexicalField {
+                    field: "copy_index_or_phase",
+                    value: copy.identity.copy_index.to_string(),
+                }));
+            }
+            if copy.provenance.origin.is_empty() {
+                return Err(rejected(TruthContractError::InvalidLexicalField {
+                    field: "copy_provenance_origin",
+                    value: copy.provenance.origin.clone(),
+                }));
+            }
+            for source in &copy.provenance.sources {
+                valid_source(source)?;
+            }
+            for segment in &copy.segments {
+                valid_segment_source(&segment.source)?;
+                for modification in &segment.modifications {
+                    valid_modification_lexical(modification)?;
                 }
-                if copy.identity.copy_index > 9 || copy.phase > 9 {
-                    return Err(rejected(TruthContractError::InvalidLexicalField {
-                        field: "copy_index_or_phase",
-                        value: copy.identity.copy_index.to_string(),
-                    }));
-                }
-                if copy.provenance.origin.is_empty() {
-                    return Err(rejected(TruthContractError::InvalidLexicalField {
-                        field: "copy_provenance_origin",
-                        value: copy.provenance.origin.clone(),
-                    }));
-                }
-                for source in &copy.provenance.sources {
-                    valid_source(source)?;
-                }
-                for segment in &copy.segments {
-                    valid_segment_source(&segment.source)?;
-                    for modification in &segment.modifications {
-                        valid_modification_lexical(modification)?;
-                    }
-                }
-                for piece in &copy.current_pieces {
-                    match piece {
-                        TruthCurrentPiece::Source { source, snps } => {
-                            valid_segment_source(source)?;
-                            for snp in snps {
-                                valid_id("event_id", &snp.event_id)?;
-                                valid_base("current_snp_reference", &snp.reference)?;
-                                valid_base("current_snp_alternate", &snp.alternate)?;
-                                valid_provenance(&snp.provenance)?;
-                            }
-                        }
-                        TruthCurrentPiece::Inserted { bases, provenance } => {
-                            valid_bases("current_inserted_bases", bases)?;
-                            valid_provenance(provenance)?
-                        }
-                        TruthCurrentPiece::RepeatAllele {
-                            locus_id,
-                            source,
-                            bases,
-                            blocks,
-                            provenance,
-                        } => {
-                            valid_id("repeat_locus_id", locus_id)?;
-                            valid_segment_source(source)?;
-                            valid_bases("repeat_allele_bases", bases)?;
-                            valid_repeat_blocks(blocks, bases)?;
-                            valid_provenance(provenance)?;
+            }
+            for piece in &copy.current_pieces {
+                match piece {
+                    TruthCurrentPiece::Source { source, snps } => {
+                        valid_segment_source(source)?;
+                        for snp in snps {
+                            valid_id("event_id", &snp.event_id)?;
+                            valid_base("current_snp_reference", &snp.reference)?;
+                            valid_base("current_snp_alternate", &snp.alternate)?;
+                            valid_provenance(&snp.provenance)?;
                         }
                     }
-                }
-                for event in &copy.history {
-                    match event {
-                        TruthHistoryEvent::Snp {
-                            event_id,
-                            provenance,
-                            ..
-                        }
-                        | TruthHistoryEvent::Insertion {
-                            event_id,
-                            provenance,
-                            ..
-                        }
-                        | TruthHistoryEvent::Deletion {
-                            event_id,
-                            provenance,
-                            ..
-                        } => {
-                            valid_id("event_id", event_id)?;
-                            valid_provenance(provenance)?;
-                        }
-                        TruthHistoryEvent::RepeatAllele {
-                            event_id,
-                            locus_id,
-                            bases,
-                            blocks,
-                            provenance,
-                            ..
-                        } => {
-                            valid_id("event_id", event_id)?;
-                            valid_id("repeat_locus_id", locus_id)?;
-                            valid_bases("repeat_allele_bases", bases)?;
-                            valid_repeat_blocks(blocks, bases)?;
-                            valid_provenance(provenance)?;
-                        }
+                    TruthCurrentPiece::Inserted { bases, provenance } => {
+                        valid_bases("current_inserted_bases", bases)?;
+                        valid_provenance(provenance)?
                     }
-                    if let TruthHistoryEvent::Insertion { bases, .. } = event {
-                        valid_bases("history_insertion_bases", bases)?;
+                    TruthCurrentPiece::RepeatAllele {
+                        locus_id,
+                        source,
+                        bases,
+                        blocks,
+                        provenance,
+                    } => {
+                        valid_id("repeat_locus_id", locus_id)?;
+                        valid_segment_source(source)?;
+                        valid_bases("repeat_allele_bases", bases)?;
+                        valid_repeat_blocks(blocks, bases)?;
+                        valid_provenance(provenance)?;
                     }
                 }
             }
-            TruthRecord::Genotype(genotype) => {
-                for value in [
-                    &genotype.case_id,
-                    &genotype.reference_id,
-                    &genotype.individual_id,
-                    &genotype.locus.sequence_id,
-                ] {
-                    valid_id("genotype", value)?;
-                }
-                for allele in &genotype.alleles {
-                    valid_allele_lexical(allele)?;
-                }
-                for carrier in &genotype.carriers {
-                    for value in [
-                        &carrier.copy.reference_id,
-                        &carrier.copy.individual_id,
-                        &carrier.copy.sequence_id,
-                    ] {
-                        valid_id("carrier_copy", value)?;
+            for event in &copy.history {
+                match event {
+                    TruthHistoryEvent::Snp {
+                        event_id,
+                        provenance,
+                        ..
                     }
-                    if carrier.copy.copy_index > 9 {
-                        return Err(rejected(TruthContractError::InvalidLexicalField {
-                            field: "carrier_copy_index",
-                            value: carrier.copy.copy_index.to_string(),
-                        }));
+                    | TruthHistoryEvent::Insertion {
+                        event_id,
+                        provenance,
+                        ..
                     }
+                    | TruthHistoryEvent::Deletion {
+                        event_id,
+                        provenance,
+                        ..
+                    } => {
+                        valid_id("event_id", event_id)?;
+                        valid_provenance(provenance)?;
+                    }
+                    TruthHistoryEvent::RepeatAllele {
+                        event_id,
+                        locus_id,
+                        bases,
+                        blocks,
+                        provenance,
+                        ..
+                    } => {
+                        valid_id("event_id", event_id)?;
+                        valid_id("repeat_locus_id", locus_id)?;
+                        valid_bases("repeat_allele_bases", bases)?;
+                        valid_repeat_blocks(blocks, bases)?;
+                        valid_provenance(provenance)?;
+                    }
+                }
+                if let TruthHistoryEvent::Insertion { bases, .. } = event {
+                    valid_bases("history_insertion_bases", bases)?;
                 }
             }
+        }
+        TruthRecord::Genotype(genotype) => validate_lexical_genotype(genotype)?,
+    }
+    Ok(())
+}
+
+/// Paso léxico de un caso genotípico; lo comparten los dos lectores.
+pub(crate) fn validate_lexical_genotype(
+    genotype: &GenotypeRecord,
+) -> Result<(), TruthContractError> {
+    for value in [
+        &genotype.case_id,
+        &genotype.reference_id,
+        &genotype.individual_id,
+        &genotype.locus.sequence_id,
+    ] {
+        valid_id("genotype", value)?;
+    }
+    for allele in &genotype.alleles {
+        valid_allele_lexical(allele)?;
+    }
+    for carrier in &genotype.carriers {
+        for value in [
+            &carrier.copy.reference_id,
+            &carrier.copy.individual_id,
+            &carrier.copy.sequence_id,
+        ] {
+            valid_id("carrier_copy", value)?;
+        }
+        if carrier.copy.copy_index > 9 {
+            return Err(rejected(TruthContractError::InvalidLexicalField {
+                field: "carrier_copy_index",
+                value: carrier.copy.copy_index.to_string(),
+            }));
         }
     }
     Ok(())
 }
+
+/// **La versión se promueve por lo que se publica, no por lo que se
+/// declara.** Un documento que lleve al menos un alelo de repetición es de la
+/// versión 5 y uno que no lleve ninguno sigue siendo de la 4. Se exige en las
+/// dos direcciones: sin la segunda, una promoción disparada por la mera
+/// declaración del locus pasaría inadvertida.
+pub(crate) fn validate_schema_version(
+    header: &TruthHeader,
+    carries_repeats: bool,
+) -> Result<(), TruthContractError> {
+    let expected = if carries_repeats {
+        TRUTH_SCHEMA_VERSION_WITH_REPEATS
+    } else {
+        TRUTH_SCHEMA_VERSION
+    };
+    if header.schema_version != expected {
+        return Err(rejected(TruthContractError::UnsupportedVersion));
+    }
+    Ok(())
+}
+
 fn valid_id(field: &'static str, value: &str) -> Result<(), TruthContractError> {
     if value.len() <= 64
         && !value.is_empty()

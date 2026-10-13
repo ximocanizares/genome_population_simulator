@@ -484,7 +484,12 @@ src/f5_closure.rs	42	5
 src/results.rs	724	153
 src/event_manifest.rs	147	8
 src/truth_validation.rs	121	32
-src/truth_schema.rs	69	8
+# **El 13/10/2026 (DT-015) `src/truth_schema.rs` pasa de 69 a 70 comprobaciones
+# y sigue en 8 sin disparar**: la nueva es el rechazo de una versión que no
+# sea la 4 ni la 5 (`VersionRule::AnyKnown`), que usa el lector por flujo en la
+# cabecera. La dispara `an_unknown_version_is_rejected_in_the_header_before_any_other_defect`,
+# que muere al quitarla.
+src/truth_schema.rs	70	8
 src/fastq_validation.rs	84	26
 src/population_snvs.rs	143	25
 src/f5_publication.rs	53	10

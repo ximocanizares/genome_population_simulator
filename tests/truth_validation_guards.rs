@@ -47,6 +47,279 @@ fn the_published_truth_is_accepted_by_both_readers() {
     }
 }
 
+/// DT-015: la verdad con alelos de repetición (versión 5), publicada por el
+/// programa, la aceptan los dos lectores. El lector por flujo la rechazaba
+/// entera con `UnsupportedVersion` porque comprobaba la cabecera como la de un
+/// documento sin registros.
+#[test]
+fn the_published_repeat_truth_is_accepted_by_both_readers() {
+    let all = lines_v5();
+    assert!(
+        all.iter()
+            .any(|line| line["record_type"] == "genotype" && line["case_kind"] == "repeat"),
+        "la verdad lleva un caso de repetición"
+    );
+    for result in both(jsonl(&all).as_bytes()) {
+        result.expect("la verdad v5 publicada intacta se acepta");
+    }
+}
+
+/// DT-015: la regla de versiones sigue exigiéndose, en las dos direcciones y
+/// con el mismo error en los dos lectores: la versión 5 sin ningún alelo de
+/// repetición, la 4 con ellos y una versión desconocida.
+#[test]
+fn the_version_rule_is_enforced_by_both_readers_in_both_directions() {
+    let unsupported = TruthValidationError::Contract(TruthContractError::UnsupportedVersion);
+    for (label, mut all, declared) in [
+        ("v5 declarada sin repeticiones", lines(), "5"),
+        ("v4 declarada con repeticiones", lines_v5(), "4"),
+        ("versión desconocida sin repeticiones", lines(), "9"),
+        ("versión desconocida con repeticiones", lines_v5(), "9"),
+    ] {
+        assert_ne!(all[0]["schema_version"], declared, "{label}: alteró");
+        all[0]["schema_version"] = json!(declared);
+        assert_both(label, &bytes_of(&all), &unsupported);
+    }
+}
+
+/// El error que dan los dos lectores, que tiene que ser **el mismo**.
+#[track_caller]
+fn agreed(label: &str, all: &[Value]) -> Option<TruthValidationError> {
+    let [full, stream] = both(&bytes_of(all));
+    assert_eq!(full, stream, "{label}: los dos lectores coinciden");
+    full.err()
+}
+
+fn version_unsupported() -> Option<TruthValidationError> {
+    Some(TruthValidationError::Contract(
+        TruthContractError::UnsupportedVersion,
+    ))
+}
+
+/// La verdad "5" sin que ninguna copia lleve un alelo de repetición en las
+/// piezas vigentes: la copia 0 de `chr2` de `I3` pierde el suyo (se borra el
+/// evento del historial, se funden las piezas, se quita la fuente aleatoria) y
+/// su caso de repetición pasa a llevar el portador en el alelo de referencia.
+/// En la "5" publicada las doce copias llevan repetición, así que sin esto la
+/// copia aislada sin repetición, dentro de una verdad "5", no la ejercita nadie.
+fn v5_with_a_copy_without_repeat() -> Vec<Value> {
+    let mut all = lines_v5();
+    let at = all
+        .iter()
+        .position(|l| {
+            l["record_type"] == "haplotype_copy"
+                && l["identity"]["individual_id"] == "I3"
+                && l["identity"]["sequence_id"] == "chr2"
+                && l["identity"]["copy_index"] == 0
+        })
+        .expect("copia");
+    let copy = &mut all[at];
+    copy["history"]
+        .as_array_mut()
+        .expect("historial")
+        .retain(|e| e["kind"] != "repeat_allele");
+    let pieces = copy["current_pieces"].as_array_mut().expect("piezas");
+    assert_eq!(pieces.len(), 3, "el fixture de la copia cambió");
+    let tail = pieces.pop().expect("pieza");
+    pieces.pop();
+    pieces[0]["source"]["end"] = tail["source"]["end"].clone();
+    copy["provenance"]["sources"]
+        .as_array_mut()
+        .expect("fuentes")
+        .retain(|s| s["kind"] != "random");
+    let case = all
+        .iter()
+        .position(|l| {
+            l["record_type"] == "genotype"
+                && l["individual_id"] == "I3"
+                && l["case_kind"] == "repeat"
+                && l["locus"]["sequence_id"] == "chr2"
+        })
+        .expect("caso de repetición");
+    all[case]["carriers"][0]["allele_index"] = json!(0);
+    all[case]["allele_dosages"] = json!([1, 1]);
+    all
+}
+
+/// DT-015: una copia sin repetición dentro de una verdad "5" se acepta por los
+/// dos lectores. El lector por flujo aplicaba la regla de versiones a la copia
+/// aislada y la rechazaba. Y la misma verdad declarada "4" se rechaza igual.
+#[test]
+fn a_copy_without_repeat_inside_a_v5_truth_is_accepted_by_both_readers() {
+    let mut all = v5_with_a_copy_without_repeat();
+    assert_eq!(agreed("v5 con una copia sin repetición", &all), None);
+    all[0]["schema_version"] = json!("4");
+    assert_eq!(agreed("la misma, declarada 4", &all), version_unsupported());
+}
+
+/// Un alelo de repetición del historial que una deleción posterior borra
+/// entero de las piezas vigentes: ningún caso lo exige, pero la verdad es de
+/// la versión 5 porque lo publica. La regla de versiones lo cuenta en los dos
+/// lectores. Es la prueba que exige el acumulador de las copias: sin él, el
+/// lector por flujo invierte las dos respuestas.
+#[test]
+fn a_repeat_allele_erased_by_a_later_deletion_still_makes_the_truth_v5() {
+    let mut all = lines();
+    let at = all
+        .iter()
+        .position(|l| {
+            l["record_type"] == "haplotype_copy"
+                && l["identity"]["individual_id"] == "I1"
+                && l["identity"]["sequence_id"] == "chr1"
+                && l["identity"]["copy_index"] == 1
+        })
+        .expect("copia");
+    let history = all[at]["history"].as_array_mut().expect("historial");
+    let deletion = history
+        .iter()
+        .position(|e| e["kind"] == "deletion")
+        .expect("deleción");
+    assert_eq!(history[deletion]["start"], 420);
+    assert_eq!(history[deletion]["end"], 424);
+    let provenance = history[deletion]["provenance"].clone();
+    history.insert(
+        deletion,
+        json!({"kind": "repeat_allele", "event_id": "STR-X", "locus_id": "STR-X",
+               "start": 421, "end": 423, "bases": "CA",
+               "blocks": [{"bases": 2, "motif": "CA", "motif_length": 2, "units": 1.0}],
+               "provenance": provenance}),
+    );
+    assert_eq!(all[0]["schema_version"], "4");
+    assert_eq!(agreed("declarada 4", &all), version_unsupported());
+    all[0]["schema_version"] = json!("5");
+    assert_eq!(agreed("declarada 5", &all), None);
+}
+
+/// Sin ningún caso, el juez de cada individuo corre después de la regla de
+/// versiones: la verdad "5" publicada sin sus casos da `MissingCase` en los
+/// dos lectores, no `UnsupportedVersion`. Exige que el acumulador de las copias
+/// sea el que decide la versión cuando no hay casos.
+#[test]
+fn a_v5_truth_without_cases_is_judged_for_its_missing_cases_by_both_readers() {
+    let mut all: Vec<Value> = lines_v5()
+        .into_iter()
+        .filter(|l| l["record_type"] != "genotype")
+        .collect();
+    all[0]["counts"]["genotypes"] = json!(0);
+    assert!(matches!(
+        agreed("v5 sin casos", &all),
+        Some(TruthValidationError::MissingCase { .. })
+    ));
+    all[0]["schema_version"] = json!("4");
+    assert_eq!(
+        agreed("v5 sin casos, declarada 4", &all),
+        version_unsupported()
+    );
+}
+
+/// Un caso de repetición que ninguna copia lleva, en una verdad declarada "4":
+/// el acumulador de los casos hace que el error sea `UnsupportedVersion` en
+/// los dos lectores. Sin él, el lector por flujo daría el del juez del caso;
+/// la aceptación es la misma, porque el caso sin copia no se admite nunca.
+#[test]
+fn a_repeat_case_that_no_copy_carries_is_rejected_for_its_version_by_both_readers() {
+    let v5 = lines_v5();
+    let mut case = v5
+        .iter()
+        .find(|l| {
+            l["record_type"] == "genotype"
+                && l["individual_id"] == "I3"
+                && l["case_kind"] == "repeat"
+                && l["locus"]["sequence_id"] == "chr1"
+        })
+        .expect("caso de repetición")
+        .clone();
+    for carrier in case["carriers"].as_array_mut().expect("portadores") {
+        carrier["allele_index"] = json!(0);
+    }
+    case["allele_dosages"] = json!([2, 0]);
+    let mut all = lines();
+    let at = all
+        .iter()
+        .position(|l| {
+            l["record_type"] == "genotype"
+                && l["individual_id"] == "I3"
+                && l["locus"]["sequence_id"] == "chr1"
+                && l["locus"]["start"]
+                    .as_u64()
+                    .is_some_and(|start| start > 200)
+        })
+        .expect("posición");
+    all.insert(at, case);
+    all[0]["counts"]["genotypes"] = json!(
+        all.iter()
+            .filter(|l| l["record_type"] == "genotype")
+            .count()
+    );
+    assert_eq!(agreed("declarada 4", &all), version_unsupported());
+}
+
+/// Una versión desconocida se rechaza en la cabecera, en el mismo punto que el
+/// lector completo, aunque haya otro defecto después (la convención de
+/// coordenadas, un recuento, una copia desordenada): el lector por flujo no
+/// reconstruye ninguna copia. El desajuste entre la "4" y la "5", en cambio,
+/// solo puede decidirse al final: con un segundo defecto los errores pueden
+/// diferir, la aceptación coincide.
+#[test]
+fn an_unknown_version_is_rejected_in_the_header_before_any_other_defect() {
+    let mut all = lines();
+    all[0]["schema_version"] = json!("9");
+    all[0]["coordinate_convention"] = json!("one_based");
+    let [full, stream] = both_with_copy_counter(&bytes_of(&all));
+    assert_eq!(full.0.err(), version_unsupported());
+    assert_eq!(stream.0.err(), version_unsupported());
+    assert_eq!(
+        stream.1, 0,
+        "el lector por flujo no reconstruye ninguna copia"
+    );
+}
+
+fn both_with_copy_counter(bytes: &[u8]) -> [(Result<(), TruthValidationError>, usize); 2] {
+    let mut copies = 0_usize;
+    let stream =
+        validate_truth_jsonl_streaming(&mut Cursor::new(bytes.to_vec()), &reference(), |_, _| {
+            copies += 1
+        })
+        .map(|_| ());
+    [(full(bytes), 0), (stream, copies)]
+}
+
+/// DT-049: el paso léxico del contrato se aplica a cada caso en los dos
+/// lectores, con el mismo error: un `case_id` con espacio, uno de más de 64
+/// caracteres y un alelo de deleción cuyo evento fuente empieza una base más
+/// allá que el alelo (421 en vez de 420).
+#[test]
+fn the_lexical_step_is_applied_to_each_case_by_both_readers() {
+    let long = "c".repeat(65);
+    for bad in ["bad id", long.as_str()] {
+        let mut all = lines();
+        let at = case_line(&all, "I1", "snp", 49);
+        all[at]["case_id"] = json!(bad);
+        assert_both(
+            "case_id léxico",
+            &bytes_of(&all),
+            &TruthValidationError::Contract(TruthContractError::InvalidLexicalField {
+                field: "genotype",
+                value: bad.to_owned(),
+            }),
+        );
+    }
+    let mut all = lines();
+    let at = case_line(&all, "I1", "indel", 420);
+    let allele = &mut all[at]["alleles"][1];
+    let event_id = allele["event_id"].as_str().expect("evento").to_owned();
+    let start = allele["source_event"]["start"].as_u64().expect("inicio");
+    assert_eq!(start, allele["start"].as_u64().expect("inicio"));
+    allele["source_event"]["start"] = json!(start + 1);
+    assert_both(
+        "evento fuente de la deleción desplazado",
+        &bytes_of(&all),
+        &TruthValidationError::Contract(TruthContractError::InvalidGenotypeAllele {
+            case_id: event_id,
+        }),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // El lector de líneas: lo que se rechaza antes de mirar el contenido
 // ---------------------------------------------------------------------------

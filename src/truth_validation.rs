@@ -22,7 +22,7 @@ use crate::truth_schema::{
     NamedDigest, SegmentSource, TruthAllele, TruthContractError, TruthCurrentPiece,
     TruthCurrentSnp, TruthDocument, TruthHeader, TruthHistoryEvent, TruthLocus, TruthModification,
     TruthPieceLink, TruthRecord, TruthRepeatBlock, TruthSourceKind, TruthSourceRef,
-    TruthStructuralEvent,
+    TruthStructuralEvent, VersionRule, validate_lexical_genotype, validate_schema_version,
 };
 
 /// Resultado reconstruido exclusivamente desde `truth.jsonl` y la referencia.
@@ -575,6 +575,7 @@ pub fn validate_truth_jsonl_streaming(
     let mut raw = Vec::new();
     let mut line_number = 0_u64;
     let mut header = None;
+    let mut carries_repeats = false;
     let mut copy_count = 0_u64;
     let mut genotype_count = 0_u64;
     let mut previous_copy = None;
@@ -625,7 +626,7 @@ pub fn validate_truth_jsonl_streaming(
                     header: isolated,
                     records: Vec::new(),
                 }
-                .validate_structure()
+                .validate_structure_with_version(VersionRule::AnyKnown)
                 .map_err(TruthValidationError::Contract)?;
                 if parsed.reference_id != reference.id().as_str() {
                     return Err(rejected(TruthValidationError::ReferenceIdMismatch {
@@ -664,12 +665,17 @@ pub fn validate_truth_jsonl_streaming(
                 let mut isolated_header = header.clone();
                 isolated_header.copy_count = 1;
                 isolated_header.genotype_count = 0;
-                TruthDocument {
+                let isolated = TruthDocument {
                     header: isolated_header,
                     records: vec![TruthRecord::HaplotypeCopy(copy.clone())],
-                }
-                .validate_structure()
-                .map_err(TruthValidationError::Contract)?;
+                };
+                isolated
+                    .validate_structure_with_version(VersionRule::AnyKnown)
+                    .map_err(TruthValidationError::Contract)?;
+                // Un alelo de repetición del historial cuenta aunque una deleción
+                // posterior lo borre de las piezas vigentes y sin que se exija caso
+                // de repetición (`records_carry_repeat_alleles` lo ve igual).
+                carries_repeats |= isolated.carries_repeat_alleles();
                 let result = reconstruct_copy(&copy, reference)?;
                 on_copy(&copy.identity, &result.bases);
                 let copy_identity = copy.identity.clone();
@@ -721,6 +727,11 @@ pub fn validate_truth_jsonl_streaming(
                 // El flujo debe aplicar el mismo contrato estructural que el
                 // documento completo antes de comparar semántica: incluidos
                 // portadores duplicados, índices y dosificaciones.
+                validate_lexical_genotype(&genotype).map_err(TruthValidationError::Contract)?;
+                // Con un documento sin copia con repetición, este acumulador solo
+                // cambia el error (`UnsupportedVersion` en vez de lo que diga el
+                // juez del caso), no la aceptación.
+                carries_repeats |= matches!(genotype.case_kind, GenotypeCaseKind::Repeat);
                 crate::truth_schema::validate_genotype(&genotype, header, &copy_identities)
                     .map_err(TruthValidationError::Contract)?;
                 validate_genotype_semantics(&genotype, reference, &summaries)?;
@@ -747,6 +758,11 @@ pub fn validate_truth_jsonl_streaming(
         }
     }
     let header = header.ok_or_else(|| rejected(TruthValidationError::EmptyDocument))?;
+    // La versión desconocida ya se rechazó en la cabecera. El desajuste entre
+    // la 4 y la 5 depende de todos los registros y solo puede decidirse aquí,
+    // así que con un segundo defecto los errores de los dos lectores pueden
+    // diferir; la aceptación coincide.
+    validate_schema_version(&header, carries_repeats).map_err(TruthValidationError::Contract)?;
     if let Some(last) = individual_cases.first() {
         let individual_id = last.individual_id.clone();
         judge_individual(&individual_cases, &individual_id, &summaries)?;
