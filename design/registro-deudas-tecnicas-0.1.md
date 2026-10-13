@@ -73,8 +73,8 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-037 | `tests/test_population_snvs_editor.py` está fuera de la puerta de Python y falla 1 de 7 | Baja | 06/10/2026 | Abierta |
 | DT-038 | Ante un fallo posterior al evento, el VCF ya publicado y validado se descarta del paquete fallido aunque es independiente | Media | 06/10/2026 | Abierta |
 | DT-039 | Con evento, si se altera el FASTA de la referencia suministrada antes del cierre, la rama de fallo controlado no consigue publicar y se pierde la causa original | Media | 06/10/2026 | Abierta |
-| DT-040 | Con tartamudeo clonal, la configuración efectiva publica `technical_event.rng_catalog = "f4-technical-v5"` y su esquema v6 exige `f4-technical-v6`: el validador externo la rechaza | Media | 08/10/2026 | Abierta; decidido el 08/10/2026 que manda el esquema, en un cambio aparte junto con DT-041 |
-| DT-041 | Toda ejecución amplificada, con microsatélites o sin ellos, publica un manifiesto general que no pasa su propio esquema: el perfil está fijado al de sin PCR y los catálogos a v3 y v4 | Media | 08/10/2026 | Abierta; decidido que manda el contrato, ampliándolo; junto con DT-040 |
+| DT-040 | Con tartamudeo clonal, la configuración efectiva publica `technical_event.rng_catalog = "f4-technical-v5"` y su esquema v6 exige `f4-technical-v6`: el validador externo la rechaza | Media | 08/10/2026 | Cerrada (12/10/2026) |
+| DT-041 | Toda ejecución amplificada, con microsatélites o sin ellos, publica un manifiesto general que no pasa su propio esquema: el perfil está fijado al de sin PCR y los catálogos a v3 y v4 | Media | 08/10/2026 | Cerrada (12/10/2026), con el manifiesto general v4 ampliado como excepción expresa a DTC-089 |
 | DT-042 | En el cuaderno, con un evento técnico activo, la celda que reconstruye el formulario falla con `NameError` sobre `TechnicalEventForm`: ningún control del panel de PCR llega al TOML | Media | 08/10/2026 | Abierta |
 | DT-043 | El juez acepta en el manifiesto de evento los recuentos realizados de la amplificación (familias, parejas, histograma, linaje) alterados, con las huellas rehechas | Media | 08/10/2026 | Abierta, reducida (10/10/2026): los parámetros de la amplificación ya se atan a la efectiva; quedan los recuentos realizados |
 | DT-044 | REQ-CONF-134 a 138, REQ-DAT-81 a 85 y REQ-MAN-94 no tienen fila en la matriz de trazabilidad | Baja | 08/10/2026 | Abierta |
@@ -4082,7 +4082,7 @@ coherente o, al menos, conservar y devolver la causa original. **Sin arreglar.**
 
 ## DT-040. Con tartamudeo clonal, la configuración efectiva contradice su esquema en el catálogo de azar
 
-**Gravedad: media.** Encontrada el 08/10/2026 al pasar por primera vez por el
+**Gravedad: media. Cerrada (12/10/2026)**; ver «Cómo se cerró» al final. Encontrada el 08/10/2026 al pasar por primera vez por el
 validador externo de esquemas la configuración efectiva de una ejecución
 **amplificada con loci de repetición**. Ninguna prueba lo hacía: las que
 validan la efectiva por fuera usan escenarios amplificados sin loci.
@@ -4115,11 +4115,136 @@ la igualdad byte a byte que exigía. `tests/clonal_homopolymer_fold.rs` comprueb
 que este es el único motivo por el que la efectiva no pasa su esquema, y fallará
 cuando se corrija para que se quite el rodeo.
 
+### Cómo se cerró (12/10/2026)
+
+En el mismo cambio que DT-041.
+
+- **Productor.** `technical_event_json` (`src/results.rs`) toma el catálogo de
+  la raíz del evento de la misma función que el del bloque de la amplificación
+  (`PcrSettings::rng_catalog`): v6 con tartamudeo clonal y v5 sin él. Los dos
+  ya no pueden separarse. El enlace del evento en el manifiesto general
+  (`src/execution.rs`) **también** escribía siempre el v5 con PCR, aunque el
+  registro no lo nombraba; hace lo mismo.
+- **Juez de la efectiva** (`validate_effective_technical_event`). Espera el v6
+  cuando el bloque de la amplificación lleva `stutter` y el v5 con PCR sin él;
+  el rechazo sigue siendo «catálogo técnico F4 inválido».
+- **Lector del manifiesto general.** Admite el v6, que antes rechazaba, solo
+  con el perfil con PCR y en la versión 6 (ver DT-041). El juez completo no
+  cambia: desde DT-056 ya compara el perfil y el catálogo de cada evento del
+  manifiesto general con la efectiva.
+
+**Huellas que cambiaron, a propósito.** Solo las de las ejecuciones
+**amplificadas con loci de repetición**, y en ellas solo dos ficheros: la
+configuración efectiva, por su `technical_event.rng_catalog`, y el manifiesto
+general, por el catálogo del enlace del evento y por la huella de la efectiva,
+que cita dos veces. Medido sobre los escenarios de
+`evidence/dt-009-multiplicador-congelacion/inputs/` con el binario del commit
+`e8135ae`, compilado aparte, y con el corregido:
+
+| Escenario | Fichero | Antes | Después |
+|---|---|---|---|
+| `amplificado-loci` | `effective-config.json` | `834848fea574…` | `c195900326ac…` |
+| `amplificado-loci` | `manifest.json` | `a40a8cbb2456…` | `2368b402656a…` |
+| `amplificado-multiplicador` | `effective-config.json` | `8f48d1312c0a…` | `efdaa0f8e67a…` |
+| `amplificado-multiplicador` | `manifest.json` | `224b0a42f879…` | `767ea4aa4d7a…` |
+| `amplificado-sustitucion` | `effective-config.json` | `b4c2ae8734db…` | `eaaac90e7740…` |
+| `amplificado-sustitucion` | `manifest.json` | `11707e7f826d…` | `cb41615ba475…` |
+
+Los otros diez ficheros de cada uno de esos tres paquetes —los cuatro FASTQ,
+la verdad, el manifiesto de evento, la copia del TOML, la matriz, sus metadatos
+y la referencia— no cambian, y **los paquetes `sin-pcr-loci`, `amplificado-sin-loci`
+y `sin-evento` son idénticos byte a byte** (31 ficheros: 12, 12 y 7). Ninguna huella
+congelada anterior se movió: `tests/clonal_homopolymer_fold.rs` congela los
+FASTQ, la verdad, el manifiesto de evento y el bloque clonal de la efectiva, que
+no cambian, y `tests/pcr_frozen_identity.rs` es de un escenario sin PCR. Lo que
+sí cambió es la huella del **esquema** del manifiesto general v4 (DT-041), en
+las dos pruebas que lo fijan.
+
+**Pruebas** (todas fallan contra el código anterior; se comprobó ejecutándolas
+sobre una copia de `e8135ae`):
+
+- `tests/technical_catalog_contract.rs`, nueva.
+  `every_kind_of_run_publishes_documents_that_pass_their_schemas` comprueba el
+  catálogo y el perfil de la efectiva, de los dos manifiestos y del bloque de
+  la amplificación en los tres tipos de ejecución, y pasa la efectiva y los dos
+  manifiestos por el validador externo. `published_packages_keep_their_frozen_digests`
+  congela cada fichero de los cuatro paquetes con las huellas de arriba.
+  `the_judges_and_the_schemas_reject_a_catalog_that_contradicts_the_run`
+  prueba catorce combinaciones incoherentes con el motivo exacto del juez
+  completo y el veredicto del esquema.
+- `tests/clonal_homopolymer_fold.rs`: la prueba E pierde el rodeo y exige que
+  la efectiva y el manifiesto general, con y sin multiplicador, pasen su
+  esquema tal como se publican; el control negativo es la efectiva con el v5.
+- `tests/results_repeat_guards.rs`: una sección clonal añadida a mano con la
+  raíz en v5 la rechaza ahora la raíz («catálogo técnico F4 inválido»); para
+  llegar a la comprobación del bloque se pone además la raíz en v6.
+
+**Mutaciones** (de DT-040 y DT-041 juntas). Se hicieron sobre una copia del árbol
+con su propio directorio de compilación, un mutante por ejecución contra la
+batería entera. Antes se ejecutó un control sin mutar: 2075 pruebas pasan, 0
+fallan y 9 se ignoran. Las huellas son del fichero mutado: antes, mutado y
+restaurado (la restaurada es siempre la de antes). Los quince mutantes mueren.
+
+| Mutante | Fichero | Antes → mutado | Lo matan |
+|---|---|---|---|
+| El productor vuelve al v5 con tartamudeo clonal | `src/results.rs` | `9f14164252` → `f09eb6a14f` | 39 pruebas, entre ellas las tres nuevas y la E del multiplicador |
+| El productor publica el v6 con toda PCR | `src/results.rs` | `9f14164252` → `8e2e23a06e` | 31, entre ellas las tres nuevas (cambian los bytes de la amplificada sin loci) |
+| El enlace del manifiesto general vuelve al v5 | `src/execution.rs` | `8166cc7f86` → `a96d13086f` | 39, entre ellas las tres nuevas |
+| El juez de la efectiva no ve el linaje (espera v5) | `src/results.rs` | `9f14164252` → `7a8facb7be` | 40, entre ellas las tres nuevas |
+| El juez de la efectiva espera v6 con toda PCR | `src/results.rs` | `9f14164252` → `c4b9a1998c` | 31, entre ellas las tres nuevas |
+| El lector no ata el catálogo al perfil | `src/results.rs` | `9f14164252` → `36a2a045ad` | `the_judges_and_the_schemas_reject_a_catalog_that_contradicts_the_run` y la de DT-056 |
+| El lector admite el v3 con PCR | `src/results.rs` | `9f14164252` → `d0574e134a` | las mismas dos |
+| El lector admite el v4 en la versión 4 | `src/results.rs` | `9f14164252` → `ccf45e6ae7` | la de DT-056 |
+| El lector admite el v5 sin PCR | `src/results.rs` | `9f14164252` → `bc59bba329` | las mismas dos |
+| El lector admite el v6 en la versión 4 | `src/results.rs` | `9f14164252` → `7d1806b0a5` | `the_judges_and_the_schemas_reject_a_catalog_that_contradicts_the_run` |
+| El lector no admite el v6 | `src/results.rs` | `9f14164252` → `5e59a9da81` | 39, entre ellas las tres nuevas |
+| El esquema v4 sin la atadura | `schemas/manifest-general-v4.schema.json` | `d493bd74ff` → `c16bd6bceb` | las dos huellas del esquema y la de los rechazos |
+| El esquema v4 sin el perfil con PCR | `schemas/manifest-general-v4.schema.json` | `d493bd74ff` → `8b7aea9917` | las dos huellas, la de los tres tipos y la de los rechazos |
+| El esquema v6 admite v3 y v4 con PCR | `schemas/manifest-general-v6.schema.json` | `2eb01de623` → `22b4bde9d0` | la de los rechazos |
+| El esquema v6 admite v5 y v6 sin PCR | `schemas/manifest-general-v6.schema.json` | `2eb01de623` → `176c26ef98` | la de los rechazos |
+
+**Revisión adversarial (12/10/2026), una sola ronda de corrección.** El revisor
+confirmó el cambio: sobre 17 escenarios y 192 ficheros, cambian exactamente 12,
+la efectiva y el manifiesto general de las seis ejecuciones amplificadas con
+loci. Encontró un hallazgo medio: el esquema v6 y el lector admitían el v5 con
+PCR en la versión 6, cosa que el programa nunca publica, y la prueba lo
+consagraba. Corregido así:
+
+- el lector exige el v5 solo en la versión 4;
+- la rama con PCR del esquema v6 admite solo el v6;
+- el caso de la prueba pasa a exigir el rechazo, con el motivo exacto del
+  lector y también por el esquema;
+- para que la comparación del catálogo con la efectiva siga probada, entra un
+  caso nuevo: la ejecución sin PCR con el enlace en v3 frente a la efectiva en
+  v4. El esquema lo acepta con razón y lo rechaza el juez completo.
+
+Menores aplicados en la misma ronda:
+
+- la cuenta de ficheros idénticos (31);
+- en la prueba nueva, el objeto que borra la carpeta temporal se crea antes de
+  publicar;
+- `declares_pcr &&` en la condición del linaje del juez de la efectiva queda
+  anotado como equivalente.
+
+Un menor queda **disputado, con la demostración**: la rama `then` del esquema v4
+no repite el `enum`. Sin ella, el validador externo acepta el perfil con PCR con
+el v3. El esquema v4 no cambia en esta ronda.
+
+Tres mutantes más, uno por ejecución contra la batería entera sobre una copia
+(control: 2075 pasan, 0 fallan, 9 ignoradas). Los tres mueren por
+`the_judges_and_the_schemas_reject_a_catalog_that_contradicts_the_run`:
+
+| Mutante | Fichero | Antes → mutado → restaurado |
+|---|---|---|
+| El lector vuelve a admitir el v5 en la versión 6 | `src/results.rs` | `d8bba8595a` → `0f646f41b5` → `d8bba8595a` |
+| El esquema v6 vuelve a admitir el v5 con PCR | `schemas/manifest-general-v6.schema.json` | `3c682e90c7` → `9823d6dc5d` → `3c682e90c7` |
+| Sin la comparación del catálogo con la efectiva (DT-056) | `src/results.rs` | `d8bba8595a` → `36008a1760` → `d8bba8595a` |
+
 ---
 
 ## DT-041. El manifiesto general de toda ejecución amplificada incumple su propio esquema
 
-**Gravedad: media.** Hallada el 08/10/2026 por la revisión adversarial de
+**Gravedad: media. Cerrada (12/10/2026)**; ver «Cómo se cerró» al final. Hallada el 08/10/2026 por la revisión adversarial de
 DT-009 y comprobada después contra el binario de esa entrega: el manifiesto
 general de los escenarios `amplificado-loci` y `amplificado-sin-loci` de
 `evidence/dt-009-multiplicador-congelacion/` lo rechaza el validador externo con
@@ -4138,6 +4263,58 @@ general de una ejecución amplificada.
 **Decisión del responsable (08/10/2026): manda el contrato, ampliándolo** para
 admitir el perfil con PCR y los catálogos que la amplificación abre. Se resuelve
 **junto con DT-040**, en el mismo cambio aparte. **Sin arreglar.**
+
+### Cómo se cerró (12/10/2026)
+
+**Qué versión publica cada ejecución.** El código publica el manifiesto general
+v6 solo cuando hay loci de repetición, así que la amplificada **sin** loci
+publica el **v4**, que DTC-089 declaraba histórico e inmutable. El implementador
+paró e informó; el responsable decidió ese día **ampliar el v4 como excepción
+expresa**, porque publicar otra versión movía los bytes de esas ejecuciones y
+ampliarlo no mueve ninguno. La excepción quedó escrita en DTC-089 y anotada en
+la regla «los esquemas publicados no se editan» de los planes de F4 (§16.3) y
+de repeticiones y PCR (§10.3 y §14.1).
+
+- **`schemas/manifest-general-v4.schema.json`.** El perfil admite los dos pares
+  (identificador y huella) y el catálogo, el v3 o el v5, atados: con PCR el v5,
+  sin PCR el v3, como antes. Nada más cambia.
+- **`schemas/manifest-general-v6.schema.json`**, abierto por S-26. Admite los
+  dos perfiles y los catálogos v3, v4 y v6, atados: sin PCR, el v3 o el v4; con
+  PCR, solo el v6. Esta versión solo la publica una ejecución con loci de
+  repetición, y con PCR y loci siempre hay tartamudeo clonal (la configuración
+  exige el de base), así que el v5 es exclusivo de la versión 4 (DTC-092).
+- **Lector del manifiesto general** (`validate_manifest_technical_events`).
+  Antes admitía cualquiera de los dos perfiles con cualquiera de los catálogos
+  v3, v4 y v5. Ahora ata el catálogo al perfil y a la versión, igual que los
+  esquemas: el v3 sin PCR, el v4 sin PCR y solo en la versión 6, el v5 con PCR
+  y solo en la versión 4, y el v6 con PCR y solo en la versión 6. El rechazo nuevo es «el catálogo de
+  azar del inventario técnico no corresponde a su perfil o a la versión del
+  manifiesto». Esto cierra también lo que DT-056 dejaba dicho: con el esquema
+  ampliado, un manifiesto con el perfil cambiado ya no lo frena solo el
+  esquema.
+
+**Lo que el esquema no puede ver.** Sin PCR, la versión 6 admite el v3 y el v4,
+y el manifiesto general no dice si el tartamudeo de base está encendido: un
+enlace en v3 frente a una efectiva en v4 pasa el esquema con razón, y lo
+rechaza el juez completo al compararlo con la efectiva (DT-056). La prueba lo
+dice tal cual. *Corregido en la revisión adversarial del 12/10/2026:* la
+primera versión de este cierre decía que con PCR en la versión 6 el esquema no
+podía distinguir el v5 del v6, y el esquema y el lector admitían el v5 ahí. La
+premisa era falsa: con PCR y loci siempre hay tartamudeo clonal, así que ese v5
+no lo publica nunca el programa. Ahora lo rechazan los dos.
+
+**Pruebas.** Las de DT-040, en `tests/technical_catalog_contract.rs`. Por
+primera vez se pasa por el validador externo el manifiesto general de las dos
+ejecuciones amplificadas. Además:
+
+- `the_general_manifest_carries_the_profile_and_the_catalog_of_the_effective_config`
+  (`tests/results_manifest_guards.rs`): sus tres cambios sueltos los rechaza
+  ahora el lector. Para llegar a la comparación del perfil con la efectiva se
+  añadió un cuarto caso, que cambia a la vez el perfil y el catálogo.
+- Las dos pruebas que fijan la huella del esquema v4
+  (`tests/repeat_locus_contract.rs` y `tests/f5_0_1_config_admission.rs`) la
+  actualizan a propósito, con un comentario fechado: `ada06880f576…` pasa a
+  `d493bd74ff0c…`.
 
 ---
 

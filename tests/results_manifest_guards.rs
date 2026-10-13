@@ -3648,6 +3648,17 @@ fn statistics_without_initial_populations_are_rejected() {
 /// uno de los dos perfiles, así que cambiar solo uno lo rechaza él antes
 /// («inventario técnico F4 incompatible»); las dos mitades de la comparación
 /// del juez completo se implican.
+///
+/// **Desde el 12/10/2026 (DT-041) el lector ata además el catálogo al perfil y
+/// a la versión del manifiesto**, de modo que los tres cambios sueltos los
+/// rechaza él antes de llegar a la comparación con la efectiva: en un
+/// manifiesto v4 sin PCR solo cabe el v3. Para llegar a la comparación del
+/// perfil se cambian a la vez el perfil y el catálogo (PCR con v5, coherentes
+/// entre sí). La comparación del catálogo, con perfil y catálogo coherentes y
+/// distintos de la efectiva, la ejercita
+/// `the_judges_and_the_schemas_reject_a_catalog_that_contradicts_the_run`
+/// (`tests/technical_catalog_contract.rs`) sobre la ejecución sin PCR con loci
+/// (enlace en v3 frente a la efectiva en v4).
 #[test]
 fn the_general_manifest_carries_the_profile_and_the_catalog_of_the_effective_config() {
     use genome_population_simulator::technical_profile::{
@@ -3656,8 +3667,7 @@ fn the_general_manifest_carries_the_profile_and_the_catalog_of_the_effective_con
     let package = publish_rich();
     let none: &dyn Fn(&mut Value) = &|_| {};
     assert_eq!(probe(&package, none, none, none), "OK", "control positivo");
-    let catalog =
-        "el catálogo de azar del manifiesto general no es el de la configuración efectiva";
+    let catalog = "el catálogo de azar del inventario técnico no corresponde a su perfil o a la versión del manifiesto";
     let profile = "el perfil técnico del manifiesto general no es el de la configuración efectiva";
     for (label, edit, expected) in [
         (
@@ -3681,6 +3691,17 @@ fn the_general_manifest_carries_the_profile_and_the_catalog_of_the_effective_con
                     "id": GPS_HISEQX_PCR_PE150_V1,
                     "sha256": GPS_HISEQX_PCR_PE150_SHA256,
                 });
+            }),
+            catalog,
+        ),
+        (
+            "el perfil de PCR con su huella y el catálogo v5",
+            Box::new(|m: &mut Value| {
+                m["technical_events"][0]["profile"] = json!({
+                    "id": GPS_HISEQX_PCR_PE150_V1,
+                    "sha256": GPS_HISEQX_PCR_PE150_SHA256,
+                });
+                m["technical_events"][0]["rng_catalog"] = json!("f4-technical-v5");
             }),
             profile,
         ),

@@ -63,3 +63,13 @@ No dice que la configuración efectiva de una ejecución amplificada con
 microsatélites pase su esquema: no lo pasa, ni antes ni después, por DT-040 —su
 catálogo de azar dice `f4-technical-v5` y el esquema exige `f4-technical-v6`—.
 Es anterior a esta entrega y se registró al encontrarlo.
+
+*Nota del 12/10/2026.* DT-040 y DT-041 se cerraron ese día: desde entonces la
+efectiva de `amplificado-loci` publica `f4-technical-v6` y pasa su esquema, y
+los manifiestos generales de las dos ejecuciones amplificadas pasan el suyo.
+Con el binario corregido, en los tres escenarios amplificados con
+microsatélites (`amplificado-loci`, `amplificado-multiplicador` y
+`amplificado-sustitucion`) cambian solo `effective-config.json` y
+`manifest.json`; los demás escenarios no cambian ni un byte. Las huellas de
+antes y de después están en el cierre de DT-040 del registro de deudas.
+Los ficheros `.sha256` de aquí siguen siendo los de la entrega de DT-009.

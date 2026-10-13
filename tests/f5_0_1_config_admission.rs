@@ -206,9 +206,13 @@ fn approved_versioned_contract_artifacts_remain_byte_for_byte_pinned() {
             &include_bytes!("../schemas/effective-config-v4.schema.json")[..],
             "1647da1cda5c512182dd7d9565c36d7dd6497e208c08acf6760efc0a2c3b5d3a",
         ),
+        // Cambiada a propósito el 12/10/2026 (DT-041), como excepción expresa a
+        // su inmutabilidad (DTC-089): admite el perfil con PCR con el catálogo
+        // v5, que es lo que publica toda ejecución amplificada sin loci. Era
+        // ada06880f5766c835a8f29609e3af1a969b40ff4423e0723f4829efb148f7b41.
         (
             &include_bytes!("../schemas/manifest-general-v4.schema.json")[..],
-            "ada06880f5766c835a8f29609e3af1a969b40ff4423e0723f4829efb148f7b41",
+            "d493bd74ff0c11cfe5ebaa1bfd430e6dddc125e8ca0a3741f4f37f2fdc0c0370",
         ),
         (
             &include_bytes!("../schemas/truth-v1.schema.json")[..],

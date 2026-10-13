@@ -295,13 +295,20 @@
       }
     },
     "technical_event_link": {
+      "$comment": "Ampliado el 12/10/2026 como excepción expresa a la inmutabilidad de esta versión (DTC-089, DT-041): una ejecución amplificada sin loci de repetición publica esta versión con el perfil con PCR y el catálogo f4-technical-v5. Sin PCR sigue siendo exactamente el perfil sin PCR con el catálogo f4-technical-v3.",
       "type": "object", "additionalProperties": false,
       "required": ["event_id", "effective_config", "profile", "rng_catalog", "id_catalog", "artifacts", "event_manifest"],
+      "if": { "properties": { "profile": { "properties": { "id": { "const": "gps-hiseqx-pcr-pe150-v1" } } } } },
+      "then": { "properties": { "rng_catalog": { "const": "f4-technical-v5" } } },
+      "else": { "properties": { "rng_catalog": { "const": "f4-technical-v3" } } },
       "properties": {
         "event_id": { "$ref": "#/$defs/non_empty_id" },
         "effective_config": { "oneOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
-        "profile": { "type": "object", "additionalProperties": false, "required": ["id", "sha256"], "properties": {"id":{"const":"gps-hiseqx-pcrfree-pe150-v1"}, "sha256":{"const":"3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea"}}},
-        "rng_catalog": { "const": "f4-technical-v3" },
+        "profile": { "oneOf": [
+          { "type": "object", "additionalProperties": false, "required": ["id", "sha256"], "properties": {"id":{"const":"gps-hiseqx-pcrfree-pe150-v1"}, "sha256":{"const":"3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea"}}},
+          { "type": "object", "additionalProperties": false, "required": ["id", "sha256"], "properties": {"id":{"const":"gps-hiseqx-pcr-pe150-v1"}, "sha256":{"const":"83b00fb8d084df8f6aef0464fd2b0260cfefe3f89fc523b135da6bbf6595a03c"}}}
+        ]},
+        "rng_catalog": { "enum": ["f4-technical-v3", "f4-technical-v5"] },
         "id_catalog": { "$ref": "#/$defs/f4_id_catalog" },
         "artifacts": {"type":"object","additionalProperties":false,"required":["chimera"],"properties":{"chimera":{"type":"object","additionalProperties":false,"required":["rate","realized_pairs"],"properties":{"rate":{"type":"number","minimum":0,"maximum":1},"realized_pairs":{"type":"integer","minimum":0}},"allOf":[{"if":{"properties":{"rate":{"const":0}},"required":["rate"]},"then":{"properties":{"realized_pairs":{"const":0}}}}]}}},
         "event_manifest": { "oneOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] }

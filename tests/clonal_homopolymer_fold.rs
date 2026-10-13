@@ -308,33 +308,45 @@ fn the_fold_is_published_in_both_documents_only_when_declared() {
         "manifest-event-v3.schema.json",
         true,
     );
-    // **La efectiva no lo pasa por un defecto anterior y ajeno al campo,
-    // DT-040**: con tartamudeo clonal, su `technical_event.rng_catalog` dice
-    // `f4-technical-v5` y su esquema exige `f4-technical-v6`. Pasa igual sin
-    // el multiplicador y en el commit de partida. Se comprueba entonces que
-    // ese es el ÚNICO motivo: con el catálogo corregido en una copia, el
-    // documento —con el campo nuevo— pasa. Cuando DT-040 se corrija, la
-    // primera aserción fallará y este rodeo sobrará.
-    let effective_path = folded.destination.join("effective-config.json");
-    for (what, path) in [
-        ("con multiplicador", effective_path.clone()),
-        (
-            "sin multiplicador",
-            plain.destination.join("effective-config.json"),
-        ),
+    // **Y la efectiva y el manifiesto general también, directamente** (12/10/2026,
+    // DT-040 y DT-041). Hasta ese día la efectiva publicaba
+    // `technical_event.rng_catalog = "f4-technical-v5"` con tartamudeo clonal y
+    // su esquema exige `f4-technical-v6`; aquí había un rodeo que comprobaba que
+    // ese era el único motivo de rechazo. Con el catálogo corregido en el
+    // productor el rodeo sobra: las dos efectivas —con y sin multiplicador— y
+    // sus manifiestos generales pasan su esquema tal como se publican.
+    for (what, published) in [
+        ("con multiplicador", &folded),
+        ("sin multiplicador", &plain),
     ] {
-        let output = external_schema(&path, "effective-config-v6.schema.json");
-        assert!(
-            !output.status.success()
-                && String::from_utf8_lossy(&output.stderr)
-                    .contains("'f4-technical-v6' was expected"),
-            "{what}: DT-040 sigue abierta; si ya no falla, quítese este rodeo: {}",
-            String::from_utf8_lossy(&output.stderr)
+        assert_eq!(
+            published.json("effective-config.json")["technical_event"]["rng_catalog"],
+            "f4-technical-v6",
+            "{what}"
+        );
+        assert_external_schema(
+            &published.destination.join("effective-config.json"),
+            "effective-config-v6.schema.json",
+            true,
+        );
+        assert_external_schema(
+            &published.destination.join("manifest.json"),
+            "manifest-general-v6.schema.json",
+            true,
         );
     }
+    // Control negativo del esquema: la efectiva con el catálogo de antes del
+    // arreglo, el v5, se rechaza; es el defecto de DT-040 visto desde fuera.
     let mut patched = folded_effective.clone();
-    patched["technical_event"]["rng_catalog"] = json!("f4-technical-v6");
+    patched["technical_event"]["rng_catalog"] = json!("f4-technical-v5");
     let patched_path = folded.root.join("effective-patched.json");
+    fs::write(
+        &patched_path,
+        serde_json::to_vec_pretty(&patched).expect("JSON"),
+    )
+    .expect("copia");
+    assert_external_schema(&patched_path, "effective-config-v6.schema.json", false);
+    patched["technical_event"]["rng_catalog"] = json!("f4-technical-v6");
     fs::write(
         &patched_path,
         serde_json::to_vec_pretty(&patched).expect("JSON"),

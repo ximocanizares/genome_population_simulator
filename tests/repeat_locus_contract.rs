@@ -1736,9 +1736,13 @@ fn the_inherited_schemas_are_byte_for_byte_unchanged() {
             "manifest-general-v3.schema.json",
             "d5de555a1fd419fcb32e5d746f08a0cb565d00a31dc16312a0cdd74af6d0a022",
         ),
+        // Cambiada a propósito el 12/10/2026 (DT-041), como excepción expresa a
+        // su inmutabilidad (DTC-089): admite el perfil con PCR con el catálogo
+        // v5, que es lo que publica toda ejecución amplificada sin loci. Era
+        // ada06880f5766c835a8f29609e3af1a969b40ff4423e0723f4829efb148f7b41.
         (
             "manifest-general-v4.schema.json",
-            "ada06880f5766c835a8f29609e3af1a969b40ff4423e0723f4829efb148f7b41",
+            "d493bd74ff0c11cfe5ebaa1bfd430e6dddc125e8ca0a3741f4f37f2fdc0c0370",
         ),
         (
             "manifest-general-v5.schema.json",

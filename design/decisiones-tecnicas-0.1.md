@@ -929,6 +929,18 @@ extiende, reescribe ni acepta como documentos F5. `truth-v1.schema.json` y su
 contrato textual también son históricos e inmutables; F5 usa exclusivamente la
 nueva v2 descrita en «IDs, RNG y formatos de salida».
 
+**Excepción expresa del 12/10/2026 (decisión del responsable, DT-041).** El
+esquema del manifiesto general v4 se amplió **una vez** para admitir, en cada
+evento técnico, el perfil con PCR (`gps-hiseqx-pcr-pe150-v1`, con su huella)
+con el catálogo `f4-technical-v5`, atados entre sí: sin PCR sigue exigiendo
+exactamente el perfil sin PCR con `f4-technical-v3`. El motivo: desde que
+existe la preparación amplificada, **toda** ejecución amplificada sin loci de
+repetición publica esta versión del manifiesto con ese perfil y ese catálogo, y
+el contrato v4 la rechazaba. Ampliarlo **no mueve ningún byte publicado**; la
+alternativa —que esas ejecuciones publicaran otra versión— sí los movía. La
+excepción se limita a eso: no reabre el manifiesto general v4 para nada más, ni
+toca el general v2, el efectivo v4 ni la verdad v1, que siguen inmutables.
+
 `scenario_id`, `population_id` y los elementos de `founder_ids`/`founder_keys`
 cumplen DTC-039. La ploidía efectiva del general pertenece a `1..=10`,
 `founder_count>0` y es exactamente la suma comprobada de `individual_count>0`.

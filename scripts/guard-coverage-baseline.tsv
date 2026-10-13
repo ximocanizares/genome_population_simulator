@@ -470,10 +470,18 @@
 # bajan 15 que la ronda cubre con prueba (la contabilidad de tracto releída, la matriz de SNV, los
 # lectores compartidos y las estadísticas sin poblaciones) y no queda en `results.rs` ninguna guarda
 # sin disparar y sin anotar. No es una regresión: es lo que la puerta declara con la nota.
+# **El 12/10/2026 (DT-040 y DT-041) `src/results.rs` pasa de 723 a 724 comprobaciones y sigue
+# en 153 sin disparar.** Entra una: el lector del manifiesto general ata el catálogo de azar
+# de cada evento técnico a su perfil y a la versión del documento («el catálogo de azar del
+# inventario técnico no corresponde a su perfil o a la versión del manifiesto»). La disparan
+# `the_judges_and_the_schemas_reject_a_catalog_that_contradicts_the_run`
+# (`tests/technical_catalog_contract.rs`) y
+# `the_general_manifest_carries_the_profile_and_the_catalog_of_the_effective_config`, y
+# murieron los cinco mutantes que la anulan o la aflojan rama a rama.
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
-src/results.rs	723	153
+src/results.rs	724	153
 src/event_manifest.rs	147	8
 src/truth_validation.rs	121	32
 src/truth_schema.rs	69	8

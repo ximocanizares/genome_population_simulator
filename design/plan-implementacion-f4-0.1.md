@@ -688,7 +688,7 @@ cambio de contrato**. Los sitios, comprobados en el árbol de esta entrega:
 | `resources/f4/gps-hiseqx-pcr-pe150-v1.json` | recurso | perfil hermano amplificado, con su huella y los dominios de la amplificación |
 
 **Los esquemas publicados no se editan.** Un fichero general v2 sigue
-publicando configuración efectiva v4 y manifiesto de evento v2.
+publicando configuración efectiva v4 y manifiesto de evento v2. *Excepción del 12/10/2026 (DT-041, decisión del responsable): el esquema del manifiesto general v4 se amplió una vez para admitir el perfil con PCR con el catálogo v5, que es lo que publica toda ejecución amplificada sin loci; ver la enmienda de DTC-089.*
 
 ### 16.4. Pruebas nuevas y su variante defectuosa
 

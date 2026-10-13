@@ -1237,8 +1237,14 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
         // El catálogo es el **más alto** cuya etapa abre este evento. La
         // amplificación estrena el v5 y no desplaza ninguna decisión: las
         // trece heredadas siguen en el v3 y las dos del tartamudeo en el v4.
-        "rng_catalog": if event.pcr().is_some() {
-            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+        // Con tartamudeo clonal la amplificación abre además las decisiones de
+        // linaje y publica el v6 (DTC-092); hasta el 12/10/2026 aquí se
+        // publicaba el v5 aunque el bloque de la amplificación dijera v6, y el
+        // esquema de la efectiva rechazaba el documento (DT-040). El catálogo
+        // sale de la misma función que el del bloque, de modo que los dos no
+        // pueden volver a separarse.
+        "rng_catalog": if let Some(pcr) = event.pcr() {
+            pcr.rng_catalog()
         } else if stutter_active {
             crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
         } else {
@@ -3544,8 +3550,9 @@ fn validate_physical_technical_event(
     // la efectiva y quedan fuera: no hay nada en el paquete contra lo que
     // compararlos sin rehacer la amplificación. El catálogo de azar de este
     // bloque (`artifacts.pcr.rng_catalog`) entra en la comparación: los dos
-    // documentos publican el mismo, y no es el de la raíz del evento que
-    // discute DT-040. Sin amplificación el bloque es solo `applicable`.
+    // documentos publican el mismo, que desde el 12/10/2026 (DT-040) es
+    // también el de la raíz del evento. Sin amplificación el bloque es solo
+    // `applicable`.
     let event_pcr = event
         .get("artifacts")
         .and_then(|artifacts| artifacts.get("pcr"));
@@ -6896,6 +6903,7 @@ fn parse_general_manifest_bytes_unretagged(
         &events,
         effective_id,
         &records,
+        schema_version == Some(GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS),
         path,
     )?;
     validate_manifest_authorizations(object.get("authorizations"), path)?;
@@ -7163,6 +7171,7 @@ fn validate_manifest_technical_events(
     events: &[(String, UnitState, String)],
     effective_id: Option<&str>,
     records: &[ArtifactRecord],
+    with_repeats: bool,
     path: &Path,
 ) -> Result<(), Diagnostic> {
     if values.len() != events.len() {
@@ -7185,28 +7194,51 @@ fn validate_manifest_technical_events(
             "event_manifest",
         ];
         validate_closed_object(object, &FIELDS, "technical_events[]", path)?;
+        let amplified = object.get("profile")
+            == Some(&json!({
+                "id": crate::technical_profile::GPS_HISEQX_PCR_PE150_V1,
+                "sha256": crate::technical_profile::GPS_HISEQX_PCR_PE150_SHA256,
+            }));
         if required_non_empty_text(object, "event_id", path)? != event_id
-            || !matches!(
-                object.get("profile"),
-                Some(profile) if *profile == json!({
-                    "id": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
-                    "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
-                }) || *profile == json!({
-                    "id": crate::technical_profile::GPS_HISEQX_PCR_PE150_V1,
-                    "sha256": crate::technical_profile::GPS_HISEQX_PCR_PE150_SHA256,
-                })
-            )
+            || !(amplified
+                || object.get("profile")
+                    == Some(&json!({
+                        "id": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
+                        "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
+                    })))
             || !matches!(
                 object.get("rng_catalog").and_then(Value::as_str),
                 Some(
                     crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
                         | crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
                         | crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+                        | crate::randomness::F4_TECHNICAL_RNG_CATALOG_V6
                 )
             )
             || object.get("id_catalog") != Some(&f4_id_catalog_value())
         {
             return Err(manifest_error(path, "inventario técnico F4 incompatible"));
+        }
+        // El catálogo va atado al perfil y a la versión, como en la
+        // configuración efectiva (DT-041, 12/10/2026): sin PCR, el v3 o el v4
+        // del tartamudeo de base; con PCR, el v5 de la amplificación o el v6
+        // del tartamudeo clonal. El v4 y el v6 solo existen con loci de
+        // repetición, que son los que publican la versión 6 del manifiesto. Y
+        // con PCR y loci **siempre** hay tartamudeo clonal (la configuración
+        // exige el tartamudeo de base con loci y PCR), de modo que en la
+        // versión 6 con PCR solo cabe el v6 y el v5 es exclusivo de la 4
+        // (DTC-092). Es lo mismo que fijan los esquemas de las dos versiones.
+        let catalog_matches = match object.get("rng_catalog").and_then(Value::as_str) {
+            Some(crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3) => !amplified,
+            Some(crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4) => !amplified && with_repeats,
+            Some(crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5) => amplified && !with_repeats,
+            _ => amplified && with_repeats,
+        };
+        if !catalog_matches {
+            return Err(manifest_error(
+                path,
+                "el catálogo de azar del inventario técnico no corresponde a su perfil o a la versión del manifiesto",
+            ));
         }
         validate_embedded_artifact(object.get("effective_config"), effective_id, records, path)?;
         validate_embedded_artifact(
@@ -9033,13 +9065,24 @@ fn validate_effective_technical_event(
     }
     // La amplificación estrena el v5, y **manda sobre el v4**: un evento que
     // amplifica y además tartamudea abre las dos etapas y publica el más alto.
-    let declares_pcr = effective_object(event, "artifacts", path)
+    let declared_pcr = effective_object(event, "artifacts", path)
         .ok()
         .and_then(|artifacts| artifacts.get("pcr"))
-        .and_then(Value::as_object)
-        .and_then(|pcr| pcr.get("applicable"))
-        == Some(&Value::Bool(true));
-    let expected_catalog = if declares_pcr {
+        .and_then(Value::as_object);
+    let declares_pcr =
+        declared_pcr.and_then(|pcr| pcr.get("applicable")) == Some(&Value::Bool(true));
+    // Y el tartamudeo clonal, que es el bloque `stutter` de la amplificación,
+    // estrena el v6 (DTC-092, DT-040): el catálogo de la raíz del evento es el
+    // mismo que el del bloque, que `validate_effective_pcr` ata a ese bloque.
+    // `declares_pcr &&` es equivalente (no discrimina): un bloque de PCR con
+    // `stutter` y `applicable = false` lo rechaza antes el objeto cerrado del
+    // bloque sin amplificación, que solo admite `applicable`. Se deja porque
+    // dice la condición tal como la fija DTC-092.
+    let declares_lineage =
+        declares_pcr && declared_pcr.is_some_and(|pcr| pcr.contains_key("stutter"));
+    let expected_catalog = if declares_lineage {
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V6
+    } else if declares_pcr {
         crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
     } else if declares_stutter {
         crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4

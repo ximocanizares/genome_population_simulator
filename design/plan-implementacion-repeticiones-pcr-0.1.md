@@ -3174,7 +3174,7 @@ Los sitios conocidos, comprobados en el árbol de partida:
 —general v4, efectivo v6, manifiesto de evento v3, manifiesto general v6,
 verdad v3 y mapa de coordenadas v2— llevan la capacidad, y los valores fijos de
 las versiones heredadas se comparan byte a byte en cada hito. Un fichero
-general v2 sigue publicando efectivo v4 y manifiesto de evento v2.
+general v2 sigue publicando efectivo v4 y manifiesto de evento v2. *Excepción del 12/10/2026 (DT-041, decisión del responsable): el esquema del manifiesto general v4 se amplió una vez para admitir el perfil con PCR con el catálogo v5, que es lo que publica toda ejecución amplificada sin loci; ver la enmienda de DTC-089.*
 
 ### 10.4. Evidencia que hay que repetir
 
@@ -3323,6 +3323,9 @@ que es la autoridad, y la cláusula queda acotada por esta sección.
 - **Ningún esquema publicado se edita.** La capacidad va en las versiones que ya
   la llevaban abiertas —general v4, efectivo v6 y manifiesto general v6—, que
   son las que este mismo trabajo estrenó.
+  *Con una excepción posterior, del 12/10/2026 (DT-041): el esquema del
+  manifiesto general v4 admite desde entonces el perfil con PCR con el catálogo
+  v5; ver la enmienda de DTC-089.*
 - **Ninguna decisión de las entregas 1 a 4 se revoca**, ni se rehace ninguna de
   sus evidencias.
 - **El significado de las frecuencias no cambia.** La declarada sigue siendo la

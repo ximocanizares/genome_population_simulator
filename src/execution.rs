@@ -1700,7 +1700,10 @@ fn write_event_manifest(
     pcr: Option<crate::event_manifest::EventManifestPcr>,
 ) -> Result<ManifestEventLink, Diagnostic> {
     let stutter_present = stutter.is_some();
-    let pcr_present = pcr.is_some();
+    // El catálogo del enlace en el manifiesto general es el de la amplificación
+    // cuando la hay: v6 con tartamudeo clonal, v5 sin él. Hasta el 12/10/2026
+    // aquí se escribía siempre el v5 (DT-040).
+    let pcr_catalog = pcr.as_ref().map(|pcr| pcr.settings.rng_catalog());
     let profile_id = event.profile();
     let profile_sha256 = match event.preparation() {
         crate::technical_profile::LibraryPreparation::PcrFree => {
@@ -1768,8 +1771,8 @@ fn write_event_manifest(
         realized_chimera_pairs,
         profile_id,
         profile_sha256,
-        rng_catalog: if pcr_present {
-            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+        rng_catalog: if let Some(catalog) = pcr_catalog {
+            catalog
         } else if stutter_present {
             crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
         } else {

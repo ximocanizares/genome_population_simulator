@@ -3209,11 +3209,23 @@ fn the_pcr_catalog_follows_whether_the_clonal_section_is_present() {
                 "algoritmo de amplificación inválido",
                 |d| pcr(d)["rng_catalog"] = json!("f4-technical-v6"),
             ),
+            // Desde el 12/10/2026 (DT-040) la raíz del evento también publica el
+            // v6 con tartamudeo clonal, y su comprobación va antes: una sección
+            // añadida a mano con la raíz en v5 la rechaza ella. Para llegar a la
+            // del bloque hay que poner la raíz en v6.
+            case(
+                "un tartamudeo clonal añadido con la raíz del evento en v5",
+                "catálogo técnico F4 inválido",
+                |d| {
+                    pcr(d)["stutter"] = json!({});
+                },
+            ),
             case(
                 "un catálogo v5 con un tartamudeo clonal añadido",
                 "algoritmo de amplificación inválido",
                 |d| {
                     pcr(d)["stutter"] = json!({});
+                    d["technical_event"]["rng_catalog"] = json!("f4-technical-v6");
                 },
             ),
             case(
