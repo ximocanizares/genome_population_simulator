@@ -55,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           pipx install uv==0.4.19
-          uv sync --frozen --all-groups
+          uv sync --frozen   # uv 0.4.19 incluye las dependencias de desarrollo por omisión
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
           "$GITHUB_WORKSPACE/.venv/bin/python3" -c "import jsonschema; print('jsonschema', jsonschema.__version__)"
       - name: Install pinned Rust toolchain
