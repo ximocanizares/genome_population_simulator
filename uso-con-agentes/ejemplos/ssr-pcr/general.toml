@@ -1,0 +1,171 @@
+config_kind = "general"
+schema_version = "4"
+seed = "1d0c5a7e9b3f42618a0d2c4e6f8091a2b3c4d5e6f708192a3b4c5d6e7f809102"
+
+[population_snvs]
+mode = "supplied"
+input_path = "population-snvs.tsv"
+
+[reference]
+kind = "supplied"
+id = "ref-ssr"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 2000
+
+# Microsatélite (CA)24 en 1001-1048. Los alelos se generan por deslizamiento.
+[[reference.repeat_loci]]
+id = "STR-CA"
+sequence = "chr1"
+start = 1001
+end = 1048
+motif = "CA"
+max_units = 60
+
+[reference.repeat_loci.slippage]
+model = "stepwise"
+mean_events = 3.0
+expansion_bias = 0.5
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 20
+individual_ids = ["I001", "I002", "I003", "I004", "I005", "I006", "I007", "I008", "I009", "I010", "I011", "I012", "I013", "I014", "I015", "I016", "I017", "I018", "I019", "I020"]
+ploidy = 2
+genotype_model = "hwe"
+
+[vcf_output]
+mode = "text"
+
+[technical_event]
+event_id = "reads-ssr"
+individual_ids = ["I001", "I002", "I003", "I004", "I005", "I006", "I007", "I008", "I009", "I010", "I011", "I012", "I013", "I014", "I015", "I016", "I017", "I018", "I019", "I020"]
+target_coverage_wgs = 30
+library_preparation = "pcr"
+
+[technical_event.pcr]
+duplicate_fraction = 0.7
+cycles = 10
+efficiency = 0.9
+
+[technical_event.stutter]
+enabled = true
+
+[[technical_event.stutter.steps]]
+units = -3
+weight = 0.05
+
+[[technical_event.stutter.steps]]
+units = -2
+weight = 0.15
+
+[[technical_event.stutter.steps]]
+units = -1
+weight = 0.6
+
+[[technical_event.stutter.steps]]
+units = 1
+weight = 0.2
+
+[[technical_event.libraries]]
+individual_id = "I001"
+i7 = "GCTAAAGA"
+i5 = "CAATTACA"
+
+[[technical_event.libraries]]
+individual_id = "I002"
+i7 = "TAACATAC"
+i5 = "ACGTCAGC"
+
+[[technical_event.libraries]]
+individual_id = "I003"
+i7 = "ACGAAACT"
+i5 = "TGTTGGCC"
+
+[[technical_event.libraries]]
+individual_id = "I004"
+i7 = "CAGTGTGA"
+i5 = "ATCGCTTA"
+
+[[technical_event.libraries]]
+individual_id = "I005"
+i7 = "AGGGTTAA"
+i5 = "GTAAGTGT"
+
+[[technical_event.libraries]]
+individual_id = "I006"
+i7 = "GATGCATA"
+i5 = "CGCCTTTA"
+
+[[technical_event.libraries]]
+individual_id = "I007"
+i7 = "CTTGCTGT"
+i5 = "GTCCACCC"
+
+[[technical_event.libraries]]
+individual_id = "I008"
+i7 = "CATCGGAC"
+i5 = "TGGCATTT"
+
+[[technical_event.libraries]]
+individual_id = "I009"
+i7 = "TTATTACA"
+i5 = "CTCAGAAA"
+
+[[technical_event.libraries]]
+individual_id = "I010"
+i7 = "CAGAACTC"
+i5 = "GGGTAATT"
+
+[[technical_event.libraries]]
+individual_id = "I011"
+i7 = "TTGACAGG"
+i5 = "TCACGCAG"
+
+[[technical_event.libraries]]
+individual_id = "I012"
+i7 = "AGGCGCGC"
+i5 = "CCTCCTGA"
+
+[[technical_event.libraries]]
+individual_id = "I013"
+i7 = "AGTGCGTG"
+i5 = "GACACTCG"
+
+[[technical_event.libraries]]
+individual_id = "I014"
+i7 = "CTATGAAT"
+i5 = "CTCTGATT"
+
+[[technical_event.libraries]]
+individual_id = "I015"
+i7 = "TACCCACT"
+i5 = "CTGCCAAA"
+
+[[technical_event.libraries]]
+individual_id = "I016"
+i7 = "CTCCAGCG"
+i5 = "CGGTCAGT"
+
+[[technical_event.libraries]]
+individual_id = "I017"
+i7 = "TCCATCAC"
+i5 = "CCTAAGTA"
+
+[[technical_event.libraries]]
+individual_id = "I018"
+i7 = "ACCGAATA"
+i5 = "ATGCGTTC"
+
+[[technical_event.libraries]]
+individual_id = "I019"
+i7 = "GCTCTATT"
+i5 = "GACTACGA"
+
+[[technical_event.libraries]]
+individual_id = "I020"
+i7 = "CGCGCTCA"
+i5 = "TTCCCTTG"

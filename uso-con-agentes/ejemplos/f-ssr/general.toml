@@ -1,0 +1,51 @@
+config_kind = "general"
+schema_version = "4"
+seed = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+
+[population_snvs]
+mode = "supplied"
+input_path = "snvs.tsv"
+
+[reference]
+kind = "supplied"
+id = "ref-ssr"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 2000
+
+[[reference.repeat_loci]]
+id = "STR-CA"
+sequence = "chr1"
+start = 1001
+end = 1048
+motif = "CA"
+
+[[reference.repeat_loci.alleles]]
+sequence = "CACACACACACACACACACACACACACACACACACACACACACA"
+frequency = 0.25
+
+[[reference.repeat_loci.alleles]]
+sequence = "CACACACACACACACACACACACACACACACACACACACACACACA"
+frequency = 0.25
+
+[[reference.repeat_loci.alleles]]
+sequence = "CACACACACACACACACACACACACACACACACACACACACACACACA"
+frequency = 0.25
+
+[[reference.repeat_loci.alleles]]
+sequence = "CACACACACACACACACACACACACACACACACACACACACACACACACA"
+frequency = 0.25
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 200
+individual_ids = ["I001", "I002", "I003", "I004", "I005", "I006", "I007", "I008", "I009", "I010", "I011", "I012", "I013", "I014", "I015", "I016", "I017", "I018", "I019", "I020", "I021", "I022", "I023", "I024", "I025", "I026", "I027", "I028", "I029", "I030", "I031", "I032", "I033", "I034", "I035", "I036", "I037", "I038", "I039", "I040", "I041", "I042", "I043", "I044", "I045", "I046", "I047", "I048", "I049", "I050", "I051", "I052", "I053", "I054", "I055", "I056", "I057", "I058", "I059", "I060", "I061", "I062", "I063", "I064", "I065", "I066", "I067", "I068", "I069", "I070", "I071", "I072", "I073", "I074", "I075", "I076", "I077", "I078", "I079", "I080", "I081", "I082", "I083", "I084", "I085", "I086", "I087", "I088", "I089", "I090", "I091", "I092", "I093", "I094", "I095", "I096", "I097", "I098", "I099", "I100", "I101", "I102", "I103", "I104", "I105", "I106", "I107", "I108", "I109", "I110", "I111", "I112", "I113", "I114", "I115", "I116", "I117", "I118", "I119", "I120", "I121", "I122", "I123", "I124", "I125", "I126", "I127", "I128", "I129", "I130", "I131", "I132", "I133", "I134", "I135", "I136", "I137", "I138", "I139", "I140", "I141", "I142", "I143", "I144", "I145", "I146", "I147", "I148", "I149", "I150", "I151", "I152", "I153", "I154", "I155", "I156", "I157", "I158", "I159", "I160", "I161", "I162", "I163", "I164", "I165", "I166", "I167", "I168", "I169", "I170", "I171", "I172", "I173", "I174", "I175", "I176", "I177", "I178", "I179", "I180", "I181", "I182", "I183", "I184", "I185", "I186", "I187", "I188", "I189", "I190", "I191", "I192", "I193", "I194", "I195", "I196", "I197", "I198", "I199", "I200"]
+ploidy = 2
+genotype_model = "f_diploid"
+inbreeding_coefficient = 0.5
+
+[vcf_output]
+mode = "text"
