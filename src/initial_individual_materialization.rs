@@ -197,6 +197,7 @@ pub fn materialize_initial_individuals(
                 reference,
                 config,
                 population.population_id(),
+                population.genotype_model(),
             )
             .map_err(InitialIndividualsMaterializationError::Repeat)?;
             let (individual, draws) = applied.into_parts();

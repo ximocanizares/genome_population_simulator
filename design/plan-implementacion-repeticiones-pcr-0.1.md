@@ -1800,7 +1800,10 @@ frecuencias; y **no hay umbral de 50 pb**, sino un tope propio configurable.
 
 - ☐ **F6.4.3.2.** **Sorteo de los genotipos desde las frecuencias del locus**,
   con su ámbito de azar propio: cada copia haplotípica de cada individuo recibe
-  un alelo del locus sorteado de las frecuencias declaradas.
+  un alelo del locus sorteado de las frecuencias declaradas. *Añadido el
+  25/10/2026 (DT-058):* con `genotype_model = "f_diploid"` el sorteo de la
+  copia 1 queda condicionado al de la copia 0 para seguir F (REQ-EVO-48); ver
+  DTC-100.
   - Depende de: F6.4.3.1.
   - Procede de: decisión **S-04**, que invierte la recomendación original;
     REQ-DAT-15, DTC-037, DTC-072 y DTC-081 para la disciplina de aleatoriedad.

@@ -98,6 +98,12 @@ min_longest_run_units = 3
 }
 
 fn config(individual_ids: &[&str], loci: &str) -> EffectiveConfig {
+    config_with_model(individual_ids, loci, "genotype_model = \"hwe\"")
+}
+
+/// La misma configuración con el modelo genotípico que se pida, escrito tal
+/// cual en la cohorte (`genotype_model` y, si hace falta, el coeficiente).
+fn config_with_model(individual_ids: &[&str], loci: &str, model: &str) -> EffectiveConfig {
     let ids = individual_ids
         .iter()
         .map(|id| format!("\"{id}\""))
@@ -133,7 +139,7 @@ population_id = "P1"
 individual_count = {}
 individual_ids = [{ids}]
 ploidy = 2
-genotype_model = "hwe"
+{model}
 "#,
         individual_ids.len()
     );
@@ -422,3 +428,146 @@ const FROZEN_DRAW: [(&str, u8, usize); 8] = [
     ("I5", 0, 0),
     ("I5", 1, 1),
 ];
+
+/// Los dos alelos de cada individuo en el locus, `(copia 0, copia 1)`.
+fn diploid_pairs(genotypes: &BTreeMap<(String, u8), usize>) -> BTreeMap<String, (usize, usize)> {
+    let mut pairs = BTreeMap::new();
+    for ((individual_id, copy_index), allele) in genotypes {
+        let entry = pairs
+            .entry(individual_id.clone())
+            .or_insert((usize::MAX, usize::MAX));
+        match copy_index {
+            0 => entry.0 = *allele,
+            1 => entry.1 = *allele,
+            other => panic!("un diploide no tiene copia {other}"),
+        }
+    }
+    assert!(
+        pairs
+            .values()
+            .all(|(first, second)| *first != usize::MAX && *second != usize::MAX),
+        "cada individuo tiene que tener sus dos copias sorteadas"
+    );
+    pairs
+}
+
+fn many_ids(count: usize) -> Vec<String> {
+    (1..=count).map(|index| format!("I{index:04}")).collect()
+}
+
+/// **Con F = 1 todos los individuos son homocigotos en el microsatélite**
+/// (DT-058; REQ-EVO-47: «F=1 debe producir homocigosis completa»).
+///
+/// Es exacta: no hay intervalo. Discrimina porque el corpus es **polimórfico**
+/// —se comprueba que hay más de un alelo entre los individuos— y grande: con
+/// los tres alelos al 0,5, 0,3 y 0,2 sorteados copia a copia, cada individuo
+/// es homocigoto con probabilidad 0,38, y que lo sean los doscientos tiene
+/// probabilidad 0,38^200, del orden de 10^-84. Contra el código anterior, que
+/// ignoraba F, falla.
+#[test]
+fn an_inbreeding_coefficient_of_one_makes_every_repeat_genotype_homozygous() {
+    let reference = reference();
+    let ids = many_ids(200);
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let output = materialize(
+        &config_with_model(
+            &ids,
+            &locus("STR-1", "chr1"),
+            "genotype_model = \"f_diploid\"\ninbreeding_coefficient = 1.0",
+        ),
+        &reference,
+    );
+    let drawn = genotypes(&output, "STR-1");
+    assert_eq!(drawn.len(), 400, "doscientos individuos diploides");
+    assert_discriminating(&drawn);
+    let heterozygous = diploid_pairs(&drawn)
+        .into_iter()
+        .filter(|(_, (first, second))| first != second)
+        .collect::<Vec<_>>();
+    assert!(
+        heterozygous.is_empty(),
+        "con F = 1 hay heterocigotos: {heterozygous:?}"
+    );
+}
+
+/// **Con F = 0,8 la proporción de heterocigotos cae alrededor de
+/// `(1 − F)·He`** (DT-058; REQ-EVO-48).
+///
+/// # El intervalo
+///
+/// Con los alelos al 0,5, 0,3 y 0,2, la heterocigosidad esperada es
+/// `He = 1 − (0,25 + 0,09 + 0,04) = 0,62`, y con F = 0,8 la proporción de
+/// heterocigotos es `Σ_{i<j} 2 (1 − F) p_i p_j = (1 − F)·He = 0,124`. Sobre
+/// n = 2000 individuos independientes el recuento es binomial, con desviación
+/// típica `sqrt(0,124 · 0,876 / 2000) ≈ 0,0074`. Se acepta ±5 desviaciones,
+/// `[0,087, 0,161]`: la probabilidad de que un sorteo correcto caiga fuera es
+/// menor que 10^-6, y la semilla es fija, así que el resultado no varía entre
+/// ejecuciones.
+///
+/// # Lo que caza
+///
+/// - **Ignorar F** (el código anterior): da `He = 0,62`, a más de sesenta
+///   desviaciones.
+/// - **Aplicar F a una sola de las copias**, es decir, que la copia 1 no quede
+///   ligada a la 0: vuelve a dar 0,62.
+/// - **Olvidar el factor `1 − F`** en los pesos de la copia 1: da
+///   `He/(1 + F) ≈ 0,344`, a treinta desviaciones.
+///
+/// Se comprueba además que **la marginal** sigue siendo la declarada: F
+/// redistribuye genotipos, no frecuencias alélicas. La frecuencia del alelo
+/// mayoritario sobre 4000 copias tiene, con F = 0,8, varianza
+/// `p (1 − p)(1 + F)/(2n)`, desviación ≈ 0,0106; ±5 desviaciones alrededor de
+/// 0,5. Esto caza un sorteo condicionado que sesgara la copia 1 hacia un alelo
+/// fijo en vez de hacia el de la copia 0.
+#[test]
+fn an_inbreeding_coefficient_of_point_eight_lowers_repeat_heterozygosity() {
+    let reference = reference();
+    let ids = many_ids(2000);
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let output = materialize(
+        &config_with_model(
+            &ids,
+            &locus("STR-1", "chr1"),
+            "genotype_model = \"f_diploid\"\ninbreeding_coefficient = 0.8",
+        ),
+        &reference,
+    );
+    let drawn = genotypes(&output, "STR-1");
+    assert_eq!(drawn.len(), 4000, "dos mil individuos diploides");
+    let pairs = diploid_pairs(&drawn);
+    let heterozygous = pairs
+        .values()
+        .filter(|(first, second)| first != second)
+        .count();
+    let observed = heterozygous as f64 / 2000.0;
+    let expected = (1.0 - 0.8) * 0.62;
+    let deviation = (expected * (1.0 - expected) / 2000.0_f64).sqrt();
+    assert!(
+        (observed - expected).abs() <= 5.0 * deviation,
+        "proporción de heterocigotos {observed}, fuera de {expected} ± {}",
+        5.0 * deviation
+    );
+
+    let majority = drawn.values().filter(|index| **index == 0).count() as f64 / 4000.0;
+    let marginal_deviation = (0.5_f64 * 0.5 * 1.8 / 4000.0).sqrt();
+    assert!(
+        (majority - 0.5).abs() <= 5.0 * marginal_deviation,
+        "frecuencia del alelo mayoritario {majority}, fuera de 0,5 ± {}",
+        5.0 * marginal_deviation
+    );
+
+    // **La fase de un heterocigoto es simétrica**: cada orientación tiene
+    // probabilidad un medio, como la de los SNV al permutar su composición.
+    // Sobre unos 250 heterocigotos la desviación del recuento es ≈ 7,9; ±5
+    // desviaciones caza una fase fija, que pondría siempre el alelo de menor
+    // índice en la copia 0.
+    let ascending = pairs
+        .values()
+        .filter(|(first, second)| first < second)
+        .count() as f64;
+    let half = heterozygous as f64 / 2.0;
+    assert!(
+        (ascending - half).abs() <= 5.0 * (heterozygous as f64 * 0.25).sqrt(),
+        "{ascending} de {heterozygous} heterocigotos llevan el alelo menor en la copia 0"
+    );
+}

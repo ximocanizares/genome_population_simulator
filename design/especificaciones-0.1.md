@@ -2496,7 +2496,9 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   usar `P(ii)=p_i²+F p_i(1-p_i)` para cada homocigoto y
   `P(ij)=2(1-F)p_i p_j` para cada heterocigoto con `i<j`. Configurar F para
   ploidía 1 o mayor que 2 debe rechazarse antes de simular, identificando ámbito
-  y ploidía. V1 no debe inferir una adaptación poliploide.
+  y ploidía. V1 no debe inferir una adaptación poliploide. Las mismas fórmulas
+  rigen los alelos de cada locus de repetición en tándem, con las frecuencias
+  del locus como `p_i` (DTC-100).
 - **REQ-EVO-49.** Una distribución genotípica explícita por locus o bloque debe
   sustituir localmente al modelo general de F. Ambos métodos solo son
   incompatibles si intentan aplicarse al mismo locus o bloque. F debe seguir

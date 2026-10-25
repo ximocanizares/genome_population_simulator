@@ -2546,3 +2546,56 @@ sus ciclos fuera del bloque y los recuentos de linaje siguen sin atarse a nada
 perdería una preparación amplificada sin tartamudeo de base vale **con la
 calibración por omisión**. Con `k = 2,5` el homopolímero perdería un 38 %, y con
 `k = 1`, todo. La guarda que exige el tartamudeo de base no cambia.
+
+<a id="dtc-100"></a>
+
+## DTC-100 — El coeficiente F en los alelos de los loci de repetición
+
+Decisión del 25/10/2026, que cierra DT-058 y aplica REQ-CONF-130 y
+REQ-EVO-46 a 48 a los loci de repetición.
+
+Con `genotype_model = "f_diploid"`, los dos alelos de un locus de repetición
+de un individuo siguen las fórmulas multialélicas de REQ-EVO-48, igual que los
+SNV de la matriz. Hasta esta decisión se sorteaban copia a copia y de forma
+independiente, como en Hardy-Weinberg, sin mirar F.
+
+**Cómo se sortea.** Sin ámbito de azar nuevo y sin primitiva nueva: el ámbito
+sigue siendo `initial_repeat_allele` (catálogo de ámbitos v9 y siguientes, sin
+cambio de fila) y el algoritmo, `categorical-f64-v1` (DTC-072).
+
+- La copia 0 sortea su alelo `a` con su propia subsemilla y de las
+  frecuencias, exactamente como con Hardy-Weinberg.
+- La copia 1 sortea con su propia subsemilla sobre los pesos
+  `(1 − F) p_j + F·[j = a]`. Con probabilidad F hereda el alelo de la copia 0
+  —F es la probabilidad de que los dos alelos sean idénticos por
+  descendencia— y con `1 − F` sortea de las frecuencias.
+
+La distribución conjunta es la de REQ-EVO-48: `P(a, a) = p_a² + F p_a (1 − p_a)`
+y `P(i, j) + P(j, i) = 2 (1 − F) p_i p_j`. **La fase es simétrica**: cada
+orientación de un heterocigoto tiene probabilidad un medio, la misma que dan
+los SNV al permutar su composición entre copias (REQ-IND-62).
+
+**Consecuencias que se comprueban.** Con F = 0 los pesos de la copia 1 son
+bit a bit las frecuencias y el sorteo es el de Hardy-Weinberg; con F = 1 solo
+el alelo de la copia 0 tiene peso y la copia 1 no consume aleatoriedad. Con
+Hardy-Weinberg nada cambia: ni el ámbito, ni el consumo, ni un byte publicado.
+
+**Por qué no `f-diploid-genotype-v1`, que es lo que usan los SNV.** Esa
+primitiva decide el genotipo **del individuo** en un solo sorteo, y para eso
+haría falta una subsemilla por individuo y locus que el catálogo no tiene;
+añadirla exigiría una versión nueva del catálogo de ámbitos, que se publica en
+`rng_scope_catalog_version` y habría cambiado los bytes de toda ejecución con
+deslizamiento, también las de Hardy-Weinberg. Además devuelve índices `u8` y
+enumera `n(n + 1)/2` genotipos, y un abanico generado por deslizamiento no
+tiene por qué quedarse en 256 alelos. La forma condicional conserva el
+significado literal del ámbito —cada copia decide su alelo con su
+subsemilla—, no tiene límite de alelos y cuesta lo mismo que antes.
+
+**Ploidía.** `f_diploid` solo se admite con ploidía 2, y la admisión lo
+rechaza antes (REQ-EVO-48). El sorteo no generaliza: pedir con F una copia que
+no sea la 0 o la 1 es un error interno.
+
+**Publicación.** No cambia ningún esquema. El manifiesto sigue publicando las
+copias sorteadas y las realizadas por alelo, que se cuentan copia a copia como
+antes. Solo cambian los bytes de las ejecuciones con `f_diploid`, F > 0 y loci
+de repetición.

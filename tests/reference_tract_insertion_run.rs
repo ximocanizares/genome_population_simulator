@@ -498,6 +498,7 @@ fn the_generation_regions_are_translated_to_the_final_genome() {
 /// fallando en vez de pasar en falso.
 #[test]
 fn the_repeat_draws_are_seeded_with_the_final_reference() {
+    use genome_population_simulator::application::EffectiveInitialGenotypeModel;
     use genome_population_simulator::identity::{IndividualId, PopulationId};
     use genome_population_simulator::repeat_genotypes::draw_repeat_allele_index;
 
@@ -529,6 +530,7 @@ fn the_repeat_draws_are_seeded_with_the_final_reference() {
                     reference_id,
                     &PopulationId::parse("P1", "test").expect("población"),
                     &IndividualId::parse(format!("I{index:02}"), "test").expect("individuo"),
+                    EffectiveInitialGenotypeModel::HardyWeinberg,
                     copy,
                     locus,
                 )

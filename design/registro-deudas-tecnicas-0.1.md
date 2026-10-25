@@ -91,6 +91,8 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-055 | El juez de la pareja efectiva/manifiesto no comprueba dos desigualdades de las estadísticas iniciales que la arquitectura fija (los genotipos realizados cuentan solo observaciones completas); las caza después el juez completo | Baja | 12/10/2026 | Abierta |
 | DT-056 | El juez completo acepta un manifiesto general con otro perfil técnico u otro catálogo de azar que los de la ejecución | Media | 12/10/2026 | Cerrada (12/10/2026) |
 | DT-057 | El juez del manifiesto general acepta paquetes fallidos incoherentes editados a mano: verdad sin matriz de SNV, VCF sin verdad o verdad sin su referencia | Baja | 13/10/2026 | Abierta |
+| DT-058 | Los alelos de los microsatélites ignoran el coeficiente de endogamia F: con `f_diploid` se sorteaban copia a copia como en Hardy-Weinberg | Media | 25/10/2026 | **Cerrada (25/10/2026)** |
+| DT-059 | Con `schema_version = "3"` y microsatélites, el error habla del escenario F5 y de un campo desconocido `initial_populations`, no de la versión | Baja | 25/10/2026 | Abierta |
 
 ---
 
@@ -5437,3 +5439,113 @@ exige, y lo prueba `a_failed_manifest_with_a_misclassified_truth_is_rejected`
 que la conserva. Arreglarla del todo es exigir en el juez la regla de la unidad:
 si hay verdad, la referencia de la simulación, la copia de la configuración y,
 cuando su cabecera cita una matriz, esa matriz; si hay VCF, la verdad.
+
+## DT-058. Los alelos de los microsatélites ignoran el coeficiente de endogamia F
+
+**Gravedad: media. Cerrada (25/10/2026)**; ver «Cómo se cerró». Detectada el
+25/10/2026 al probar un escenario con endogamia y un microsatélite.
+
+Con `genotype_model = "f_diploid"`, los SNV de la matriz siguen F
+(REQ-EVO-46 a 48), pero los alelos de cada locus de repetición
+(`[[reference.repeat_loci]]`) se sorteaban **copia a copia y de forma
+independiente**, como en Hardy-Weinberg: `apply_repeat_alleles`
+(`src/repeat_genotypes.rs`) no recibía el modelo genotípico de la población y
+nada lo comprobaba ni avisaba. Era un error científico silencioso: el paquete
+se publicaba, los jueces lo aceptaban, y la heterocigosidad del microsatélite
+no reflejaba la endogamia pedida.
+
+**Reproducción.** 200 individuos, F = 0,8, cuatro SNV a frecuencia 0,5 y un
+`(CA)` con cuatro alelos equiprobables. En el VCF, la heterocigosidad observada
+entre la esperada (Ho/He) de los SNV sale entre 0,12 y 0,20 —lo esperado es
+1 − F = 0,20—, y la del microsatélite, **1,015**.
+
+**Por qué ninguna prueba lo vio.** Las pruebas del sorteo de alelos de
+repetición usaban todas Hardy-Weinberg, y ningún juez rehace ese sorteo de
+forma independiente: el de las estadísticas iniciales vuelve a materializar la
+población con el mismo código y descarta los alelos de repetición, y las copias
+realizadas del manifiesto se atan a la verdad, no al sorteo (DT-053).
+
+### Cómo se cerró (25/10/2026)
+
+DTC-100 fija la regla. Con F, la copia 0 sortea su alelo `a` como siempre y la
+copia 1, con su propia subsemilla, sortea con `categorical-f64-v1` sobre los
+pesos `(1 − F) p_j + F·[j = a]`. La distribución conjunta es exactamente la de
+REQ-EVO-48 y la fase es simétrica. **Sin ámbito de azar nuevo** —el catálogo
+de ámbitos no cambia de versión— y **sin límite de alelos**: se descartó
+reutilizar `f_diploid_genotype`, que devuelve índices `u8` y habría necesitado
+una subsemilla por individuo y locus, es decir, un catálogo nuevo.
+
+- `src/repeat_genotypes.rs`: `draw_repeat_allele_index` y
+  `apply_repeat_alleles` reciben el modelo genotípico de la población; nueva
+  `draw_inbred_with_source` con los pesos condicionados; con F, una copia que
+  no sea la 0 o la 1 es un error interno en vez de una generalización
+  poliploide.
+- `src/initial_individual_materialization.rs`: pasa
+  `population.genotype_model()`.
+- `tests/reference_tract_insertion_run.rs`: el oráculo que vuelve a sortear
+  copia a copia declara Hardy-Weinberg, que es el modelo de su escenario.
+
+**Pruebas.** En `tests/repeat_genotype_draw.rs`:
+`an_inbreeding_coefficient_of_one_makes_every_repeat_genotype_homozygous`
+(exacta, 200 individuos) y
+`an_inbreeding_coefficient_of_point_eight_lowers_repeat_heterozygosity`
+(2000 individuos, proporción de heterocigotos dentro de ±5 desviaciones de
+`(1 − F)·He = 0,124`, más la frecuencia marginal y la simetría de la fase).
+Las dos **fallan contra el código de `9bdd391`**, ejecutadas sobre una copia:
+los 200 individuos deberían ser homocigotos y había 124 heterocigotos; la
+proporción de heterocigotos salió 0,6345 frente a 0,124 ± 0,037. En
+`src/repeat_genotypes.rs`, tres pruebas unitarias:
+`an_inbreeding_coefficient_of_zero_draws_exactly_like_hardy_weinberg` (F = 0
+da el mismo alelo y el mismo consumo que Hardy-Weinberg; **no** caza este
+defecto, y su documentación lo dice),
+`an_inbreeding_coefficient_of_one_copies_the_anchor_without_randomness` y
+`f_refuses_a_third_copy_instead_of_generalising`.
+
+**Mutaciones**, una por ejecución sobre una copia, con `src/repeat_genotypes.rs`
+en `90202d5c63` antes y después de restaurar:
+
+| Mutación | SHA mutado | La matan |
+|---|---|---|
+| Ignorar F: `apply_repeat_alleles` pasa siempre Hardy-Weinberg (lo que hacía `9bdd391`) | `76eba86f49` | las dos pruebas de `tests/repeat_genotype_draw.rs` |
+| F en una sola copia: el ancla de la copia 1 sale de su propia subsemilla, no del alelo de la copia 0 | `d5e9023382` | las dos pruebas de `tests/repeat_genotype_draw.rs` |
+| Pesos sin el factor `1 − F` | `e7b8bdbfa2` | las dos de `tests/repeat_genotype_draw.rs` y `an_inbreeding_coefficient_of_one_copies_the_anchor_without_randomness` |
+
+No hay mutación de juez: ningún juez rehace este sorteo por su cuenta.
+
+**Bytes publicados.** Solo cambian las ejecuciones con `f_diploid`, F > 0 y
+loci de repetición: la verdad, el VCF, el manifiesto general (copias
+realizadas), si hay evento de lecturas sus FASTQ y su manifiesto de evento, y
+puede cambiar, en la configuración efectiva, la cota de bases de tracto del
+VCF, que se mide sobre el VCF publicado (DTC-097). Comprobado ejecutando el
+binario de `9bdd391` y el corregido sobre el mismo escenario: con
+Hardy-Weinberg, con alelos declarados y con abanico por deslizamiento, todo lo
+publicado es **idéntico byte a byte**; con `f_diploid` y F = 0, también.
+
+**Resultado.** En el escenario de la reproducción, Ho/He del microsatélite
+pasa de 1,015 a **0,221** (esperado 0,20); los SNV no cambian.
+
+---
+
+## DT-059. Con la versión 3 y microsatélites, el error no apunta a la versión
+
+**Gravedad: baja.** Hallada el 25/10/2026 al redactar la guía de uso con
+agentes (`uso-con-agentes/`). **Sin arreglar.**
+
+Un TOML general con `[[reference.repeat_loci]]` e `[[initial_populations]]` que
+declara `schema_version = "3"` en lugar de `"4"` se rechaza con:
+
+```
+GPS-CONF-101 [CONF] El escenario F5, su objetivo, F/P o sus límites no satisfacen el contrato de admisión. detail="La configuración contiene un campo desconocido." fields="initial_populations"
+```
+
+El rechazo es correcto, pero el mensaje confunde: habla del escenario F5 y
+señala `initial_populations`, cuando la causa es la versión del esquema. Quien
+lo lea, persona o agente, buscará el error en otro sitio. La guía lo recoge en
+su tabla de trampas.
+
+**Reproducción.** El ejemplo `uso-con-agentes/ejemplos/f-ssr/general.toml`
+con `schema_version = "3"`, validado con `validate`.
+
+**Qué haría falta.** Que, ante un campo que solo existe en una versión
+posterior, el diagnóstico nombre la versión declarada y la que lo admite.
+
