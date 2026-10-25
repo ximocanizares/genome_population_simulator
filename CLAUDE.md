@@ -248,10 +248,17 @@ búsqueda. Ha mordido tres veces. Antes de dar por buena una cifra de pruebas,
 comprobar que se midió con el entorno correcto.
 
 - **Hay que instalar también las dependencias de desarrollo**, no solo las de
-  uso: `uv sync --all-groups` o equivalente. Sin ellas faltan 41 pruebas,
+  uso: `uv sync --frozen`, que con la versión fijada de `uv` (0.4.19) ya las
+  incluye; esa versión no admite `--all-groups`. Sin ellas faltan 41 pruebas,
   porque el validador de esquemas se lanza como proceso externo y no encuentra
   su módulo. La versión está **fijada a propósito** en la 4.10.3: las modernas
   retiran la pieza que el validador usa.
+- **La integración continua de GitHub** (`.github/workflows/ci.yml`) instala lo
+  mismo: compila `bcftools` y `tabix` 1.24 desde las fuentes oficiales con la
+  huella fijada, hace `uv sync --frozen` y compila las pruebas sin información
+  de depuración, porque con ella ocupan 26 GB y el runner tiene unos 14 libres.
+  Estuvo en rojo del 12/09 al 25/10/2026 sin que nadie lo viera: el disco se
+  llenaba y faltaban esas herramientas.
 - **La puerta de los validadores independientes se ejecuta con el `python3`
   que encuentre el camino de búsqueda**, que es el del entorno virtual del
   proyecto (3.12.7) si está activado y el del sistema (3.12.3) si no. Desde el
