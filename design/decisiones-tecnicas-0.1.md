@@ -5,6 +5,9 @@
   DTC-094 a DTC-097 cierran el deslizamiento biológico de los microsatélites;
   DTC-098 conecta la inserción de tractos en una referencia suministrada;
   DTC-099 hace configurable el multiplicador de la PCR en los homopolímeros
+  DTC-101 garantiza la comparación pareja a pareja del FASTQ final con
+  una batería obligatoria en lugar de repetirla en cada ejecución
+  DTC-102 fija cómo se tartamudea una molécula quimérica
 - **Fecha:** 1 de septiembre de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
@@ -155,7 +158,7 @@ eventos; los cambios `direct_events` se preflightan antes de abrir publicación.
 | <a id="dtc-081"></a>DTC-081 | F4 introduce el catálogo RNG `f4-technical-v1`, derivado con DTC-037 y ChaCha12 local por decisión. Sus componentes se codifican exactamente en el orden `event_id`, `library_id`, `stage`, `template_ordinal` o `pre_hop_instance_id`, y después los específicos de la decisión; `stage` es ASCII y distingue `fragment`, `chimera`, `quality`, `error`, `contamination_percent`, `contamination_donors`, `contamination_remove`, `index_hop` e `final_id`. La cobertura y el fragmento pertenecen a una plantilla estable; calidad y error añaden `mate` y `cycle`; contaminación añade `recipient_id` y la clave candidata; *index hopping* usa exclusivamente biblioteca anterior al salto e identidad pre-salto. Todo sorteo se reinicia desde su clave: no existe consumo acumulado entre decisiones. `bernoulli-v1` no sortea para 0 o 1 y, en otro caso, compara un uniforme de 53 bits en `[0,1)` con `p`; `uniform-index-v1` usa rechazo sobre `u64` hasta obtener un intervalo cuyo cardinal sea múltiplo de `n`; listas sin reemplazo se ordenan canónicamente por su clave y aplican Fisher–Yates parcial con ese uniforme. Los casos sin candidatos o con cardinalidad imposible se rechazan antes de sortear. Cada cambio de fila, orden de componentes, algoritmo o vector crea una nueva versión de catálogo y, si altera la codificación DTC-037, una nueva versión de derivación. | Cerrar reproducibilidad, regeneración bajo demanda y paralelismo de F4 sin mantener estados RNG ni colecciones de lecturas | F4 publica en configuración efectiva/manifiesto el nombre y versión del catálogo, y prueba vectores literales, permutación de bibliotecas, ejecución paralela y ramas 0/1. La distribución cuantitativa del perfil y su normal truncada siguen siendo responsabilidad de DTPD-106 y no se inventan aquí. |
 | <a id="dtc-082"></a>DTC-082 | F4 sustituye de forma atómica los cuatro contratos que consume al cerrar F4.1.3: TOML general `"2"`, `effective-config.json` `"4"`, manifiesto general `"4"` y manifiesto de evento `"2"`. F4.1.1 y F4.1.2 solo preparan el recurso, perfil e identidades internos; mientras F3 siga siendo el único productor publicado conserva exclusivamente sus contratos v1/v3. Al activar PE real, el runtime admite solo las versiones F4, los documentos y *fixtures* v1–v3 se actualizan o eliminan, sin migración automática ni lector heredado. | Evitar publicar un perfil PE sobre FASTQ SE y, al mismo tiempo, evitar matrices de compatibilidad que no aportan valor científico ni operativo | La transición ocurre junto al primer productor PE verificable. Entonces los cuatro escritores emiten sus versiones activas y los lectores rechazan versión ausente, anterior, posterior o desconocida. Un TOML anterior no puede activar F4. Diagnósticos y formatos ajenos a esos cuatro contratos no cambian por esta decisión. |
 | <a id="dtc-083"></a>DTC-083 | F4 acepta exclusivamente UDI explícitos por biblioteca: `i7` e `i5` son cada uno ocho bases `ACGT`, en orientación de secuenciación, y cada componente es único dentro de la tanda. La cabecera FASTQ escribe literalmente `i7+i5`, sin complementar ni invertir `i5`. Ausencia de UDI, marcador `0`, índices simples o combinatorios, longitudes/alfabetos inválidos y duplicados se rechazan antes de generar. | Fijar un contrato pequeño, inequívoco y verificable para la única familia de perfiles F4, sin construir soporte anticipado para modos no usados | Un *index hopping* transfiere solo al UDI completo ya declarado de la biblioteca final; no crea combinaciones nuevas. Una combinación inesperada en la frontera se descarta defensivamente y solo incrementa un recuento agregado. `0` queda reservado para un perfil futuro no indexado. Añadir otro formato o longitud requiere nueva decisión, esquema y pruebas. |
-| <a id="dtc-084"></a>DTC-084 | Una quimera F4 conserva el prefijo de longitud `b` de su plantilla de inserto `L`, con `b` uniforme en `1..L-1`, y concatena un segundo intervalo de longitud `L-b`. Sus candidatas son los intervalos válidos del mismo individuo/biblioteca, ordenados por copia, secuencia e inicio; en la copia fuente se excluyen los que solapan o tocan el prefijo. Se elige uniformemente una candidata, ambos segmentos se leen en orientación directa y la disposición PE se aplica al inserto compuesto. | Convertir la noción de «dos segmentos no contiguos» en un algoritmo completo y reproducible sin inventar un modelo de quimeras entre muestras | La selección usa las claves de quimera vigentes de DTC-086; una candidata ausente para una pareja seleccionada falla antes de publicar, sin reintento ni reducción silenciosa de la tasa. Solo se retienen coordenadas/orientaciones/punto durante la construcción y validación; el manifiesto publica tasa y recuento agregados. |
+| <a id="dtc-084"></a>DTC-084 | Una quimera F4 conserva el prefijo de longitud `b` de su plantilla de inserto `L`, con `b` uniforme en `1..L-1`, y concatena un segundo intervalo de longitud `L-b`. Sus candidatas son los intervalos válidos del mismo individuo/biblioteca, ordenados por identificador de secuencia en orden de bytes de su nombre (no en el orden de declaración de la referencia), después por índice de copia y después por inicio; en la copia fuente se excluyen los que solapan o tocan el prefijo. *Nota del 27/10/2026: la redacción anterior decía «ordenados por copia, secuencia e inicio», que era ambigua y, leída literalmente (índice de copia primero), contraria al código. Por decisión del responsable se fijó al comportamiento publicado (`src/chimera.rs`, orden de `HaplotypeCopyId`), sin cambiar ningún byte. Su regresión es `tests/final_pairs_against_truth.rs::chimeras_across_two_sequences_match_the_truth`, con `chrB` declarada antes que `chrA`.* Se elige uniformemente una candidata, ambos segmentos se leen en orientación directa y la disposición PE se aplica al inserto compuesto. | Convertir la noción de «dos segmentos no contiguos» en un algoritmo completo y reproducible sin inventar un modelo de quimeras entre muestras | La selección usa las claves de quimera vigentes de DTC-086; una candidata ausente para una pareja seleccionada falla antes de publicar, sin reintento ni reducción silenciosa de la tasa. Solo se retienen coordenadas/orientaciones/punto durante la construcción y validación; el manifiesto publica tasa y recuento agregados. |
 | <a id="dtc-085"></a>DTC-085 | `f4-technical-v2` sustituye al catálogo F4 v1 aún no implementado y añade siempre el componente ASCII `decision` después de `stage`. Fragmento: `[event_id,library_id,fragment,template_ordinal,decision]`, con `insert_length`, `copy` o `start`. Quimera: `[event_id,library_id,chimera,template_ordinal,decision]`, con `bernoulli`, `breakpoint` o `second_source`; esta última añade el `breakpoint` ya sorteado. Calidad/error: `[event_id,library_id,quality|error,template_ordinal,mate,cycle,decision]`, con `quality` o `substitution`. Porcentaje contaminante: `[event_id,recipient_library_id,contamination_percent,recipient_id,decision=percent]`; donantes/retirada: `[event_id,recipient_library_id,contamination_donors|contamination_remove,recipient_id,decision]`; *index hopping*: `[event_id,pre_hop_library_id,index_hop,pre_hop_instance_id,decision]`, con `bernoulli` o `destination`; ID final: `[event_id,final_library_id,final_id,pre_hop_instance_id,decision=technical_pair_id]`. | Completar DTC-081 con claves implementables para cada sorteo y versionar su cambio de codificación | Cada clave usa ChaCha12 nuevo y el consumidor DTC-081 correspondiente; 0/1 no consumen, reintentos de la normal permanecen dentro de `insert_length`, y un candidato ausente falla antes de publicar. `f4-technical-v1` no se publica ni implementa; cualquier cambio posterior crea v3 y nuevos vectores. |
 | <a id="dtc-086"></a>DTC-086 | `f4-technical-v3` sustituye a v2, ambas aún no publicadas, y es el único catálogo F4 normativo. Fragmento usa `[event_id,library_id,fragment,template_ordinal,decision]` con `insert_length`, `copy` o `start`; quimera usa `[event_id,library_id,chimera,template_ordinal,decision]` con `bernoulli`, `breakpoint` o `second_source`, que añade el `breakpoint` ya sorteado; *index hopping* usa `[event_id,pre_hop_library_id,index_hop,pre_hop_instance_id,decision]` con `bernoulli` o `destination`. Calidad es determinista: la curva y sus ajustes producen el Phred efectivo y no consumen RNG. Error usa `[event_id,library_id,error,template_ordinal,mate,cycle,decision]`, con `decision=bernoulli` para decidir el error y `decision=substitution` solo cuando ocurre; el primero usa `bernoulli-v1` y el segundo `uniform-index-v1` sobre las otras tres bases. El porcentaje contaminante usa `[event_id,recipient_library_id,contamination_percent,recipient_id,decision=percent]` y `uniform-closed-53-bit-v1`: para límites finitos `a <= b`, si `a=b` devuelve `a` sin sortear; en otro caso toma un entero uniforme `k∈[0,2^53-1]` mediante `uniform-index-v1` y devuelve `a+(b-a)×k/(2^53-1)`, incluyendo ambos extremos. Donantes/retirada usan `[event_id,recipient_library_id,contamination_donors|contamination_remove,recipient_id,decision]`, respectivamente `decision=select_donors` y `decision=select_recipients`. `TechnicalPairId` no es un sorteo ni una excepción: es un ID automático BLAKE3 de DTC-039 con clase `TechnicalPairId`, prefijo `TP_`, versión de derivación `2` y componentes canónicos `class=TechnicalPairId,event_id,final_library_id,pre_hop_instance_id`, en ese orden. `id-catalog-v2` añade solo esa clase F4 y no modifica ni rederiva IDs v1; toma los primeros 128 bits, Base32 RFC 4648 mayúscula sin relleno y detecta colisiones como DTC-039. | Cerrar todos los consumidores RNG F4 y separar identidad determinista de aleatoriedad | Las claves v1/v2 no se publican ni implementan. F4 publica v3 y sus vectores cubren extremos del porcentaje, error sí/no, sustitución y todas las decisiones literales. Cambiar cualquier clave, literal, algoritmo o catálogo de `TechnicalPairId` crea una nueva versión y vectores; no hay consumo compartido ni reintento fuera de `insert_length`. |
 | <a id="dtc-087"></a>DTC-087 | `id-catalog-v3` es un superconjunto estricto del fichero publicado `catalogs/id-classes-v2.tsv`: conserva literalmente sus filas, vectores, contexto y derivación v1 para ejecución, referencia, individuo, evento, tanda, biblioteca, grupo de lectura y la excepción de plantilla. Añade solo `PreHopInstanceId` y `TechnicalPairId`, ambas con derivación v2, BLAKE3 y codificación canónica de DTC-037/039, 128 bits y Base32 RFC 4648 mayúscula. `PreHopInstanceId` tiene prefijo `PH_`: una instancia propia usa `class=PreHopInstanceId,event_id,library_id,origin=own,template_id`; una contaminante usa `class=PreHopInstanceId,event_id,library_id=recipient_library_id,origin=contamination,source_pre_hop_instance_id`. `TechnicalPairId` tiene prefijo `TP_` y causas `class=TechnicalPairId,event_id,final_library_id,pre_hop_instance_id`. La propuesta homónima `id-catalog-v2` de DTC-086 es antecedente nulo y no se implementa. Colisiones de las nuevas clases fallan. | Hacer derivables, distintos y acotados los IDs de instancia antes/después de contaminación y demultiplexado sin alterar IDs publicados | El `PreHopInstanceId` propio se crea en F4.1; el contaminante se crea al copiar en F4.4; el `TechnicalPairId`, solo tras el salto en F4.5. Configuración efectiva y manifiestos registran `id-catalog-v3` y el mapa `{v1: clases heredadas, v2: PH_/TP_}`. Cada clase tiene vectores con caracteres permitidos, longitudes máximas, copias entre receptoras, reordenación y colisión. |
@@ -2599,3 +2602,81 @@ no sea la 0 o la 1 es un error interno.
 copias sorteadas y las realizadas por alelo, que se cuentan copia a copia como
 antes. Solo cambian los bytes de las ejecuciones con `f_diploid`, F > 0 y loci
 de repetición.
+
+## DTC-101 — La comparación pareja a pareja del FASTQ final es una prueba del proyecto
+
+Decisión del responsable del 27/10/2026, que concreta REQ-VAL-03 y cierra el
+paso F4.5.3 del plan de F4, que nunca llegó a implementarse.
+
+**Qué se decide.** La comparación de cada pareja final del FASTQ con la pareja
+esperada desde su clave técnica, la verdad biológica y la transformación
+autorizada **no se ejecuta en cada simulación**. La garantiza la batería
+obligatoria `tests/final_pairs_against_truth.rs`, que forma parte de la puerta
+`cargo test --workspace --all-targets --locked`. Cada escenario ejecuta el
+binario sobre una configuración propia y juzga lo publicado con el oráculo de
+`tests/final_pairs_oracle/`.
+
+**Por qué.** Repetir en cada ejecución el recorrido completo del muestreo, la
+amplificación, la quimera, el tartamudeo, los errores, la contaminación y el
+demultiplexado duplica su coste en tiempo y deja en el programa un segundo
+productor permanente que mantener. Una batería que combina las
+transformaciones cubre lo mismo para las combinaciones que contempla.
+
+**Qué se acepta perder.** Una combinación de configuración que la batería no
+contemple y que fallara **no se detectaría en la ejecución del usuario**. La
+ejecución conserva las comprobaciones que ya hacía del FASTQ final: gramática,
+pareja de mates, identidades, huellas y recuentos frente al manifiesto.
+
+**Qué exige del oráculo.** Lee solo lo publicado: la configuración efectiva,
+la referencia, `truth.jsonl`, el recurso del perfil técnico, con su huella
+comprobada, y los FASTQ, descomprimidos con el `gzip` del sistema. Comparte
+con el productor **únicamente** la derivación de subsemillas del catálogo
+técnico, las primitivas de muestreo normativas y la derivación de los
+identificadores de biblioteca, que además se exigen iguales a los publicados.
+Reescribe todo lo demás, incluidas las identidades `PH_` y `TP_`. No compara el
+orden de las parejas dentro de un fichero, que no es contrato, pero sí el
+conjunto exacto por biblioteca y los recuentos de propias y contaminantes del
+manifiesto. Cada escenario exige además que el oráculo haya visto la
+transformación que dice cubrir.
+
+**Cómo se mantiene.** Una transformación nueva que cambie las lecturas entra
+en el oráculo y en al menos un escenario de la batería en el mismo cambio que
+la introduce. Si no, la decisión deja de cubrirla.
+
+## DTC-102 — El tartamudeo de una molécula quimérica, tramo a tramo
+
+Decisión del 27/10/2026, nacida del arreglo de DT-060. Concreta REQ-DAT-74 a
+77 y REQ-DAT-82 para las moléculas quiméricas. No cambia el catálogo
+aleatorio ni añade claves.
+
+**Dónde se buscan los tractos.** Una molécula quimérica se compone de dos
+tramos: el prefijo, de la copia y el inicio del fragmento, y el sufijo, del
+segundo origen que eligió la quimera. Cada tracto declarado se busca **en el
+tramo que lo contiene, con la copia de la que sale ese tramo**, y se recorta a
+ese tramo. Los tractos de los dos tramos se recorren juntos en el orden
+canónico de la molécula: inicio y, a igualdad, identificador de locus.
+
+**(a) El paso heredado del linaje de PCR solo cae en el primer tramo.** El
+linaje es la historia de la molécula original de la familia, y en una pareja
+quimérica de esa familia solo el prefijo procede de ella; el sufijo es
+secuencia de otro sitio sin historia de linaje. Un tracto del sufijo recibe
+solo la decisión de base por pareja, aunque su locus tenga paso de linaje en
+la familia.
+
+**(b) Un mismo locus en los dos tramos usa la misma clave aleatoria.** Puede
+ocurrir cuando el prefijo y el sufijo salen de copias distintas que llevan el
+mismo locus. La decisión de base se deriva de evento, biblioteca, plantilla e
+**identificador de locus** (REQ-DAT-77), así que los dos tractos leen la misma
+subsemilla. **Consecuencia:** los dos resbalan o no a la vez, y si resbalan
+eligen el paso con la misma palabra aleatoria; el paso coincide cuando los dos
+tienen los mismos candidatos viables y puede diferir si no. No son decisiones
+independientes. Se acepta porque es lo que el contrato fija para la clave, y
+separarlas exigiría una clave nueva y una versión nueva del catálogo. En la
+batería ocurre en dos moléculas del escenario de linaje con quimeras y en tres
+del de quimeras entre dos secuencias.
+
+**Qué lo vigila.** `tests/final_pairs_against_truth.rs`: la reproducción
+mínima de DT-060, el escenario de quimeras entre dos secuencias con
+microsatélites, el de linaje con quimeras —que exige que (a) haya ocurrido— y
+el saturado.
+

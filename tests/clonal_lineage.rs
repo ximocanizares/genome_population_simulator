@@ -973,19 +973,23 @@ fn a_high_chimera_rate_does_not_break_the_pair_source_check() {
 /// Una primera versión se quedaba en `escritos < sorteados` y **sobrevivía a
 /// suprimir la mitad de la viabilidad**, porque los descartes de la otra mitad
 /// bastaban para que la desigualdad siguiera cumpliéndose. Con las dos mitades
-/// se escriben **248** de 300; suprimiendo la viabilidad, **274**. De ahí la
-/// cifra congelada.
+/// se escriben **243** de 300; suprimiendo la viabilidad, la ejecución aborta.
+/// De ahí la cifra congelada.
 ///
 /// Y con contracciones la otra mitad **tampoco se distingue**, porque
 /// `step_is_viable` ya excluye por su cuenta una contracción sobre una tirada
 /// de cero unidades. La mitad del tracto ausente solo manda con **expansiones**,
 /// donde la viabilidad no filtra nada y lo único que impide insertar copias de
 /// un motivo que no está es esa comprobación. De ahí el **segundo escenario**,
-/// con todo el peso en `+1`: **274** de 300 con quimera y **300** sin ella.
+/// con todo el peso en `+1`: **248** de 300 con quimera y **300** sin ella.
+/// Suprimiendo la comprobación del tracto ausente salen **249**: esa mitad
+/// solo se distingue por un paso.
 ///
 /// **Ninguno de los dos literales se actualiza sin más si algún día cambian**:
 /// o el cambio mueve la aleatoriedad de estos escenarios —y entonces hay que
-/// decidirlo por escrito— o es un defecto.
+/// decidirlo por escrito— o es un defecto. El 27/10/2026 se decidió por
+/// escrito (DT-060): hasta entonces el paso del linaje podía escribirse en el
+/// sufijo de la molécula quimérica, y las cifras eran 248 y 274.
 #[test]
 fn a_net_step_that_does_not_fit_the_chimeric_molecule_is_not_written() {
     let tract = "CA".repeat(4);
@@ -1035,9 +1039,9 @@ fn a_net_step_that_does_not_fit_the_chimeric_molecule_is_not_written() {
     );
     // **Y la cifra exacta**, que es lo que distingue la mitad de la viabilidad.
     // Ver la nota de la documentación: la desigualdad sola sobrevive a
-    // suprimirla, y entonces da 274.
+    // suprimirla.
     assert_eq!(
-        chimeric_written, 248,
+        chimeric_written, 243,
         "pasos escritos congelados de este escenario; ver la documentación antes de tocar \
          este número"
     );
@@ -1065,9 +1069,9 @@ fn a_net_step_that_does_not_fit_the_chimeric_molecule_is_not_written() {
     );
     assert_eq!(
         grown.applied_steps("STR-1"),
-        274,
+        248,
         "expansiones escritas congeladas: con la comprobación del tracto ausente suprimida \
-         se escribirían las 300, porque la viabilidad no filtra una expansión"
+         se escriben 249, porque la viabilidad no filtra una expansión"
     );
 }
 

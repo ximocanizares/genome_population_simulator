@@ -377,8 +377,10 @@ con muestreo WGS básico separado de la evidencia final.
     siendo una unidad completa. Para inserto `L`, el primer segmento es el
     prefijo de la plantilla hasta un punto `b` uniforme en `1..L-1`; el segundo
     aporta `L-b` bases y se elige uniformemente de la lista canónica de todos
-    los intervalos válidos del mismo individuo/biblioteca, ordenada por copia,
-    secuencia e inicio. En la misma copia se excluyen intervalos que solapen o
+    los intervalos válidos del mismo individuo/biblioteca, ordenada por
+    identificador de secuencia en orden de bytes de su nombre (no en el orden
+    de declaración de la referencia), después por índice de copia y después
+    por inicio (DTC-084, corregida el 27/10/2026). En la misma copia se excluyen intervalos que solapen o
     toquen el primero; ambos se leen en orientación directa y la PE normal se
     aplica al inserto compuesto. Si una pareja Bernoulli seleccionada no tiene
     segunda fuente válida, se falla antes de publicar. El perfil inicial fija
@@ -500,20 +502,33 @@ con muestreo WGS básico separado de la evidencia final.
     validador independiente comprueba FASTQ, pareja, hashes y resúmenes, y que
     no se publica procedencia individual; puertas comunes.
 
-- ☐ F4.5.3. Validar por flujo cada pareja final contra la reconstrucción
-  independiente de su clave técnica transitoria antes de destruirla.
+- ✅ F4.5.3. Comprobar cada pareja final contra la reconstrucción
+  independiente de su clave técnica, la verdad y la transformación autorizada.
+  - **Forma nueva (27/10/2026, DTC-101).** El responsable decidió que la
+    comparación no se repita en cada ejecución: la garantiza una prueba
+    obligatoria del proyecto. La redacción original pedía un reconstructor
+    por flujo dentro de `src/fastq_validation.rs` que comparara antes de
+    destruir las claves; no se implementó nunca y queda sustituida.
   - Depende de: F4.5.2.
   - Procede de: REQ-VAL-01–03/09–11, REQ-DAT-25–36/69–71 y DTPD-108.
-  - Cambia: `src/fastq_validation.rs` y el orquestador provisional; el
-    reconstructor consulta verdad biológica, plan compacto, perfil y catálogo
-    RNG, pero no al escritor FASTQ. Compara literalmente R1/R2, calidad,
-    cabecera, mate, donante o retirada biológica y biblioteca tras *hopping*.
-    En éxito solo conserva el resultado agregado; en discrepancia detiene antes
-    de publicar y conserva el diagnóstico sin un fichero de procedencia.
-  - Se comprueba con: `cargo test --test f4_technical_replay_validation --locked`;
-    fixture pequeño con haplotipos, calidades y bibliotecas distinguibles, más
-    mutaciones negativas independientes de base, calidad, donante, retirada y
-    salto, demuestra que ninguna supera la validación.
+  - Cambia: `tests/final_pairs_against_truth.rs` (escenarios) y
+    `tests/final_pairs_oracle/` (oráculo). El oráculo lee solo lo publicado y
+    no llama al productor de lecturas; compara literalmente R1/R2, calidad,
+    cabecera, mate, donante o retirada biológica y biblioteca tras el salto.
+    La ejecución no cambia.
+  - Se comprueba con: `cargo test --test final_pairs_against_truth --locked`.
+    Doce escenarios: haploide con `N` y sin errores; diploide con *indels*,
+    errores y `N`; tetraploide con alelos generados; dos secuencias con
+    quimeras; quimeras y microsatélites en dos secuencias;
+    contaminación con salto de índice en dos poblaciones; PCR sola;
+    tartamudeo de base solo; tartamudeo clonal solo; clonal con quimeras; la
+    reproducción mínima de DT-060 y el escenario saturado. Cada mutación del
+    productor de `evidence/final-pairs-f4-5-3/mutaciones.md` (inicio del
+    fragmento, copia, R2, punto de corte, errores, calidad, `N`,
+    contaminación, salto, PCR, linaje, tartamudeo, desempate de la tirada)
+    hace fallar al menos un escenario; puertas comunes.
+  - Hallazgo al implementarlo: DT-060 (tartamudeo de moléculas quiméricas),
+    cerrada el mismo día.
 
 > **PAUSA-F4.5.** Revisar coherencia transversal FASTQ–resumen agregado–manifiesto,
 > la reconstrucción independiente de cada pareja final y que los descartes

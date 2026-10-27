@@ -266,7 +266,9 @@ const BASE32_ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 /// Comprueba una sola salida PE descomprimida frente a la identidad esperada,
 /// sin consultar verdad biológica ni claves transitorias, y devuelve lo que
-/// recuenta. La comparación contra esa verdad pertenece a F4.5.3.
+/// recuenta. La comparación de cada pareja con la verdad (REQ-VAL-03) no se
+/// hace en la ejecución: la garantiza la batería obligatoria
+/// `tests/final_pairs_against_truth.rs` (DTC-101).
 pub fn validate_final_fastq_mate(
     path: &Path,
     expected_mate: crate::technical_identity::TechnicalMate,

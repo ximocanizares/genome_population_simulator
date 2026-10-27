@@ -2859,6 +2859,15 @@ cuando procede de una sola molécula.
     un orden invertido; una guarda aplicada a cada paso por separado en vez de
     al neto; una implementación que calcule la tirada más larga **una sola vez**
     y aplique los dos pasos en la misma, que la prueba de los dos pasos caza.
+  - **Nota del 27/10/2026 (DT-060).** «Sobre la molécula ya quimérica» quiere
+    decir que los tractos se sitúan **en cada uno de sus dos tramos con la
+    copia de la que sale ese tramo**: el prefijo con la del fragmento y el
+    sufijo con el segundo origen de la quimera. Hasta esa fecha se situaban con
+    la copia del prefijo sobre la molécula entera, lo que tartamudeaba bases
+    del sufijo que no eran un tracto y dejaba sin evaluar los tractos del
+    sufijo (REQ-DAT-74 a 76). El paso heredado del linaje cae solo sobre los
+    tractos del prefijo, que es lo que procede de la molécula original de la
+    familia (DTC-102). Lo vigila `tests/final_pairs_against_truth.rs`.
 
 - ☐ **F4.10.5.** **Comprobación aritmética de la composición**: con las dos
   partes activas, la fracción de lecturas afectadas por tartamudeo que un

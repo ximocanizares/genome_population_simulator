@@ -558,7 +558,9 @@ FASTQ y manifiesto no publican el vínculo de procedencia individual.
 Una quimera F4 no busca una segunda plantilla ni cambia de biblioteca. Para un
 inserto `L`, conserva el prefijo `1..b` de la plantilla fuente, donde `b` se
 elige uniformemente en `1..L-1`, y forma una lista canónica de intervalos de
-longitud `L-b` en todas las copias del mismo individuo/biblioteca. La clave de
+longitud `L-b` en todas las copias del mismo individuo/biblioteca, ordenada por
+identificador de secuencia en orden de bytes de su nombre, después por índice
+de copia y después por inicio (DTC-084). La clave de
 quimera añade `b` y el selector de intervalo a `f4-technical-v3`. En la copia
 fuente excluye los intervalos que solapan o tocan el prefijo; escoge uno de los
 restantes con `uniform-index-v1`. Ambos segmentos se leen en orientación

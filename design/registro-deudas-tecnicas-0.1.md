@@ -93,6 +93,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-057 | El juez del manifiesto general acepta paquetes fallidos incoherentes editados a mano: verdad sin matriz de SNV, VCF sin verdad o verdad sin su referencia | Baja | 13/10/2026 | Abierta |
 | DT-058 | Los alelos de los microsatélites ignoran el coeficiente de endogamia F: con `f_diploid` se sorteaban copia a copia como en Hardy-Weinberg | Media | 25/10/2026 | **Cerrada (25/10/2026)** |
 | DT-059 | Con `schema_version = "3"` y microsatélites, el error habla del escenario F5 y de un campo desconocido `initial_populations`, no de la versión | Baja | 25/10/2026 | Abierta |
+| DT-060 | En una molécula quimérica, el tartamudeo situaba los tractos con la copia del primer tramo sobre la molécula entera: tartamudeaba bases que no eran un tracto y no evaluaba los tractos del segundo tramo | Media | 27/10/2026 | **Cerrada (27/10/2026)** |
 
 ---
 
@@ -5548,4 +5549,83 @@ con `schema_version = "3"`, validado con `validate`.
 
 **Qué haría falta.** Que, ante un campo que solo existe en una versión
 posterior, el diagnóstico nombre la versión declarada y la que lo admite.
+
+## DT-060. El tartamudeo de una molécula quimérica miraba la copia equivocada
+
+**Gravedad: media.** Hallada el 27/10/2026 por la batería que compara cada
+pareja final con la verdad (`tests/final_pairs_against_truth.rs`, REQ-VAL-03).
+**Cerrada el mismo día.**
+
+**Qué pasaba.** Una molécula quimérica se compone de dos tramos: el prefijo,
+de la copia de la que salió el fragmento, y el sufijo, del segundo origen que
+elige la quimera. El tartamudeo (`src/stutter.rs`, `transform_paired_end`)
+buscaba cada microsatélite en la copia del prefijo y aplicaba su ventana a la
+molécula **entera**. La quimera conservaba el origen del sufijo, pero el
+muestreador lo descartaba antes de tartamudear. Dos consecuencias:
+
+- si la ventana caía más allá del punto de corte, leía bases del segundo
+  origen que **no eran el tracto**; bastaba un `CA` suelto para que pudiera
+  expandirse;
+- un tracto que entraba con el segundo origen **no se evaluaba nunca**.
+
+Lo mismo valía para el paso heredado del linaje de PCR, que se sitúa igual. Un
+comentario del código lo presentaba como «limitación conocida» y afirmaba que
+nunca se escribía un paso sobre bases que no repiten; era falso, porque una
+sola copia del motivo es una tirada de una unidad y admite la expansión.
+
+**Qué contrato rompía.** REQ-DAT-74 («una región repetitiva que no corresponda
+a un locus configurado no produce tartamudeo»), REQ-DAT-75 («para cada molécula
+y cada tracto declarado contenido en ella») y REQ-DAT-76 (en una quimera, el
+tartamudeo se aplica a la molécula quimérica ya formada).
+
+**Alcance real.** Solo con quimeras, loci declarados y tartamudeo activo a la
+vez. Con las tasas calibradas por omisión era raro: perdía del orden del 1 %
+del tartamudeo de los tractos del sufijo y la expansión inventada exigía una
+tasa de una tirada de una unidad, del orden de 4·10⁻⁵. Con tasas altas se ve
+enseguida: la reproducción mínima da 10 parejas distintas de unas 100.
+
+**Cómo se cerró.** La quimera entrega el origen de sus dos tramos
+(`ChimeraTransformation::into_parts`) y el tartamudeo sitúa los tractos de cada
+tramo con su propia copia, en el orden canónico de la molécula entera. El paso
+heredado del linaje solo cae sobre los tractos del primer tramo, que es la
+parte que procede de la molécula original de la familia; el sufijo no tiene
+historia de linaje. Ninguna clave aleatoria nueva ni cambio de catálogo: si un
+mismo locus aparece en los dos tramos (dos copias distintas), las dos
+ventanas usan la clave de ese locus, que es lo que REQ-DAT-77 fija.
+
+**Qué bytes cambian.** Solo los de ejecuciones que combinan quimeras, loci de
+repetición y tartamudeo activo: los FASTQ de las parejas afectadas y los
+recuentos del tartamudeo del manifiesto de evento (y, con ellos, la huella del
+manifiesto general). Comprobado con el binario anterior y el corregido sobre
+los mismos ficheros: no cambia ni un byte en las siete entradas congeladas
+(una de `evidence/stutter-f4-8-congelacion/` y seis de
+`evidence/dt-009-multiplicador-congelacion/`), ni en una ejecución con
+tartamudeo y sin quimeras, ni en una con quimeras y sin loci. La ejecución con
+las tres cosas cambia los recuentos del manifiesto de evento. Aparte, y sin
+relación con este cambio: las huellas archivadas en
+`evidence/stutter-f4-8-congelacion/con-la-capacidad.sha256` ya no se reproducen
+ni con el binario anterior al arreglo —difieren `truth.jsonl` y
+`manifest.json`—; es una deriva previa y no se ha tocado.
+
+**Una cifra congelada que cambia, decidido por escrito aquí.**
+`tests/clonal_lineage.rs::a_net_step_that_does_not_fit_the_chimeric_molecule_is_not_written`
+congelaba los pasos de linaje escritos en moléculas quiméricas: 248
+contracciones y 274 expansiones de 300. Esas cifras incluían pasos escritos en
+el sufijo por este defecto. Con el arreglo son 243 y 248. Medido de nuevo, la
+prueba sigue distinguiendo las dos mitades que vigila: sin la comprobación de
+viabilidad la ejecución aborta, y sin la del tracto ausente salen 249
+expansiones.
+
+**Decisiones que deja.** Las dos reglas nuevas que el arreglo fija —el paso
+heredado del linaje solo en el primer tramo, y la misma clave para un locus
+que aparece en los dos tramos— están en DTC-102.
+
+**Regresión.** `chimeric_molecules_stutter_only_their_declared_tracts` (la
+reproducción mínima), `clonal_stutter_with_chimeras_matches_the_truth` y
+`saturated_scenario_matches_the_truth` fallan al reintroducir el defecto en el
+árbol real y pasan con el arreglo. `chimeric_stutter_across_two_sequences_matches_the_truth`,
+añadida por la revisión del 27/10/2026, caza además un arreglo a medias que
+buscara los tractos del sufijo con la secuencia del prefijo, y que la batería
+anterior dejaba pasar. Ver `evidence/final-pairs-f4-5-3/mutaciones.md` (M21 y
+M23).
 

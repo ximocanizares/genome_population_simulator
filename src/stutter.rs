@@ -997,28 +997,32 @@ pub enum StutterError {
 /// inverso de R2 muestren el mismo número de unidades cuando los dos cubren el
 /// tracto.
 ///
-/// # Una limitación conocida con las quimeras, dicha en voz alta
+/// # Moléculas quiméricas
 ///
-/// El tracto se sitúa traduciendo el intervalo del locus a coordenadas de la
-/// copia y recortándolo contra el intervalo de la molécula. En una molécula
-/// **quimérica** ese intervalo deja de describir un tramo contiguo de la copia
-/// más allá del punto de rotura, y la procedencia de la segunda mitad es
-/// transitoria: la quimera no la conserva. En consecuencia, sobre una molécula
-/// quimérica la ventana puede caer donde el tracto ya no está.
+/// Una molécula quimérica se compone de **dos tramos de copia**: el prefijo,
+/// de la copia y el inicio del fragmento, y el sufijo, del segundo origen que
+/// eligió la quimera. Los tractos se sitúan **en cada tramo con su propia
+/// copia** (`chimera`, el origen que entrega la quimera), de modo que se
+/// evalúa cada tracto declarado contenido en la molécula y ninguna región que
+/// no lo sea (REQ-DAT-74 a 76). El paso heredado del linaje de PCR solo cae
+/// sobre los tractos del prefijo, que es la parte que procede de la molécula
+/// original de la familia; el sufijo no tiene historia de linaje.
 ///
-/// **Lo que eso produce, y lo que no.** La ventana se vuelve a leer con
-/// [`observe_tract`] antes de decidir nada: si dentro no hay ninguna copia
-/// completa del motivo, no hay tirada, no se evalúa y **no se consume
-/// aleatoriedad**. Nunca se escribe un paso sobre bases que no repiten. Lo que
-/// sí puede pasar es que una molécula quimérica que sigue conteniendo el tracto
-/// no llegue a tartamudear. Con la tasa de quimeras del perfil vigente, cero,
-/// el caso no existe.
+/// Hasta el 27 de octubre de 2026 la ventana de la primera copia se aplicaba a
+/// la molécula entera: más allá del punto de corte leía bases del segundo
+/// origen, que podían tartamudear sin ser un tracto, y un tracto del segundo
+/// origen no se evaluaba nunca (DT-060).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "el origen de la quimera es el octavo hecho de la pareja; agruparlo con la pareja movería la lista sin acortarla"
+)]
 pub fn transform_paired_end(
     root: RootSeed,
     event_id: &EventId,
     individual: &Individual,
     plan: &StutterPlan,
     lineage: Option<&crate::clonal_stutter::LineageNetSteps>,
+    chimera: Option<&crate::chimera::ChimeraOrigin>,
     pair: PairedEndPair,
     read_length: u16,
 ) -> Result<StutterTransformation, StutterError> {
@@ -1048,13 +1052,37 @@ pub fn transform_paired_end(
     // Los tractos se recorren en **orden canónico de inicio sobre la
     // molécula**, con desempate por identificador de locus. El orden importa
     // porque un paso desplaza todo lo que queda a su derecha.
-    let placements = place_tracts(
-        individual,
-        plan,
-        &copy_id,
-        pair.fragment().start(),
-        original_length,
-    )?;
+    let placements = match chimera {
+        None => place_tracts(
+            individual,
+            plan,
+            &copy_id,
+            pair.fragment().start(),
+            original_length,
+        )?,
+        Some(origin) => {
+            let breakpoint = origin.breakpoint().get();
+            let second = origin.second();
+            place_tracts_in_segments(
+                individual,
+                plan,
+                &[
+                    MoleculeSegment {
+                        copy_id: origin.first().copy_id(),
+                        copy_start: origin.first().start(),
+                        molecule_start: 0,
+                        length: breakpoint,
+                    },
+                    MoleculeSegment {
+                        copy_id: second.copy_id(),
+                        copy_start: second.start(),
+                        molecule_start: breakpoint,
+                        length: second.end() - second.start(),
+                    },
+                ],
+            )?
+        }
+    };
 
     // Desplazamiento acumulado por los pasos ya aplicados. Todos caen **a la
     // izquierda** del tracto siguiente, porque los tractos se recorren en
@@ -1079,7 +1107,11 @@ pub fn transform_paired_end(
         // ------------------------------------------------------------------
         // 1. **Primero** el paso neto heredado del linaje de PCR.
         // ------------------------------------------------------------------
-        let net = lineage.map_or(0, |steps| steps.step_for(locus.id().as_str()));
+        let net = if placed.from_first_segment {
+            lineage.map_or(0, |steps| steps.step_for(locus.id().as_str()))
+        } else {
+            0
+        };
         if net != 0 {
             let sequence: &[u8] = rewritten
                 .as_deref()
@@ -1361,6 +1393,9 @@ pub struct PlacedTract<'a> {
     locus: &'a StutterLocus,
     start: u64,
     end: u64,
+    /// El tracto sale del primer tramo de la molécula, el que procede de la
+    /// molécula original de la familia. En una molécula no quimérica, siempre.
+    from_first_segment: bool,
 }
 
 impl<'a> PlacedTract<'a> {
@@ -1390,28 +1425,64 @@ pub fn place_tracts<'a>(
     fragment_start: u64,
     fragment_length: u64,
 ) -> Result<Vec<PlacedTract<'a>>, StutterError> {
-    let Some(copy) = individual
-        .copies_for(copy_id.sequence_id())
-        .and_then(|copies| copies.iter().find(|candidate| *candidate.id() == *copy_id))
-    else {
-        return Err(StutterError::CopyNotFound {
-            sequence_id: copy_id.sequence_id().as_str().to_owned(),
-            copy_index: copy_id.copy_index(),
-        });
-    };
+    place_tracts_in_segments(
+        individual,
+        plan,
+        &[MoleculeSegment {
+            copy_id,
+            copy_start: fragment_start,
+            molecule_start: 0,
+            length: fragment_length,
+        }],
+    )
+}
+
+/// Un tramo contiguo de copia dentro de una molécula.
+struct MoleculeSegment<'b> {
+    copy_id: &'b crate::haplotype::HaplotypeCopyId,
+    copy_start: u64,
+    molecule_start: u64,
+    length: u64,
+}
+
+/// Sitúa los tractos de cada tramo con su propia copia y los ordena en el
+/// orden canónico de la molécula entera.
+fn place_tracts_in_segments<'a>(
+    individual: &Individual,
+    plan: &'a StutterPlan,
+    segments: &[MoleculeSegment<'_>],
+) -> Result<Vec<PlacedTract<'a>>, StutterError> {
     let mut placements = Vec::new();
-    for locus in plan.loci() {
-        if locus.sequence_id() != copy_id.sequence_id() {
-            continue;
-        }
-        let Some(placement) = locate_tract_in_copy(copy, locus)? else {
-            continue;
-        };
-        let Some((start, end)) = clip_to_molecule(placement, fragment_start, fragment_length)
+    for (index, segment) in segments.iter().enumerate() {
+        let copy_id = segment.copy_id;
+        let Some(copy) = individual
+            .copies_for(copy_id.sequence_id())
+            .and_then(|copies| copies.iter().find(|candidate| *candidate.id() == *copy_id))
         else {
-            continue;
+            return Err(StutterError::CopyNotFound {
+                sequence_id: copy_id.sequence_id().as_str().to_owned(),
+                copy_index: copy_id.copy_index(),
+            });
         };
-        placements.push(PlacedTract { locus, start, end });
+        for locus in plan.loci() {
+            if locus.sequence_id() != copy_id.sequence_id() {
+                continue;
+            }
+            let Some(placement) = locate_tract_in_copy(copy, locus)? else {
+                continue;
+            };
+            let Some((start, end)) =
+                clip_to_molecule(placement, segment.copy_start, segment.length)
+            else {
+                continue;
+            };
+            placements.push(PlacedTract {
+                locus,
+                start: start + segment.molecule_start,
+                end: end + segment.molecule_start,
+                from_first_segment: index == 0,
+            });
+        }
     }
     placements.sort_by(|left, right| {
         (left.start, left.locus.id().as_str()).cmp(&(right.start, right.locus.id().as_str()))

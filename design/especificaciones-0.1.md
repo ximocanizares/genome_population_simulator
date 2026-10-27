@@ -51,6 +51,19 @@ Internet únicamente para descargar las dependencias exactas resueltas por
 del simulador no consultan la red ni dependen de servicios remotos. La
 instalación distribuible sin descarga previa sigue reservada a F9.
 
+**Comparación pareja a pareja de las lecturas finales (27 de octubre de
+2026).** REQ-VAL-03 pedía que cada ejecución reconstruyera de forma
+independiente cada pareja final del FASTQ y la comparara con la esperada antes
+de destruir las claves técnicas transitorias. El responsable decide que esa
+comparación **no se repita en cada ejecución**, por su coste en tiempo y por el
+código permanente que añadiría al programa, y que se garantice con una
+**prueba obligatoria del proyecto**: una batería de escenarios que combinan
+todas las transformaciones autorizadas, juzgada por un oráculo escrito aparte
+del productor (DTC-101). Se acepta expresamente lo que eso pierde: una
+combinación de configuración que la batería no contemple y que fallara no se
+detectaría en la ejecución del usuario. La ejecución conserva sus demás
+comprobaciones del FASTQ final (formato, identidades, huellas y recuentos).
+
 La sección 4 es la fuente normativa de requisitos funcionales. Las secciones 2,
 5 y 6 los resumen y la sección 7 propone criterios de aceptación preliminares.
 Si una redacción resumida difiere de un requisito identificado, prevalece el
@@ -1072,7 +1085,9 @@ su asignación por fase está en la matriz de trazabilidad.
   punto `b` se sortea uniformemente en `1..L-1` y la segunda fuente aporta
   exactamente `L-b` bases. Sus candidatas son todos los intervalos válidos de
   esa longitud en las copias del mismo individuo y biblioteca, ordenados por
-  copia, secuencia y inicio; se excluye una candidata de la misma copia que
+  identificador de secuencia en orden de bytes de su nombre —no en el orden de
+  declaración de la referencia—, después por índice de copia y después por
+  inicio (DTC-084, corregida el 27/10/2026); se excluye una candidata de la misma copia que
   solape o toque el intervalo del prefijo. Se elige uniformemente una candidata
   restante. Las dos fuentes se leen en orientación directa de su copia y la
   disposición PE normal se aplica después al inserto compuesto. Pueden proceder
@@ -4443,21 +4458,35 @@ puede diferir de su objetivo por el muestreo aleatorio. En v1 estos dos tipos no
 comparten una política de aceptación.
 
 - **REQ-VAL-01.** Siempre que se generen FASTQ o BAM o CRAM, el sistema debe
-  comprobar internamente sus invariantes deterministas contra la verdad
-  biológica simulada y producir por separado informes estadísticos de las
-  magnitudes aleatorias y los artefactos configurados.
+  comprobar internamente sus invariantes deterministas y producir por separado
+  informes estadísticos de las magnitudes aleatorias y los artefactos
+  configurados. En cada ejecución, el FASTQ final se comprueba en formato,
+  identidades, huellas y recuentos; su contenido pareja a pareja frente a la
+  verdad biológica lo garantiza la prueba obligatoria de REQ-VAL-03.
 - **REQ-VAL-02.** La validación debe usar el genoma, los haplotipos, la ploidía,
   los genotipos y la procedencia verdadera de las lecturas definidos por la
   simulación. No debe ejecutar un *SNP caller* ni llamar, imputar, fasear,
   corregir o inferir genotipos a partir de BAM o CRAM.
-- **REQ-VAL-03.** La validación debe comprobar que las lecturas proceden de los
-  individuos y haplotipos correctos, salvo las procedencias diferentes que la
-  configuración introduzca expresamente como contaminación u otro artefacto.
-  Antes de destruir las claves técnicas transitorias, un reconstructor
-  independiente por flujo debe comparar cada pareja final con la pareja esperada
-  desde su clave, verdad biológica y transformación autorizada. Debe comprobar
-  bases, calidades, mates, contaminación y transferencia técnica sin publicar ni
-  conservar un vínculo individual por lectura.
+- **REQ-VAL-03.** Las lecturas deben proceder de los individuos y haplotipos
+  correctos, salvo las procedencias diferentes que la configuración introduzca
+  expresamente como contaminación u otro artefacto. Que cada pareja final
+  coincide con la pareja esperada desde su clave técnica, la verdad biológica y
+  la transformación autorizada se garantiza mediante una **prueba obligatoria
+  del proyecto**, no en cada ejecución. La prueba recorre una batería de
+  escenarios que combinan todas las transformaciones autorizadas —ploidías
+  distintas, SNV, *indels*, microsatélites con alelos generados, errores de
+  secuenciación activos y desactivados, quimeras, contaminación biológica,
+  salto de índice entre varias bibliotecas, preparación sin PCR y amplificada,
+  tartamudeo de base y clonal—, con al menos un escenario que las active todas
+  a la vez y otros que las aíslen. Para cada pareja final publicada, un
+  oráculo independiente del productor rehace la pareja esperada desde lo
+  publicado y la compara literalmente: bases, calidades, mates y orientación,
+  origen, donante de la contaminación y biblioteca tras el salto. El oráculo
+  solo comparte con el productor las primitivas aleatorias normativas y la
+  derivación de identidades; no llama a las funciones que producen las
+  lecturas. La ejecución no repite esta comparación ni publica o conserva un
+  vínculo individual por lectura. Lo que se acepta perder lo explica la
+  sección 1 (27 de octubre de 2026).
 - **REQ-VAL-04.** La validación debe comparar la cobertura objetivo común con la
   cobertura WGS básica realizada de cada biblioteca. Debe comprobar
   por separado la cobertura final del FASTQ y la cobertura alineada observada
@@ -4495,7 +4524,10 @@ comparten una política de aceptación.
   incorrectas, identificadores incompatibles, genotipos imposibles, cabeceras o
   índices incoherentes, lecturas o parejas con procedencia o haplotipo imposible
   y artefactos observados sin explicación en la configuración, la verdad o una
-  decisión trazada.
+  decisión trazada. En el FASTQ final, la ejecución detecta lo que ve sin
+  reconstruir las parejas —formato, identidades, huellas y recuentos—; una
+  pareja cuyo contenido no corresponda a su procedencia la caza la prueba
+  obligatoria de REQ-VAL-03, no la ejecución.
 - **REQ-VAL-12.** Las diferencias atribuibles al muestreo aleatorio en cobertura,
   soporte alélico, tasas realizadas de errores, contaminación, duplicados y
   demás degradaciones deben registrarse como resultados estadísticos. En v1 no
@@ -5824,8 +5856,8 @@ pendientes.
 | **ACE-61. VCF ordenado, comprimido e indexado** | Por defecto, el VCF sigue el orden de secuencias de la referencia y las coordenadas dentro de cada una, está comprimido con BGZF y tiene un índice TBI o CSI compatible. Puede solicitarse texto sin comprimir. La ejecución falla si VCF, compresión, índice, cabecera y referencia no superan la validación correspondiente | Selección TBI/CSI, herramientas y casos límite |
 | **ACE-62. Solo loci diferentes de la referencia en VCF** | El VCF contiene un registro cuando al menos una muestra del conjunto tiene un alelo no de referencia, aunque ese ALT esté fijado en todas las muestras. No emite posiciones idénticas a la referencia ni bloques gVCF por defecto; el fichero estructurado de genotipos y haplotipos conserva la verdad completa | Casos invariantes de referencia, ALT fijado, loci polimórficos, multialélicos y distintas ploidías |
 | **ACE-63. VCF independiente de la evidencia observada** | El VCF se construye desde el estado genotípico faseado de la simulación, nunca mediante inferencia desde FASTQ, BAM o CRAM. En cada locus incluido conserva el genotipo completo y la fase real de todas las muestras aunque tengan cobertura cero, contaminación, errores, calidad baja o mapeo ausente, incorrecto, múltiple o ambiguo; esos casos no producen genotipos ausentes. Una limitación de representación se conserva mediante el complemento de verdad y no se confunde con falta de evidencia | Casos con cobertura cero y degradaciones combinadas; comprobación de independencia respecto a FASTQ y BAM/CRAM |
-| **ACE-64. Validación interna contra la verdad** | Siempre que existen FASTQ o BAM/CRAM, existe un resultado estructurado enlazado desde el manifiesto. Sin ejecutar un *SNP caller*, comprueba contra la verdad las procedencias, parejas, alineamientos, referencias e identidades, e informa cobertura, soporte alélico, errores, contaminación, duplicados y demás magnitudes aleatorias. Cada resultado estadístico registra ámbito, esperado, realizado, tamaño observado, desviaciones absoluta y relativa y explicación; si no puede calcularse, figura como «no evaluable» con causa | Métodos estadísticos, formato, esquema y casos de medida no evaluable |
-| **ACE-65. Consecuencias de la validación** | Un archivo, formato, índice o cabecera inválidos, una referencia o identificadores incompatibles, un genotipo imposible, una procedencia o haplotipo imposible o un artefacto sin explicación trazada detienen la ejecución e impiden completar el ámbito afectado. Una cobertura u otra magnitud aleatoria desviada se informa y permite completar, sin tolerancia de aceptación ni opción de elevarla a error. N desviado conserva un aviso no invalidante. Ne realizado no tiene objetivo; N realizado=0 aplica su política específica | Cobertura desviada que completa, procedencia imposible que falla, medida no evaluable y aviso de N |
+| **ACE-64. Validación interna contra la verdad** | Siempre que existen FASTQ o BAM/CRAM, existe un resultado estructurado enlazado desde el manifiesto. Sin ejecutar un *SNP caller*, comprueba contra la verdad las procedencias, parejas, alineamientos, referencias e identidades —la comparación pareja a pareja del FASTQ final con la verdad la garantiza la batería obligatoria de REQ-VAL-03, no cada ejecución—, e informa cobertura, soporte alélico, errores, contaminación, duplicados y demás magnitudes aleatorias. Cada resultado estadístico registra ámbito, esperado, realizado, tamaño observado, desviaciones absoluta y relativa y explicación; si no puede calcularse, figura como «no evaluable» con causa | Métodos estadísticos, formato, esquema y casos de medida no evaluable |
+| **ACE-65. Consecuencias de la validación** | Un archivo, formato, índice o cabecera inválidos, una referencia o identificadores incompatibles, un genotipo imposible, una procedencia o haplotipo imposible o un artefacto sin explicación trazada detienen la ejecución e impiden completar el ámbito afectado. En el FASTQ final, la procedencia de cada pareja no se comprueba en la ejecución sino con la batería obligatoria de REQ-VAL-03. Una cobertura u otra magnitud aleatoria desviada se informa y permite completar, sin tolerancia de aceptación ni opción de elevarla a error. N desviado conserva un aviso no invalidante. Ne realizado no tiene objetivo; N realizado=0 aplica su política específica | Cobertura desviada que completa, procedencia imposible que falla, medida no evaluable y aviso de N |
 | **ACE-66. Contenido genotípico del VCF verdadero** | En cada locus incluido, `GT` coincide con el genotipo real simulado y conserva fase y ploidía aunque la cobertura sea cero o las lecturas estén degradadas. El VCF no contiene `DP`, `AD`, `GQ`, `PL` ni ningún otro campo `FORMAT` derivado de observaciones o inferencias. La cobertura, el soporte alélico, las calidades y métricas equivalentes aparecen en los resultados de validación de FASTQ/BAM/CRAM, no en el VCF | Casos con distintas ploidías, cobertura cero y degradaciones; inspección de campos `FORMAT` |
 | **ACE-67. QUAL y FILTER del VCF verdadero** | Todos los registros válidos usan `QUAL=.` y `FILTER=PASS`. La cabecera explica que no se estima una calidad probabilística y que `PASS` identifica un registro verdadero validado estructuralmente. Si un registro no puede representarse mediante el VCF y su complemento cuando corresponda, o no puede validarse, se produce un error estructural, se detiene la creación del conjunto, este no se marca como completo y el registro no se emite como `PASS` | Casos de cabecera válida, complemento enlazado, registro no representable y fallo de validación |
 | **ACE-68. Alcance WGS y preparación** | F4 acepta exclusivamente WGS de DNA genómico con Illumina PE, en preparación `pcr_free` o `pcr`. Rechaza PacBio HiFi, Oxford Nanopore, PacBio CLR, paneles, amplicones, GBS y captura o reducción de representación. El perfil de sesgo GC calibrado, los duplicados ópticos y de agrupación y el marcado quedan en DTF-056 y DTF-055 | Casos de rechazo por tecnología y protocolo, y admisión de las dos preparaciones |

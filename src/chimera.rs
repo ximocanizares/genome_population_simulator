@@ -122,6 +122,14 @@ impl ChimeraTransformation {
     pub fn into_pair(self) -> PairedEndPair {
         self.pair
     }
+
+    /// La pareja y el origen de sus dos tramos, para que el tartamudeo sitúe
+    /// los tractos de una molécula quimérica en la copia de la que sale cada
+    /// tramo (DT-060).
+    #[must_use]
+    pub fn into_parts(self) -> (PairedEndPair, Option<ChimeraOrigin>) {
+        (self.pair, self.origin)
+    }
 }
 
 /// Recuento agregado, apto para el resumen de un evento.

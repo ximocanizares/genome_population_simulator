@@ -1362,13 +1362,15 @@ impl<'a> WgsPairedEndSampler<'a> {
         // **Después de la quimera y antes de calidad y errores.** La quimera
         // compara byte a byte el prefijo del fragmento contra la copia
         // haplotípica: un fragmento ya tartamudeado rompería esa comprobación.
+        let (pair, chimera_origin) = transformation.into_parts();
         let stuttered = crate::stutter::transform_paired_end(
             self.identities.root_seed(),
             event_id,
             self.individual,
             &self.stutter_plan,
             lineage.as_ref(),
-            transformation.into_pair(),
+            chimera_origin.as_ref(),
+            pair,
             self.read_length,
         )
         .map_err(WgsSamplingError::Stutter)?;

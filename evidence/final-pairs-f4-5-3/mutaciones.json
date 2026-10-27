@@ -1,0 +1,733 @@
+[
+ {
+  "mutation": "M01 inicio del fragmento desplazado una base",
+  "files": [
+   "src/wgs_sampling.rs"
+  ],
+  "before": {
+   "src/wgs_sampling.rs": "554e125aef72"
+  },
+  "after": {
+   "src/wgs_sampling.rs": "1cc25c7a31b9"
+  },
+  "restored_equal": true,
+  "oracle_kills": 12,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "base_stutter_without_pcr_matches_the_truth",
+   "chimeras_across_two_sequences_match_the_truth",
+   "chimeric_molecules_stutter_only_their_declared_tracts",
+   "chimeric_stutter_across_two_sequences_matches_the_truth",
+   "clonal_stutter_lineage_matches_the_truth",
+   "clonal_stutter_with_chimeras_matches_the_truth",
+   "contamination_with_index_hopping_matches_the_truth",
+   "diploid_reads_with_indels_and_sequencing_errors_match_the_truth",
+   "haploid_reads_without_errors_match_the_truth",
+   "pcr_families_without_microsatellites_match_the_truth",
+   "saturated_scenario_matches_the_truth",
+   "tetraploid_reads_over_generated_microsatellite_alleles_match_the_truth"
+  ],
+  "passed": 0,
+  "note": ""
+ },
+ {
+  "mutation": "M02 copia cromosómica equivocada (la siguiente candidata)",
+  "files": [
+   "src/wgs_sampling.rs"
+  ],
+  "before": {
+   "src/wgs_sampling.rs": "554e125aef72"
+  },
+  "after": {
+   "src/wgs_sampling.rs": "d70445f47966"
+  },
+  "restored_equal": true,
+  "oracle_kills": 9,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "base_stutter_without_pcr_matches_the_truth",
+   "chimeras_across_two_sequences_match_the_truth",
+   "chimeric_stutter_across_two_sequences_matches_the_truth",
+   "clonal_stutter_lineage_matches_the_truth",
+   "clonal_stutter_with_chimeras_matches_the_truth",
+   "contamination_with_index_hopping_matches_the_truth",
+   "diploid_reads_with_indels_and_sequencing_errors_match_the_truth",
+   "saturated_scenario_matches_the_truth",
+   "tetraploid_reads_over_generated_microsatellite_alleles_match_the_truth"
+  ],
+  "passed": 3,
+  "note": ""
+ },
+ {
+  "mutation": "M03 copias recorridas en orden de secuencia inverso",
+  "files": [
+   "src/wgs_sampling.rs"
+  ],
+  "before": {
+   "src/wgs_sampling.rs": "554e125aef72"
+  },
+  "after": {
+   "src/wgs_sampling.rs": "2c073f07fd87"
+  },
+  "restored_equal": true,
+  "oracle_kills": 2,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "chimeras_across_two_sequences_match_the_truth",
+   "chimeric_stutter_across_two_sequences_matches_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M04 media del inserto desplazada una base",
+  "files": [
+   "src/wgs_sampling.rs"
+  ],
+  "before": {
+   "src/wgs_sampling.rs": "554e125aef72"
+  },
+  "after": {
+   "src/wgs_sampling.rs": "5b1b70c93634"
+  },
+  "restored_equal": true,
+  "oracle_kills": 12,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "base_stutter_without_pcr_matches_the_truth",
+   "chimeras_across_two_sequences_match_the_truth",
+   "chimeric_molecules_stutter_only_their_declared_tracts",
+   "chimeric_stutter_across_two_sequences_matches_the_truth",
+   "clonal_stutter_lineage_matches_the_truth",
+   "clonal_stutter_with_chimeras_matches_the_truth",
+   "contamination_with_index_hopping_matches_the_truth",
+   "diploid_reads_with_indels_and_sequencing_errors_match_the_truth",
+   "haploid_reads_without_errors_match_the_truth",
+   "pcr_families_without_microsatellites_match_the_truth",
+   "saturated_scenario_matches_the_truth",
+   "tetraploid_reads_over_generated_microsatellite_alleles_match_the_truth"
+  ],
+  "passed": 0,
+  "note": ""
+ },
+ {
+  "mutation": "M05 R2 invertido sin complementar",
+  "files": [
+   "src/paired_end.rs"
+  ],
+  "before": {
+   "src/paired_end.rs": "718e1f9a890f"
+  },
+  "after": {
+   "src/paired_end.rs": "fea3f3676238"
+  },
+  "restored_equal": true,
+  "oracle_kills": 12,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "base_stutter_without_pcr_matches_the_truth",
+   "chimeras_across_two_sequences_match_the_truth",
+   "chimeric_molecules_stutter_only_their_declared_tracts",
+   "chimeric_stutter_across_two_sequences_matches_the_truth",
+   "clonal_stutter_lineage_matches_the_truth",
+   "clonal_stutter_with_chimeras_matches_the_truth",
+   "contamination_with_index_hopping_matches_the_truth",
+   "diploid_reads_with_indels_and_sequencing_errors_match_the_truth",
+   "haploid_reads_without_errors_match_the_truth",
+   "pcr_families_without_microsatellites_match_the_truth",
+   "saturated_scenario_matches_the_truth",
+   "tetraploid_reads_over_generated_microsatellite_alleles_match_the_truth"
+  ],
+  "passed": 0,
+  "note": ""
+ },
+ {
+  "mutation": "M06 punto de corte de la quimera desplazado",
+  "files": [
+   "src/chimera.rs"
+  ],
+  "before": {
+   "src/chimera.rs": "fa88db1cfb72"
+  },
+  "after": {
+   "src/chimera.rs": "b22fa7355503"
+  },
+  "restored_equal": true,
+  "oracle_kills": 5,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "chimeras_across_two_sequences_match_the_truth",
+   "chimeric_molecules_stutter_only_their_declared_tracts",
+   "chimeric_stutter_across_two_sequences_matches_the_truth",
+   "clonal_stutter_with_chimeras_matches_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 7,
+  "note": ""
+ },
+ {
+  "mutation": "M07 candidatas del segundo origen en orden de referencia",
+  "files": [
+   "src/chimera.rs"
+  ],
+  "before": {
+   "src/chimera.rs": "fa88db1cfb72"
+  },
+  "after": {
+   "src/chimera.rs": "96fd981cfb2e"
+  },
+  "restored_equal": true,
+  "oracle_kills": 2,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "chimeras_across_two_sequences_match_the_truth",
+   "chimeric_stutter_across_two_sequences_matches_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M08 error sorteado pero no aplicado",
+  "files": [
+   "src/error_quality.rs"
+  ],
+  "before": {
+   "src/error_quality.rs": "cae0bbf7cfc6"
+  },
+  "after": {
+   "src/error_quality.rs": "87cd40220c0f"
+  },
+  "restored_equal": true,
+  "oracle_kills": 3,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "contamination_with_index_hopping_matches_the_truth",
+   "diploid_reads_with_indels_and_sequencing_errors_match_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 9,
+  "note": ""
+ },
+ {
+  "mutation": "M09 error decidido con la clave del ciclo siguiente",
+  "files": [
+   "src/error_quality.rs"
+  ],
+  "before": {
+   "src/error_quality.rs": "cae0bbf7cfc6"
+  },
+  "after": {
+   "src/error_quality.rs": "1a1558795314"
+  },
+  "restored_equal": true,
+  "oracle_kills": 3,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "contamination_with_index_hopping_matches_the_truth",
+   "diploid_reads_with_indels_and_sequencing_errors_match_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 9,
+  "note": ""
+ },
+ {
+  "mutation": "M10 calidad desplazada un punto Phred",
+  "files": [
+   "src/error_quality.rs"
+  ],
+  "before": {
+   "src/error_quality.rs": "cae0bbf7cfc6"
+  },
+  "after": {
+   "src/error_quality.rs": "aad21b9ec3a3"
+  },
+  "restored_equal": true,
+  "oracle_kills": 12,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "base_stutter_without_pcr_matches_the_truth",
+   "chimeras_across_two_sequences_match_the_truth",
+   "chimeric_molecules_stutter_only_their_declared_tracts",
+   "chimeric_stutter_across_two_sequences_matches_the_truth",
+   "clonal_stutter_lineage_matches_the_truth",
+   "clonal_stutter_with_chimeras_matches_the_truth",
+   "contamination_with_index_hopping_matches_the_truth",
+   "diploid_reads_with_indels_and_sequencing_errors_match_the_truth",
+   "haploid_reads_without_errors_match_the_truth",
+   "pcr_families_without_microsatellites_match_the_truth",
+   "saturated_scenario_matches_the_truth",
+   "tetraploid_reads_over_generated_microsatellite_alleles_match_the_truth"
+  ],
+  "passed": 0,
+  "note": ""
+ },
+ {
+  "mutation": "M11 calidad de N distinta de cero",
+  "files": [
+   "src/error_quality.rs"
+  ],
+  "before": {
+   "src/error_quality.rs": "cae0bbf7cfc6"
+  },
+  "after": {
+   "src/error_quality.rs": "d54c7f27ddd7"
+  },
+  "restored_equal": true,
+  "oracle_kills": 0,
+  "oracle_structural": 0,
+  "run_failures": 2,
+  "failed": [
+   "diploid_reads_with_indels_and_sequencing_errors_match_the_truth",
+   "haploid_reads_without_errors_match_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M12 contaminación que no sustituye (repite la propia retirada)",
+  "files": [
+   "src/biological_contamination.rs"
+  ],
+  "before": {
+   "src/biological_contamination.rs": "b7674399e2ea"
+  },
+  "after": {
+   "src/biological_contamination.rs": "695f5a9dba3d"
+  },
+  "restored_equal": true,
+  "oracle_kills": 2,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "contamination_with_index_hopping_matches_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M13 contaminación con otra donante (orden de candidatas invertido)",
+  "files": [
+   "src/biological_contamination.rs"
+  ],
+  "before": {
+   "src/biological_contamination.rs": "b7674399e2ea"
+  },
+  "after": {
+   "src/biological_contamination.rs": "1493553219ea"
+  },
+  "restored_equal": true,
+  "oracle_kills": 2,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "contamination_with_index_hopping_matches_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M14 donantes de cualquier población",
+  "files": [
+   "src/biological_contamination.rs"
+  ],
+  "before": {
+   "src/biological_contamination.rs": "b7674399e2ea"
+  },
+  "after": {
+   "src/biological_contamination.rs": "e6f134855c4f"
+  },
+  "restored_equal": true,
+  "oracle_kills": 0,
+  "oracle_structural": 0,
+  "run_failures": 1,
+  "failed": [
+   "contamination_with_index_hopping_matches_the_truth"
+  ],
+  "passed": 11,
+  "note": ""
+ },
+ {
+  "mutation": "M15 salto de índice que no mueve la pareja",
+  "files": [
+   "src/demultiplexing.rs"
+  ],
+  "before": {
+   "src/demultiplexing.rs": "e39000ac44ce"
+  },
+  "after": {
+   "src/demultiplexing.rs": "a20ba026da6b"
+  },
+  "restored_equal": true,
+  "oracle_kills": 0,
+  "oracle_structural": 0,
+  "run_failures": 2,
+  "failed": [
+   "contamination_with_index_hopping_matches_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M16 salto de índice que duplica la pareja",
+  "files": [
+   "src/demultiplexing.rs",
+   "src/execution.rs"
+  ],
+  "before": {
+   "src/demultiplexing.rs": "e39000ac44ce",
+   "src/execution.rs": "1d2f807f448e"
+  },
+  "after": {
+   "src/demultiplexing.rs": "f660cddee344",
+   "src/execution.rs": "1a5f04a79002"
+  },
+  "restored_equal": true,
+  "oracle_kills": 0,
+  "oracle_structural": 0,
+  "run_failures": 2,
+  "failed": [
+   "contamination_with_index_hopping_matches_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M17 PCR sin duplicados (familias de tamaño 1)",
+  "files": [
+   "src/wgs_sampling.rs"
+  ],
+  "before": {
+   "src/wgs_sampling.rs": "554e125aef72"
+  },
+  "after": {
+   "src/wgs_sampling.rs": "5f3a319cbfe1"
+  },
+  "restored_equal": true,
+  "oracle_kills": 4,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "clonal_stutter_lineage_matches_the_truth",
+   "clonal_stutter_with_chimeras_matches_the_truth",
+   "pcr_families_without_microsatellites_match_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 8,
+  "note": ""
+ },
+ {
+  "mutation": "M18 PCR sin aceptación por composición",
+  "files": [
+   "src/wgs_sampling.rs"
+  ],
+  "before": {
+   "src/wgs_sampling.rs": "554e125aef72"
+  },
+  "after": {
+   "src/wgs_sampling.rs": "3f6dadd9ca61"
+  },
+  "restored_equal": true,
+  "oracle_kills": 2,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "pcr_families_without_microsatellites_match_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M19 linaje: herencia un ciclo más corta",
+  "files": [
+   "src/clonal_stutter.rs"
+  ],
+  "before": {
+   "src/clonal_stutter.rs": "7bf0c0092e49"
+  },
+  "after": {
+   "src/clonal_stutter.rs": "0f2888fe7a80"
+  },
+  "restored_equal": true,
+  "oracle_kills": 2,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "clonal_stutter_lineage_matches_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M20 tartamudeo: paso elegido simétrico al sorteado",
+  "files": [
+   "src/stutter.rs"
+  ],
+  "before": {
+   "src/stutter.rs": "3e610853ee36"
+  },
+  "after": {
+   "src/stutter.rs": "fd1b344d33f5"
+  },
+  "restored_equal": true,
+  "oracle_kills": 6,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "base_stutter_without_pcr_matches_the_truth",
+   "chimeric_molecules_stutter_only_their_declared_tracts",
+   "chimeric_stutter_across_two_sequences_matches_the_truth",
+   "clonal_stutter_lineage_matches_the_truth",
+   "clonal_stutter_with_chimeras_matches_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 6,
+  "note": ""
+ },
+ {
+  "mutation": "M21 DT-060 reintroducido (tractos con la copia del prefijo)",
+  "files": [
+   "src/stutter.rs"
+  ],
+  "before": {
+   "src/stutter.rs": "3e610853ee36"
+  },
+  "after": {
+   "src/stutter.rs": "5a0bd680698f"
+  },
+  "restored_equal": true,
+  "oracle_kills": 4,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "chimeric_molecules_stutter_only_their_declared_tracts",
+   "chimeric_stutter_across_two_sequences_matches_the_truth",
+   "clonal_stutter_with_chimeras_matches_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 8,
+  "note": ""
+ },
+ {
+  "mutation": "M22 linaje aplicado también al segundo tramo",
+  "files": [
+   "src/stutter.rs"
+  ],
+  "before": {
+   "src/stutter.rs": "3e610853ee36"
+  },
+  "after": {
+   "src/stutter.rs": "42da1f20f10b"
+  },
+  "restored_equal": true,
+  "oracle_kills": 1,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "clonal_stutter_with_chimeras_matches_the_truth"
+  ],
+  "passed": 11,
+  "note": ""
+ },
+ {
+  "mutation": "M11s calidad de N distinta de cero, sin la guarda del programa",
+  "files": [
+   "src/error_quality.rs",
+   "src/fastq_validation.rs"
+  ],
+  "before": {
+   "src/error_quality.rs": "cae0bbf7cfc6",
+   "src/fastq_validation.rs": "7f5a054c67fe"
+  },
+  "after": {
+   "src/error_quality.rs": "d54c7f27ddd7",
+   "src/fastq_validation.rs": "11e80d217186"
+  },
+  "restored_equal": true,
+  "oracle_kills": 2,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "diploid_reads_with_indels_and_sequencing_errors_match_the_truth",
+   "haploid_reads_without_errors_match_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M14s donantes de cualquier población, sin la guarda del programa",
+  "files": [
+   "src/biological_contamination.rs",
+   "src/results.rs"
+  ],
+  "before": {
+   "src/biological_contamination.rs": "b7674399e2ea",
+   "src/results.rs": "96df83dedc7e"
+  },
+  "after": {
+   "src/biological_contamination.rs": "e6f134855c4f",
+   "src/results.rs": "f399fe26402e"
+  },
+  "restored_equal": true,
+  "oracle_kills": 1,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "contamination_with_index_hopping_matches_the_truth"
+  ],
+  "passed": 11,
+  "note": ""
+ },
+ {
+  "mutation": "M15s salto de índice sorteado que no se aplica",
+  "files": [
+   "src/demultiplexing.rs"
+  ],
+  "before": {
+   "src/demultiplexing.rs": "e39000ac44ce"
+  },
+  "after": {
+   "src/demultiplexing.rs": "35d05f64aaf6"
+  },
+  "restored_equal": true,
+  "oracle_kills": 2,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "contamination_with_index_hopping_matches_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M16s salto que duplica la pareja, sin la guarda del programa",
+  "files": [
+   "src/demultiplexing.rs",
+   "src/execution.rs",
+   "src/fastq_validation.rs"
+  ],
+  "before": {
+   "src/demultiplexing.rs": "e39000ac44ce",
+   "src/execution.rs": "1d2f807f448e",
+   "src/fastq_validation.rs": "7f5a054c67fe"
+  },
+  "after": {
+   "src/demultiplexing.rs": "f660cddee344",
+   "src/execution.rs": "1a5f04a79002",
+   "src/fastq_validation.rs": "e1dab222b19d"
+  },
+  "restored_equal": true,
+  "oracle_kills": 0,
+  "oracle_structural": 2,
+  "run_failures": 0,
+  "failed": [
+   "contamination_with_index_hopping_matches_the_truth",
+   "saturated_scenario_matches_the_truth"
+  ],
+  "passed": 10,
+  "note": ""
+ },
+ {
+  "mutation": "M23 tractos del sufijo buscados con la secuencia del prefijo (revisión)",
+  "files": [
+   "src/stutter.rs"
+  ],
+  "before": {
+   "src/stutter.rs": "3e610853ee36"
+  },
+  "after": {
+   "src/stutter.rs": "2170c4b64c42"
+  },
+  "restored_equal": true,
+  "oracle_kills": 1,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "chimeric_stutter_across_two_sequences_matches_the_truth"
+  ],
+  "passed": 11,
+  "note": ""
+ },
+ {
+  "mutation": "M24 calidad de N cambiada solo con errores activos",
+  "files": [
+   "src/error_quality.rs"
+  ],
+  "before": {
+   "src/error_quality.rs": "cae0bbf7cfc6"
+  },
+  "after": {
+   "src/error_quality.rs": "a968156e222f"
+  },
+  "restored_equal": true,
+  "oracle_kills": 0,
+  "oracle_structural": 0,
+  "run_failures": 1,
+  "failed": [
+   "diploid_reads_with_indels_and_sequencing_errors_match_the_truth"
+  ],
+  "passed": 11,
+  "note": ""
+ },
+ {
+  "mutation": "M24s ídem, sin la guarda del programa",
+  "files": [
+   "src/error_quality.rs",
+   "src/fastq_validation.rs"
+  ],
+  "before": {
+   "src/error_quality.rs": "cae0bbf7cfc6",
+   "src/fastq_validation.rs": "7f5a054c67fe"
+  },
+  "after": {
+   "src/error_quality.rs": "a968156e222f",
+   "src/fastq_validation.rs": "11e80d217186"
+  },
+  "restored_equal": true,
+  "oracle_kills": 1,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "diploid_reads_with_indels_and_sequencing_errors_match_the_truth"
+  ],
+  "passed": 11,
+  "note": ""
+ },
+ {
+  "mutation": "M25 desempate de la tirada más larga por la derecha",
+  "files": [
+   "src/tandem_repeat.rs"
+  ],
+  "before": {
+   "src/tandem_repeat.rs": "dbb2bb975e13"
+  },
+  "after": {
+   "src/tandem_repeat.rs": "a55b3729830a"
+  },
+  "restored_equal": true,
+  "oracle_kills": 1,
+  "oracle_structural": 0,
+  "run_failures": 0,
+  "failed": [
+   "base_stutter_without_pcr_matches_the_truth"
+  ],
+  "passed": 11,
+  "note": ""
+ }
+]
