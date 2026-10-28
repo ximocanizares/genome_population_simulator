@@ -2,7 +2,8 @@
 
 - **Versión:** 0.2
 - **Estado:** F1 cerrado en `e14705a`/`efca265`; arquitectura F5 sintética
-  cerrada documentalmente y pendiente de implementación tras F4
+  cerrada documentalmente y pendiente de implementación tras F4; sección 16 (modelo
+  de microsatélites y componente de detección) añadida el 28/10/2026
 - **Fecha:** 1 de septiembre de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
@@ -1609,3 +1610,123 @@ una tolerancia controlada efectiva o `null`; `controlled` se valida antes de
 asignar y no coexiste con F>0. Marimo serializa
 el mismo conjunto TOML; Rust conserva la autoridad. F6 puede añadir estados SV sobre esta verdad
 cerrada y F7.1, no F5, será el único dueño de meiosis, mosaicos y recombinación.
+
+## 16. Arquitectura del modelo de microsatélites
+
+*Añadida el 28/10/2026 como requisito de entrada del hito F6.4.a (plan
+[plan-implementacion-deteccion-microsatelites-0.1.md](./plan-implementacion-deteccion-microsatelites-0.1.md)).
+Hasta hoy este documento mencionaba los microsatélites una sola vez, de pasada;
+el trabajo ya hecho (hitos F4.8, F4.10 y F6.4) no tenía sección. Esta describe lo
+que **existe**, leído en el código, y separa con claridad el componente **nuevo**
+de detección, que es propuesta y tiene partes provisionales.*
+
+### 16.1. Qué es un microsatélite en este sistema
+
+Un **locus de repetición** es un tramo de una secuencia de la referencia final
+cuyas bases son copias, exactas o casi, de uno o varios **motivos**. Dos cosas
+distintas viven en él, y el sistema las separa a propósito:
+
+- **La verdad biológica**: cuántas copias lleva cada copia haplotípica de cada
+  individuo. La decide el **deslizamiento** y el sorteo de alelos, y se publica
+  en la verdad y en el VCF.
+- **El artefacto de la medida**: cuántas copias *parece* tener una molécula
+  secuenciada. Lo decide el **tartamudeo** de la polimerasa, vive en las lecturas
+  y **nunca cambia la verdad**.
+
+Compartir mecanismo físico no significa compartir azar: un parámetro de
+laboratorio, como los ciclos de PCR, no puede decidir el genotipo real. Cada
+decisión tiene su ámbito de azar propio (DTC-096, DTC-081).
+
+### 16.2. Flujo: tres etapas, siempre en este orden
+
+Decisión del responsable del 27 y 28/10/2026 (REQ-REF-38):
+
+1. **Construir la referencia final.** Un FASTA suministrado (reducido de
+   antemano si se pidió) o una secuencia al azar; a las dos se les pueden
+   plantar o insertar tractos. La inserción en una suministrada produce una
+   referencia derivada que **es la de toda la simulación** (REQ-REF-37,
+   DTC-098).
+2. **Detectar** los microsatélites sobre esa referencia final. **Componente
+   nuevo**, sin código todavía.
+3. **Variar**: la matriz de SNV, los *indels* y los alelos de los microsatélites
+   se definen sobre esa referencia.
+
+Hoy, sin etapa 2, el catálogo de loci es la lista de los que el usuario
+declara. La detección corre en el sitio donde ya corre el generador de alelos
+por deslizamiento: **después** de preparar la referencia y **antes** de crear
+nada publicado, igual en `validate` y en `run`, de modo que un rechazo no deja un
+byte escrito.
+
+### 16.3. Componentes que existen
+
+| Componente | Módulo | Responsabilidad | Qué no hace |
+| --- | --- | --- | --- |
+| Dominio del tracto | `src/tandem_repeat.rs` | `RepeatMotif` (solo A, C, G, T en mayúsculas; sin `N`), `TandemRepeatTract` (lista ordenada de **bloques** de motivo), `TandemRepeatLocus` (identificador, intervalo y motivos, sin secuencia: la secuencia es del alelo) y `observe_tract`. Todo lo anotado —copias completas, **pureza** como proporción de bases cubiertas por copias exactas, tirada ininterrumpida más larga, interrupciones— se **deriva** de las bases por una descomposición voraz de izquierda a derecha y nunca se almacena | No decide alelos ni tasas; no declara la estructura de bloques por sí mismo: se declara |
+| Deslizamiento biológico | `src/repeat_slippage.rs` | Genera el **abanico de alelos** de un locus (`generate_allele_fan`): tantos linajes como copias haplotípicas, cada uno con un número de pasos de una Poisson de media declarada y pasos escalonados de una unidad completa; la frecuencia de un alelo es la proporción de linajes que terminan en él. Ámbito de azar propio (`initial_repeat_slippage`) indexado por **identificador del locus**. Un linaje se detiene en el borde (una unidad completa mínima o el tope del locus) y lo no aplicado se cuenta | No simula generaciones; no es tartamudeo. Solo admite un locus de **un motivo** (DTC-095) |
+| Sorteo de alelos | `src/repeat_genotypes.rs` | Reparte el abanico entre las copias haplotípicas de cada individuo (`apply_repeat_alleles`), con una subsemilla por copia derivada de identidades estables; con endogamia F sortea en forma condicional. Un alelo igual al de la referencia no se aplica | No genera el abanico |
+| Tartamudeo de base | `src/stutter.rs` | Sobre las moléculas secuenciadas: una decisión por molécula y tracto, con tasas por **longitud de motivo** y modulación por la tirada más larga; recorre los loci de cada tramo de molécula (`StutterPlan`); en una molécula quimérica busca cada tracto en el tramo que lo contiene (DTC-102). Apagado por omisión (REQ-CONF-132) | Nunca toca la verdad ni una copia haplotípica |
+| Tartamudeo clonal | `src/clonal_stutter.rs` | Con preparación amplificada, el resbalón en un ciclo de PCR se hereda por linaje de familia; despeja la tasa por ciclo de las dos columnas de la calibración (DTC-092, DTC-093, DTC-099) | No existe sin el tartamudeo de base: la admisión lo exige |
+| Inserción de tractos | `src/reference_tract_insertion.rs` | Construye la referencia derivada y su mapa de coordenadas (DTC-098) | No detecta |
+
+### 16.4. Contratos entre componentes
+
+- **Entrada común:** las bases de la referencia final, ya materializadas en
+  memoria cuando hay simulación, y la lista de loci de la configuración efectiva.
+- **Identidad del locus:** el identificador viaja con cada decisión de azar
+  (alelos, abanico, tartamudeo); ni la posición ni el orden de declaración
+  entran. Insertar un locus que ordene antes no cambia el abanico ni el genotipo
+  de los demás.
+- **Guarda de admisión:** cada locus declarado se contrasta con la referencia
+  final —pureza sobre bases y tirada más larga contra los mínimos del locus o
+  los generales—, y dos loci solapados se rechazan.
+- **Frontera con las variantes pequeñas:** hoy un cambio de base o una fila de
+  la matriz que cae dentro de un tracto declarado rechaza el escenario (S-32);
+  con detección esa regla cambia (REQ-CONF-143).
+- **Lo publicado:** los loci con sus alelos y su origen por alelo (REQ-MAN-95,
+  REQ-MAN-96) en la configuración efectiva y el manifiesto general; las bases de
+  tracto medidas en la verdad y el VCF; los parámetros del tartamudeo en el
+  manifiesto de evento. Los jueces que releen todo ello rehacen el abanico y
+  recuentan sobre los propios ficheros (REQ-VAL-60, REQ-VAL-62).
+
+### 16.5. Componente nuevo: detección (propuesta, parcialmente provisional)
+
+- **Responsabilidad.** Dadas las bases de una secuencia de la referencia final y
+  los criterios, devolver los tramos que son microsatélites y un **recuento de
+  lo descartado**, por etapa y por longitud de motivo. Es una función pura: no
+  lee ficheros ni consume azar.
+- **Núcleo.** El de `find_tandem_repeats` de `pop_var_caller`, **copiado con
+  atribución** y sin dependencias nuevas (DTC-103): puntuación +2 si una base
+  coincide con la anterior desplazada un periodo y −7 si no, segmentos de
+  puntuación máxima de Ruzzo y Tompa, motivos primitivos de 1 a 6 pb. Devuelve
+  intervalos semiabiertos en base cero y su periodo; el motivo se lee de las
+  bases del inicio.
+- **Contrato de salida.** Una sola lista de loci, **detectados y declarados
+  juntos, sin solapes, ordenada por secuencia y por inicio**, en coordenadas de
+  la referencia final, cada uno con su origen; con consulta por intervalo por
+  búsqueda binaria. Es lo que consumen la exclusión del generador de SNV y el
+  plan de *indels* poblacionales.
+- **Qué se conecta con él.** La conversión de tramo en locus sigue siendo
+  `TandemRepeatLocus` y los alelos siguen saliendo del deslizamiento, ahora con
+  el **deslizamiento común** que declara la sección de microsatélites
+  (REQ-CONF-142). Los criterios finos, la forma de publicar el catálogo y la
+  regla de coincidencia de los declarados son **provisionales** hasta la pausa
+  de decisión de la entrega 1 (DTC-103, DTC-104).
+- **Escala.** El barrido recorre secuencia a secuencia sobre las bases ya
+  cargadas. Dos recorridos del código actual pueden volverse cuadráticos con
+  decenas de miles de loci: la comprobación de solapes compara cada locus con
+  todos los demás y el tartamudeo recorre todos los loci por cada tramo de
+  molécula. Leídos en el código, no medidos; la entrega 1 los mide.
+
+### 16.6. Invariantes
+
+- La pureza, las copias y las interrupciones son **salidas derivadas** de las
+  bases, nunca entradas declaradas.
+- Un locus de microsatélite variable existe **solo** en la referencia final de la
+  simulación.
+- El tartamudeo no cambia la verdad; el deslizamiento no depende de la
+  configuración técnica.
+- Un locus detectado se identifica por su propio tramo, de modo que añadir uno
+  no mueve el azar de los demás.
+- La detección **no** alcanza a la población fundadora de F5 (REQ-EVO-74).
+- El juez que relee lo publicado no llama al productor ni al detector; su límite
+  conocido es que no prueba la exhaustividad (REQ-VAL-64).

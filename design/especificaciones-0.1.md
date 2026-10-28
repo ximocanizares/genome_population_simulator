@@ -64,6 +64,21 @@ combinación de configuración que la batería no contemple y que fallara no se
 detectaría en la ejecución del usuario. La ejecución conserva sus demás
 comprobaciones del FASTQ final (formato, identidades, huellas y recuentos).
 
+**Detección de microsatélites sobre la referencia final (28 de octubre de
+2026).** El hito F6.4.a se desarrolla con un **modo único**: la detección se
+activa por la presencia de la sección de microsatélites (REQ-CONF-142), que
+declara el deslizamiento común; con ella se detectan los loci de la referencia
+final de la simulación —suministrada, con tractos insertados o simulada con
+tractos plantados— y los loci que el usuario declare solo ajustan parámetros y
+deben coincidir con uno detectado (REQ-REF-38 a REQ-REF-40); sin la sección no
+hay microsatélites. **Se retira el régimen anterior de loci declarados sin
+detección.** Los criterios finos de detección y la forma de publicar el
+catálogo son **provisionales**: se fijan en la pausa de decisión que cierra la
+medición sobre el tomate reducido (plan
+[plan-implementacion-deteccion-microsatelites-0.1.md](./plan-implementacion-deteccion-microsatelites-0.1.md)).
+La etiqueta `v0.2.0-test` es una versión de prueba, no una publicación: los
+esquemas y formatos se retocan en su versión actual (DTC-036).
+
 La sección 4 es la fuente normativa de requisitos funcionales. Las secciones 2,
 5 y 6 los resumen y la sección 7 propone criterios de aceptación preliminares.
 Si una redacción resumida difiere de un requisito identificado, prevalece el
@@ -714,6 +729,10 @@ su asignación por fase está en la matriz de trazabilidad.
   repeticiones en tándem y generarlos al azar mediante
   las mismas reglas globales, regionales, individuales y reproducibles de la
   generación de variantes.
+  **Con detección (REQ-REF-38) hay una tercera procedencia: los loci
+  detectados** en la referencia final. Un locus definido a mano deja de ser una
+  fuente independiente: ajusta los parámetros de uno detectado (REQ-REF-40).
+  Sin la sección de microsatélites no hay loci de ninguna procedencia.
 - **REQ-CONF-57.** Para cada repetición en tándem, la configuración debe poder indicar
   el motivo repetido, la longitud de la unidad, el número de copias o la longitud
   total y la pureza de la repetición.
@@ -729,6 +748,11 @@ su asignación por fase está en la matriz de trazabilidad.
   identificar el locus y el error antes de simular. Un motivo que contenga `N`
   tampoco es un locus de repetición modelado válido y debe rechazarse antes de
   simular.
+  **La detección de REQ-REF-38 solo ve motivos de 1 a 6 pb**: un locus
+  declarado con un motivo de 7 o más pb es la excepción a la regla de coincidir
+  con un tramo detectado (REQ-REF-40), conserva su obligación de existir de
+  verdad en su tramo de la referencia y no se contrasta con el detector. Detectar
+  motivos más largos queda en DTF-064.
 - **REQ-CONF-61.** En v1, toda mutación de una repetición en tándem debe usar el
   modelo escalonado simple: añadir exactamente una unidad completa del motivo o
   eliminar exactamente una. La tasa de mutación y el sesgo o probabilidad entre
@@ -949,7 +973,13 @@ su asignación por fase está en la matriz de trazabilidad.
   por copia haplotípica, el **sesgo de expansión** —simétrico si falta— y el
   **tamaño de paso** —una unidad completa si falta—. Un modelo distinto, un salto
   de varias unidades y una media por encima del techo declarado deben rechazarse
-  **antes de simular**, nombrando el parámetro y el valor.
+  **antes de simular**, nombrando el parámetro y el valor. **Con la sección de
+  microsatélites (REQ-CONF-142)** los loci detectados reciben alelos generados
+  con el **deslizamiento común** de esa sección, y un locus declarado que no
+  declara alelos ni generador **hereda** ese deslizamiento común en vez de
+  rechazarse; un locus declarado que escribe sus alelos a mano los conserva
+  (REQ-REF-40), y escribirlos y pedir además el generador sigue siendo
+  excluyente.
 - **REQ-CONF-140.** El generador debe rechazar, antes de simular, un locus cuyo
   **tramo de referencia rebase el tope de unidades** que ese mismo locus declara,
   igual que se rechaza un alelo escrito a mano que lo rebase. Sin ese rechazo el
@@ -982,6 +1012,45 @@ su asignación por fase está en la matriz de trazabilidad.
   pinza. Las demás longitudes de motivo no admiten multiplicador (DTF-063).
   Igual que la sustitución directa, el campo solo tiene efecto con loci de
   repetición declarados.
+- **REQ-CONF-142.** La detección de microsatélites se configura en una **sección
+  propia** del documento general, cuyo nombre provisional es
+  `[reference.repeat_detection]` y cuya **presencia activa la detección**
+  (REQ-REF-38). La sección **declara el deslizamiento común**: el generador
+  de REQ-CONF-139 —modelo, media de pasos, sesgo de expansión y tamaño de
+  paso—, que se aplica a todo locus detectado y a todo locus declarado que no
+  declare el suyo. El deslizamiento común es **obligatorio** y sigue la misma
+  regla de valores que el generador de un locus en REQ-CONF-139: el modelo y
+  la **media de pasos** no tienen valor por omisión y la sección que omite
+  cualquiera de los dos se rechaza antes de simular, nombrando el campo y con
+  un ejemplo en el mensaje; el **sesgo de expansión** es simétrico si falta y
+  el **tamaño de paso** es una unidad completa si falta (decisión del
+  responsable, 28/10/2026: una sola regla para lo mismo). La sección admite además el mínimo de copias por longitud de
+  motivo de REQ-REF-39, con `[8, 6, 6, 6, 5, 4]` por omisión y publicado siempre
+  en la configuración efectiva aunque no se declare; un mínimo cero o una tabla
+  de menos de seis valores se rechaza. **Se retira el régimen anterior de loci
+  declarados sin detección** (decisión del responsable, 28/10/2026): un locus
+  declarado, un tracto insertado o un tracto plantado en un documento sin la
+  sección se rechaza antes de simular, con un diagnóstico que remite a ella.
+  Donde otros requisitos hablan de «loci de repetición declarados»
+  (REQ-CONF-138, REQ-CONF-141), se entiende **los loci del catálogo** de la
+  simulación, detectados o declarados. **Provisional, pendiente de la pausa de
+  la entrega 1:** el nombre definitivo de la sección, un tope de unidades
+  común para los detectados y una posible lista de regiones a las que limitar
+  la detección.
+- **REQ-CONF-143.** Un cambio de base escrito a mano, una fila suministrada de la
+  matriz de SNV o un SNV de los cambios directos que caiga **dentro de un tramo
+  detectado** **retira ese tramo del catálogo**: queda sin variación, y la
+  ejecución **publica cuál se retiró y por qué**, en vez de rechazarse. El
+  **generador** de la matriz de SNV **excluye** los tractos detectados de sus
+  candidatos, de modo que una matriz generada nunca obliga a retirar ninguno ni
+  hace depender el resultado de la semilla. Un locus **declarado** que contenga
+  una variante pequeña **sigue rechazándose** como hasta ahora (decisión S-32 del
+  plan de repeticiones). **Es una regla provisional por decisión del
+  responsable (28/10/2026), con tarea obligatoria:** cuando se construyan los
+  loci compuestos del plan de *indels* poblacionales, un SNV dentro de un
+  microsatélite formará **un solo locus con él** y pasará a ser un alelo más,
+  sustituyendo esta retirada (DTF-066). Los *indels* quedan fuera de este
+  requisito: los trata ese plan.
 - **REQ-IND-66.** El abanico de alelos generado debe simular **tantos linajes
   independientes como copias haplotípicas** tenga la población: una copia, un
   linaje. Cada linaje parte del alelo de la referencia y recibe un número de
@@ -1016,6 +1085,19 @@ su asignación por fase está en la matriz de trazabilidad.
   tabla de probabilidades por ciclo del tartamudeo clonal, y la fila de los
   homopolímeros debe llevar como fracción con PCR la que resulta de él. Sin
   multiplicador declarado **no se publica ningún campo nuevo**.
+- **REQ-MAN-98.** Con la sección de microsatélites, la ejecución debe publicar el
+  **catálogo de loci** de la simulación —cada locus, con su secuencia, su
+  intervalo en coordenadas de la referencia final, su motivo y su **origen**:
+  detectado o declarado—, los **criterios** con que se detectó, la **versión del
+  algoritmo de detección**, los **recuentos de lo descartado** por criterio y
+  longitud de motivo, y los tramos retirados por una variante con su causa
+  (REQ-CONF-143). Los recuentos de descarte deben sumar lo que el barrido
+  encontró. **Provisional, pendiente de la pausa de la entrega 1:** si el
+  catálogo viaja dentro de la configuración efectiva y del manifiesto general
+  o en un catálogo aparte enlazado con huella; cuál de las dos formas cabe en
+  tiempo, memoria y bytes con decenas de miles de loci es lo que mide esa
+  entrega, y nada de ello se fija antes. La verdad y el VCF no cambian de
+  formato en ninguna de las dos.
 - **REQ-VAL-60.** Un juez independiente debe **rehacer el abanico publicado** —
   desde la referencia publicada, los parámetros publicados y la semilla
   publicada— y contrastarlo con el escrito, alelo a alelo. No basta con
@@ -1059,11 +1141,36 @@ su asignación por fase está en la matriz de trazabilidad.
   intentos de composición, cobertura de moléculas distintas, cota de recursos y
   recuentos de linaje— quedan fuera: la configuración efectiva no los publica y
   atarlos exige rehacer la amplificación (DT-043).
+- **REQ-VAL-64.** Un juez independiente debe comprobar el catálogo de loci
+  publicado (REQ-MAN-98) **contra el FASTA final publicado y con aritmética
+  propia, sin llamar al detector ni a la medida de pureza del productor**:
+  hacerlo compararía el catálogo consigo mismo y no podría fallar. Debe exigir,
+  de cada locus, que está dentro de su secuencia con una base a cada lado, que
+  su motivo es primitivo y sale de las bases del tramo, que alcanza el mínimo
+  de copias de su longitud de motivo y la pureza exigida, que no se solapa con
+  otro, que cada locus declarado coincide con un tramo de un motivo
+  compatible (REQ-REF-40), que los recuentos de descarte suman lo que el
+  metadato dice y que cada tramo retirado por una variante contiene de verdad
+  esa variante. **Límite declarado: el juez no puede comprobar la
+  exhaustividad** —que no falte ningún tramo que cumpla los criterios—,
+  porque exige un detector; esa garantía la dan las pruebas del proyecto con
+  verdad plantada, y la documentación del juez lo dice. **La lista concreta de
+  comprobaciones es provisional** y sigue a los criterios definitivos de la
+  pausa de la entrega 1.
 - **REQ-UI-16.** La interfaz debe ofrecer un **control para elegir** entre
   declarar los alelos de un locus y generarlos, y **enseñar solo la tabla que
   corresponda**: con «declarar», las de alelos e interrupciones; con «generar»,
   la de los parámetros del generador. Enseñar las dos a la vez invitaría a
   escribir un documento que el lector rechaza.
+- **REQ-UI-17.** La interfaz debe ofrecer un **panel para detectar
+  microsatélites** que escriba la sección de REQ-CONF-142: el control que la
+  activa, los seis mínimos de copias mostrando los valores por omisión, los
+  demás ajustes de la sección y el deslizamiento común **sin ningún valor
+  rellenado**, de modo que quien no lo escriba reciba el rechazo del lector y
+  no un valor puesto por la interfaz. El editor de loci declarados solo escribe
+  loci cuando la sección está presente y sirve para ajustar parámetros
+  (REQ-REF-40). Todo campo del panel respeta la equivalencia entre interfaz,
+  TOML y configuración efectiva de REQ-UI-01.
 - **REQ-CONF-96.** La configuración debe permitir definir o generar por regiones
   secuencias repetitivas, duplicadas o altamente homólogas destinadas a producir
   baja mapeabilidad. También debe poder aprovechar las repeticiones y variantes
@@ -1564,6 +1671,62 @@ su asignación por fase está en la matriz de trazabilidad.
   en sus coordenadas. En esta primera versión se rechazan junto a una
   inserción los cambios directos, la matriz de SNV suministrada o reutilizada
   y la reducción de referencia; la matriz generada se admite.
+  **Alcance con detección (decisión del responsable, 28/10/2026; REQ-REF-38 a
+  REQ-REF-40).** La inserción solo existe junto a la detección de
+  microsatélites, y el tracto insertado debe coincidir con uno detectado en la
+  referencia final. Se admite con un genoma suministrado **sin matriz** o con
+  matriz **generada**; no con matriz suministrada o reutilizada, ni con
+  cambios escritos a mano, ni con reducción en la misma ejecución. El
+  diagnóstico del rechazo por reducción debe **indicar el camino en dos
+  ejecuciones**: reducir en una, publicar el FASTA reducido y suministrarlo
+  como `fasta` de la otra, donde ya puede recibir la inserción. «Sin matriz»
+  significa que la ejecución no tiene individuos: una población exige matriz.
+
+- **REQ-REF-38.** La detección de microsatélites **se activa por la presencia de
+  la sección de microsatélites** de REQ-CONF-142; sin ella **no hay
+  microsatélites** en la simulación. Con ella, el sistema localiza los
+  microsatélites de **la referencia final de la simulación** —el FASTA
+  suministrado, con tractos insertados si los hay, o la secuencia simulada con
+  los tractos plantados—, de 1 a 6 pb de motivo. Una simulación se construye en
+  **tres etapas, siempre en este orden**: (1) construir la referencia
+  (suministrada, reducida de antemano si se pidió, o al azar; a las dos se les
+  pueden plantar o insertar tractos); (2) detectar los microsatélites sobre
+  esa referencia final; (3) variar —SNV, *indels* y alelos de microsatélites se
+  definen sobre esa referencia—. **No puede existir un microsatélite variable
+  que no esté en la secuencia de referencia que usa la simulación.** La
+  detección no alcanza a la población fundadora de F5, que no tiene
+  microsatélites (REQ-EVO-74). Generar loci de repetición al azar en un genoma
+  simulado queda para F6.4.6 y no se ve afectado.
+- **REQ-REF-39.** Un tramo de la referencia final cuenta como microsatélite
+  detectado si tiene un motivo de 1 a 6 pb y alcanza un **número mínimo de
+  copias que depende de la longitud del motivo**, configurable, con
+  `[8, 6, 6, 6, 5, 4]` por omisión (motivos de 1 a 6 pb), y una **pureza**
+  suficiente, juzgada con la puntuación del propio detector y con la medida de
+  pureza que el simulador ya aplica a todo tracto. El sistema debe **contar**
+  cuántos tramos descarta y por qué, por longitud de motivo y por criterio.
+  **Provisional, pendiente de la pausa de decisión de la entrega 1 del plan de
+  detección:** sobre qué se cuentan las copias, las fronteras del tramo, la
+  regla de desempate entre tramos solapados, el trato de los tractos
+  compuestos e impuros, el tope de unidades para descartar satélites, la
+  `N` y los bordes de secuencia, y la forma de los identificadores de los loci
+  detectados; todo ello se fija con las cifras medidas sobre el tomate reducido
+  y no se escribe aquí hasta entonces. El algoritmo de detección es el del
+  proyecto `pop_var_caller`, copiado con su atribución y sin depender de él
+  (DTC-103).
+- **REQ-REF-40.** Con la sección de microsatélites, **todo locus declarado a mano,
+  todo tracto insertado y todo tracto plantado debe coincidir con uno
+  detectado**, o la configuración se rechaza antes de simular, nombrando el
+  locus y el criterio que no alcanza. Declarar un locus sirve **solo para
+  ajustar parámetros** de uno concreto —su deslizamiento, su tope de unidades y
+  sus mínimos, y, en el evento técnico, su tasa de tartamudeo—; un locus
+  declarado **conserva los alelos que el usuario escribió a mano**. Un locus
+  declarado con motivo de **siete o más pares de base** es una **excepción**
+  (REQ-CONF-60): la detección solo ve de 1 a 6 y no podría coincidir nunca.
+  **Provisional, pendiente de la pausa de la entrega 1:** la regla exacta de
+  coincidencia (la propuesta es que el intervalo declarado se solape con un
+  tramo detectado cuyo motivo sea una rotación de uno de los declarados) y qué
+  fronteras mandan (la propuesta es que mandan las del declarado, que
+  sustituye a los detectados que solapa).
 
 **Decisión funcional cerrada el 14 de agosto de 2026.** `reduction_percent`
 expresa el porcentaje eliminado, usa el cálculo decimal exacto y el redondeo de
@@ -3973,8 +4136,10 @@ a una probabilidad mayor de error.
 
 - **REQ-CONF-132.** El tartamudeo de base debe estar **desactivado de forma
   predeterminada** mediante un **interruptor explícito** del evento técnico:
-  declarar un microsatélite **no** lo activa. Quien quiera tartamudeo tiene que
-  encenderlo y aportar sus parámetros. Una
+  declarar un microsatélite, o activar su detección, **no** lo activa. Quien
+  quiera tartamudeo tiene que encenderlo y aportar sus parámetros. Encendido,
+  alcanza también a los loci **detectados** (REQ-REF-38) con las tasas
+  calibradas por longitud de motivo, sin necesidad de declararlos uno a uno. Una
   configuración que seleccione un modelo distinto del admitido, un paso
   expresado en bases en vez de unidades, un paso ajeno a la estructura o un
   parámetro fuera de su dominio debe rechazarse antes de simular, identificando
@@ -5731,7 +5896,7 @@ observará el resultado, sin crear obligaciones adicionales.
 | Etapa conceptual | Pregunta que permite seguir el flujo | Fuente normativa | Comprobación principal |
 |---|---|---|---|
 | Admisión | ¿La petición y sus ficheros forman una ejecución inequívoca? | REQ-CONF-01 a REQ-CONF-130, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 | ACE-01, ACE-23, ACE-35, ACE-36, ACE-105, ACE-111, ACE-112 y ACE-116 |
-| Referencias | ¿Qué secuencias y sistemas de coordenadas sostienen la verdad? | REQ-REF-01 a REQ-REF-37 | ACE-02 a ACE-08, ACE-95, ACE-110, ACE-112 y ACE-113 |
+| Referencias | ¿Qué secuencias y sistemas de coordenadas sostienen la verdad? | REQ-REF-01 a REQ-REF-40 | ACE-02 a ACE-08, ACE-95, ACE-110, ACE-112, ACE-113 y ACE-121 |
 | Construcción de individuos | ¿Qué genomas faseados existen antes de observarlos? | REQ-IND-01 a REQ-IND-65, REQ-DIR-01 a REQ-DIR-05 y REQ-MUT-01 a REQ-MUT-15 | ACE-09 a ACE-12, ACE-28 a ACE-32, ACE-79 a ACE-81, ACE-95, ACE-96, ACE-103, ACE-107, ACE-109 a ACE-111 y ACE-116/117 |
 | Inicialización poblacional | ¿Qué población inicial se deriva de las frecuencias y restricciones declaradas? | REQ-EVO-01 a REQ-EVO-52 y REQ-POB-01 a REQ-POB-03 | ACE-11, ACE-13, ACE-26, ACE-88 a ACE-90, ACE-104 y ACE-105 |
 | Evolución | ¿Cómo cambia el estado poblacional entre generaciones? | REQ-EVO-53 a REQ-EVO-78, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 | ACE-13, ACE-24 a ACE-28, ACE-76 a ACE-87 y ACE-117 |
@@ -5762,7 +5927,7 @@ valores, obligatoriedad ni relaciones entre objetos.
 | Grupo de entrada | Finalidad conceptual | Contrato aplicable |
 |---|---|---|
 | Petición y configuración | Identificar la ejecución y resolver los parámetros efectivos | REQ-CONF-01 a REQ-CONF-130, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 |
-| Secuencias y referencias | Establecer las bases y coordenadas sobre las que se construye y compara la verdad | REQ-REF-01 a REQ-REF-37 y las entradas de REQ-DAT-01 a REQ-DAT-73 |
+| Secuencias y referencias | Establecer las bases y coordenadas sobre las que se construye y compara la verdad | REQ-REF-01 a REQ-REF-40 y las entradas de REQ-DAT-01 a REQ-DAT-73 |
 | Individuos, poblaciones y familias | Declarar el material biológico inicial y las relaciones que deben simularse | REQ-IND-01 a REQ-IND-65, REQ-EVO-01 a REQ-EVO-78, REQ-POB-01 a REQ-POB-03 y REQ-CRU-01 a REQ-CRU-45 |
 | Procesos biológicos | Especificar creación, mutación, migración, reproducción, selección y recombinación | REQ-DIR-01 a REQ-DIR-05, REQ-MUT-01 a REQ-MUT-15, REQ-MIG-01 a REQ-MIG-09, REQ-REP-01 a REQ-REP-26, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 |
 | Eventos y condiciones técnicas | Solicitar observaciones, perfiles, artefactos y tratamientos técnicos admitidos | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 |
@@ -5883,6 +6048,7 @@ pendientes.
 | **ACE-88. Modelos de población inicial** | Cada locus o bloque y subpoblación usa modo probabilístico predeterminado o controlado explícito sin mezclarlos dentro de la unidad. Admite Hardy-Weinberg en ploidías 1–10: binomial por dosis en loci bialélicos y multinomial por composición en multialélicos. También admite frecuencias explícitas de genotipo o dosis y genotipos multilocus faseados. En Hardy-Weinberg controlado se fijan recuentos alélicos, pero los genotipos se distribuyen aleatoriamente condicionados al modelo, sin exigir recuentos genotípicos exactos salvo configuración explícita. Frecuencias y recuentos suman, respectivamente, 1 y el total aplicable; los datos incompatibles se rechazan | Casos HWE haploide, diploide y poliploide, bialélico y multialélico, por modo |
 | **ACE-119. Preparación amplificada por PCR** | Con `pcr`, las parejas de una biblioteca se organizan en familias de amplificación; los duplicados nacen antes de los errores y de las calidades; la composición actúa al elegir la molécula original y además en la media del tamaño de familia; la verdad del individuo, su VCF y el manifiesto de verdad quedan intactos; con todos los parámetros neutros los FASTQ son byte a byte los de `pcr_free`; y el manifiesto publica la cota de operaciones y memoria como valor calculado sin ejecutar. Con loci de repetición declarados, la combinación exige el tartamudeo de base activo y añade el tartamudeo heredable por linaje (REQ-CONF-138, REQ-DAT-82) | Huella congelada del FASTQ sin PCR, oráculo de duplicados sobre los bytes, par de ejecuciones que aísla la desigualdad de los primeros ciclos y validador independiente que rederiva desde la semilla |
 | **ACE-120. Multiplicador de la PCR en homopolímeros** | Sin multiplicador, una ejecución amplificada con microsatélites publica los mismos bytes que antes de existir el campo. Con 2,5, la fracción de lecturas con tartamudeo que un oráculo cuenta sobre los FASTQ en un homopolímero a su longitud de referencia reproduce 0,0675 en vez de 0,17, y la de un dinucleótido sigue en 0,038; la probabilidad por ciclo se modula con la longitud del tracto igual que la derivada; un valor fuera de [1, 37] o junto a una sustitución directa del homopolímero se rechaza antes de simular | Huella congelada de un escenario amplificado con microsatélites medida antes del cambio; prueba de composición sobre los FASTQ con tamaño muestral calculado; vectores calculados a mano a la longitud de referencia y en un tracto corto; rechazos de admisión; manipulaciones rechazadas por el juez |
+| **ACE-121. Detección de microsatélites sobre la referencia final** | Sin la sección de microsatélites no hay loci y los bytes publicados de los escenarios sin microsatélites son los de antes (huella congelada). Con ella, una referencia con tractos plantados en posiciones escritas en la prueba da exactamente esos loci, en las tres clases de referencia —suministrada, con tractos insertados, simulada— y siempre en coordenadas de la referencia final; el deslizamiento común es obligatorio y su ausencia se rechaza nombrando el campo; un locus declarado o insertado sin tracto detectado se rechaza nombrando el locus y el criterio que no alcanza, y uno de 7 o más pb queda exento; un SNV dentro de un tracto detectado retira el tracto y se publica la causa, y la matriz generada no cae en ninguno con dos semillas distintas; la reducción en la misma ejecución se rechaza indicando el camino en dos ejecuciones; el catálogo y sus recuentos de descarte se publican y un juez que no llama al detector rechaza cada alteración hecha a mano; la batería de parejas finales ejercita al menos un locus detectado en cada escenario. **Los criterios finos y la forma de publicar son provisionales hasta la pausa de la entrega 1** | Verdad plantada con tractos escritos a mano en la prueba; buscador de tiradas exactas por fuerza bruta como segundo oráculo; fixtures saturados por criterio; huella congelada de escenarios sin microsatélites; juez con cada comprobación disparada y prueba de independencia mutando la medida de pureza; batería de DTC-101 con detectados; puerta externa del VCF | Criterios definitivos, forma del catálogo publicado, tope de unidades, regiones y regla exacta de coincidencia (pausa de la entrega 1) |
 | **ACE-89. LD y fase iniciales** | F5 genera por bloque×subpoblación una distribución haplotípica SNP-only desde marginales y un perfil de media `r²(d)`, sin panel ni haplotipos aportados. La tabla H×S y q son la fuente de verdad; desde ellas se reconstruyen marginales, D, `r²`, signos y frecuencias. El probabilístico muestrea q y el controlado usa únicamente cuotas enteras factibles que suman C. Los bloques conservan fase e identidad y permanecen intactos hasta la primera meiosis de F7.1 | Oráculo H×S/q/D/`r²`, fijos, bins, signos, cuotas y ausencia de panel/recombinación |
 | **ACE-90. Endogamia inicial** | F automático se configura para la población completa o se sustituye por subpoblación exclusivamente diploide, siempre entre 0 y 1 y nunca por locus, región o bloque. Usa las fórmulas bialélica o multialélica de REQ-EVO-47/48: F=0 coincide con Hardy-Weinberg, un valor intermedio modifica las probabilidades según esas fórmulas y F=1 produce homocigosis completa. F en ploidía 1 o mayor que 2 se rechaza antes de simular con ámbito y ploidía. En poliploides se usa HWE sin F o una distribución explícita local, que prevalece. F realizado se calcula solo en diploides, puede ser negativo sin constituir error y figura como «no aplicable» en las demás ploidías | Casos F=0, intermedio y 1; rechazo P=1 y P>2; distribución explícita poliploide; F realizado no aplicable |
 | **ACE-91. Fundadores trazables** | Todos los individuos de la población inicial son fundadores con identificadores estables propios. Cada copia haplotípica también tiene identificador propio aunque su secuencia coincida con otra, y toda traza posterior alcanza una copia fundadora concreta | Formato de identificadores y casos de reconstrucción |

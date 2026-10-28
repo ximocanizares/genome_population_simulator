@@ -503,28 +503,64 @@ por referencia.** F6 no hereda
 panel ni recombinación de F5. Su cierre demuestra reconstrucción, límites,
 solapamientos y aislamiento entre referencias.
 
-**Hito nuevo, sin desarrollar (24/09/2026):**
+**Hito F6.4.a, desarrollado el 28/10/2026** (plan:
+[plan-implementacion-deteccion-microsatelites-0.1.md](./plan-implementacion-deteccion-microsatelites-0.1.md);
+nacido sin desarrollar el 24/09/2026):
 
-- **F6.4.a. Localizar los microsatélites de un genoma suministrado.** Barrer una
-  referencia real y **descubrir** los tractos que ya contiene, en vez de exigir
-  que el usuario los declare uno a uno. Hoy el simulador **no lo hace**: solo
-  sabe comprobar que un locus declarado existe de verdad donde se dice (paso
-  F6.4.2, hecho) y, cuando se desarrolle F6.4.6, generar loci nuevos al azar por
-  regiones. Descubrir los que ya están es la capacidad hermana de esa última y
-  falta por completo.
+- **F6.4.a. Localizar los microsatélites de la referencia final.** Barrer la
+  **referencia final de la simulación** y **descubrir** los tractos que ya
+  contiene, en vez de exigir que el usuario los declare uno a uno. **El alcance
+  pasa a toda referencia final**, no solo a la suministrada: el FASTA
+  suministrado (reducido de antemano si se pidió), el suministrado con tractos
+  insertados y la secuencia simulada con tractos plantados. Hasta este hito el
+  simulador solo sabía comprobar que un locus declarado existe de verdad donde
+  se dice (paso F6.4.2, hecho).
 
-  **Por qué importa más allá de la comodidad.** Sin ella, todo microsatélite es
-  declarado por el usuario, y por eso el tartamudeo tiene un interruptor
-  explícito: quien declara el locus decide también si tartamudea y aporta sus
-  parámetros. Con descubrimiento automático aparecería una clase nueva de locus
-  —el que el simulador encontró y el usuario no pidió— y habría que decidir su
-  régimen por omisión. El responsable lo anticipó el 24 de septiembre de 2026.
+  **Las cuatro preguntas que el hito dejaba abiertas, y lo que las contesta.**
+  Decisiones del responsable del 27 y 28 de octubre de 2026:
 
-  **Lo que hay que decidir cuando se desarrolle**, y que este hito no resuelve:
-  el criterio de descubrimiento —qué pureza y qué tirada mínima hacen que un
-  tramo cuente como microsatélite—, qué pasa si el usuario declara uno que el
-  barrido no encontró o al revés, el coste de barrer un genoma completo, y el
-  régimen por omisión del tartamudeo para los descubiertos.
+  1. *El criterio de descubrimiento.* Motivos de 1 a 6 pb; número mínimo de
+     copias por longitud de motivo, configurable, por omisión `[8, 6, 6, 6, 5, 4]`;
+     pureza con la puntuación del propio detector y con la medida del
+     simulador. Los criterios finos (sobre qué se cuentan las copias,
+     fronteras, solapes, compuestos, tope, `N` y bordes) son **provisionales**
+     hasta la pausa de decisión de la entrega 1.
+  2. *Un locus declarado que el barrido no encuentra, o al revés.* **Modo
+     único.** La detección se activa por la presencia de la sección de
+     microsatélites, que declara el deslizamiento común, obligatorio y sin
+     valores por omisión; con ella se detectan los loci de la referencia final
+     y los declarados a mano **solo ajustan parámetros y deben coincidir con
+     uno detectado** (salvo los de 7 o más pb, que son excepción) o se rechazan
+     con diagnóstico claro; sin la sección **no hay microsatélites**. Se retira
+     el régimen anterior de loci declarados sin detección. Un locus declarado
+     conserva sus alelos escritos a mano.
+  3. *El coste de barrer un genoma completo.* Se decide con **medición**: la
+     entrega 1 mide, sobre el tomate reducido, cuántos loci salen y cuánto
+     ocupan y tardan verdad, VCF y memoria, y termina en una **pausa** que
+     decide si hace falta limitar la detección a regiones y qué forma de
+     publicación cabe. Ninguna cifra se escribe antes.
+  4. *El régimen del tartamudeo para los descubiertos.* Sigue **apagado** salvo
+     que el usuario lo encienda; encendido usa las tasas calibradas por
+     longitud de motivo (REQ-CONF-132).
+
+  **Tres etapas, siempre en este orden:** construir la referencia, detectar
+  sobre la referencia final, variar. No puede existir un microsatélite variable
+  que no esté en la secuencia de referencia que usa la simulación. La
+  inserción de tractos se admite con genoma suministrado sin matriz o con
+  matriz generada, y no con matriz suministrada o reutilizada, cambios escritos
+  a mano ni reducción en la misma ejecución (el diagnóstico indica el camino en
+  dos ejecuciones). Un SNV dentro de un tracto detectado lo retira del catálogo
+  de forma **provisional**, con la tarea obligatoria de sustituirlo por un
+  locus compuesto en el plan de *indels* poblacionales (DTF-066). Detectar
+  motivos de más de 6 pb y descomponer compuestos automáticamente quedan en
+  DTF-064 y DTF-065. Generar microsatélites al azar en genomas simulados es
+  posterior (F6.4.6).
+
+  **Orden y estado.** Este hito se ejecuta **antes** del plan de *indels*
+  poblacionales. Entrega 0 (normas y huella de cambios involuntarios) en
+  curso; entregas 1 a 6 en el plan, la 1 como medición y pausa. **Etapa alfa:**
+  los esquemas se retocan en su versión actual, sin versiones nuevas (DTC-036,
+  nota del 28/10/2026). Paridad Marimo obligatoria (REQ-UI-17).
 
 **Subpaso diferido:**
 

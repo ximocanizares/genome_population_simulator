@@ -8,6 +8,10 @@
   DTC-101 garantiza la comparación pareja a pareja del FASTQ final con
   una batería obligatoria en lugar de repetirla en cada ejecución
   DTC-102 fija cómo se tartamudea una molécula quimérica
+  DTC-103 y DTC-104 fijan la detección de microsatélites sobre la referencia
+  final y la publicación y el juez de su catálogo (partes provisionales hasta la
+  pausa de la entrega 1 del plan de detección); la nota del 28/10/2026 de
+  DTC-036 declara que la etapa alfa retoca los esquemas en su versión actual
 - **Fecha:** 1 de septiembre de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
@@ -92,7 +96,7 @@ planificación; ya no existe una discrepancia entre fuentes.
 | DTC-033 | Las sustituciones se resuelven por coincidencia de todos sus selectores y dominancia parcial entre ejes, sin prioridad implícita entre ejes distintos. Pregunta 3 del informe adversarial (RAD-009); REQ-CONF-116 a REQ-CONF-123 | Obtener un único valor efectivo auditable sin inventar una prioridad global que cambie según la familia | Una única regla máxima gana; máximas incomparables, duplicados exactos, regiones solapadas y selectores no autorizados se rechazan antes de simular; los eventos técnicos nunca sustituyen parámetros biológicos |
 | <a id="dtc-034"></a>DTC-034 | TOML es el único formato de configuración escrito por la persona usuaria en v1, tanto para el fichero general como para los escenarios. Resolución de DTPD-001; REQ-CONF-01 a REQ-CONF-14, REQ-CONF-51/52, REQ-CONF-101/105 y REQ-CONF-116 a REQ-CONF-123 | Mantener un único formato de autoría legible y hacer explícitas identidad, orden y procedencia sin depender de la jerarquía física del fichero | Todo fichero exige versión de esquema; se conserva una copia exacta del TOML; `DeclaredConfig` representa lo escrito con su ubicación y `EffectiveConfig`, la configuración validada, heredada y resuelta e inmutable en su ámbito. Se rechazan campos desconocidos, claves o campos duplicados y combinaciones inválidas con diagnósticos localizables. Fases, eventos y cruces son listas de tablas con identificadores explícitos; su identidad y precedencia no se deducen de la jerarquía física. DTC-036 fija la compatibilidad; DTC-035, la serialización efectiva. No selecciona crate ni versión de TOML o Rust |
 | <a id="dtc-035"></a>DTC-035 | Los manifiestos de v1 son JSON conforme a RFC 8259: existe un `manifest.json` general en la raíz y otro por evento, validados con esquemas JSON Schema Draft 2020-12 distintos que reutilizan definiciones comunes. La configuración efectiva se escribe aparte en `effective-config.json`, versionada y enlazada por el manifiesto general. Resolución de DTPD-002; REQ-MAN-01/02, REQ-MAN-72 a REQ-MAN-88 y REQ-SAL-03/04/17/18 | Separar el documento de autoría TOML de salidas de intercambio verificables y mantener completo el contrato de trazabilidad sin convertir artefactos independientes en contenido duplicado del manifiesto | Cada manifiesto exige `schema_version` y `manifest_kind`, se escribe de forma legible y contiene directamente todo lo que REQ-MAN obliga a registrar o enumerar. Los artefactos independientes exigidos se enlazan mediante identificador, ruta relativa, tipo, tamaño y suma de comprobación. Las listas con semántica de conjunto se ordenan establemente por identificador, sin prometer identidad binaria general. V1 no fragmenta manifiestos en JSONL ni tablas auxiliares; el preflight incluye su tamaño y nunca reduce contenido obligatorio. La configuración original permanece como copia TOML exacta. DTC-036 fija la compatibilidad; DTC-040, el algoritmo de suma; DTC-045, la publicación; DTC-043, la política de dependencias; y DTC-048, toolchain y lock |
-| <a id="dtc-036"></a>DTC-036 | Todo documento estructurado propio declara su clase y `schema_version`: `config_kind` distingue configuración general y escenario, `manifest_kind` distingue los manifiestos, `effective-config.json` usa el discriminador equivalente de su esquema y la salida JSON de diagnósticos declara `diagnostic_kind`. La primera versión de esquema es la cadena exacta `"1"`; las posteriores se añaden por extensión (F2 la `"2"`, F3 la configuración efectiva `"3"`, F4 la `"4"` de la configuración efectiva y del manifiesto general, y las repeticiones en tándem la `"6"` de ambos). Resolución de DTPD-003; REQ-CONF-01/10/27/111 a REQ-CONF-115, REQ-MAN-02/69/73 y REQ-SAL-03/04 | Impedir que un documento se interprete con la clase o semántica de otra versión y separar la evolución del esquema de la versión del programa o del dialecto de validación | El programa solo lee versiones expresamente conocidas, y hoy son: configuración efectiva `"4"` y `"6"` (`effective_schema_version`); manifiesto general `"4"` y `"6"` (`is_supported_general_manifest_version`); manifiesto de evento `"2"` y `"3"`; TOML general `"2"` y `"4"` (el `"4"` es la extensión que puede declarar repeticiones; el despacho admite además el `"3"` de F5, y el escenario F5 el `"1"`); diagnósticos `"1"`. Los lectores de las versiones `"1"` y `"2"` de la configuración efectiva y del manifiesto general, y el de la `"3"` de la efectiva, se retiraron al cerrar F4.1 (DTC-082), antes de esta revisión; el código muerto que quedaba de la `"1"` se borró el 11/10/2026. Una versión ausente, posterior o desconocida se rechaza. No hay migración automática ni modificación silenciosa; el programa escribe siempre la versión actual de cada clase. Versión del programa, `schema_version` y JSON Schema Draft 2020-12 son conceptos distintos. Los esquemas de las versiones retiradas se conservan en `schemas/` como ficheros congelados, sin lector activo: el campo técnico F3 no era una extensión inocua del contrato cerrado de la efectiva `"2"`. DTC-044 concreta la clase y el esquema del documento de diagnósticos |
+| <a id="dtc-036"></a>DTC-036 | Todo documento estructurado propio declara su clase y `schema_version`: `config_kind` distingue configuración general y escenario, `manifest_kind` distingue los manifiestos, `effective-config.json` usa el discriminador equivalente de su esquema y la salida JSON de diagnósticos declara `diagnostic_kind`. La primera versión de esquema es la cadena exacta `"1"`; las posteriores se añaden por extensión (F2 la `"2"`, F3 la configuración efectiva `"3"`, F4 la `"4"` de la configuración efectiva y del manifiesto general, y las repeticiones en tándem la `"6"` de ambos). Resolución de DTPD-003; REQ-CONF-01/10/27/111 a REQ-CONF-115, REQ-MAN-02/69/73 y REQ-SAL-03/04 | Impedir que un documento se interprete con la clase o semántica de otra versión y separar la evolución del esquema de la versión del programa o del dialecto de validación | El programa solo lee versiones expresamente conocidas, y hoy son: configuración efectiva `"4"` y `"6"` (`effective_schema_version`); manifiesto general `"4"` y `"6"` (`is_supported_general_manifest_version`); manifiesto de evento `"2"` y `"3"`; TOML general `"2"` y `"4"` (el `"4"` es la extensión que puede declarar repeticiones; el despacho admite además el `"3"` de F5, y el escenario F5 el `"1"`); diagnósticos `"1"`. Los lectores de las versiones `"1"` y `"2"` de la configuración efectiva y del manifiesto general, y el de la `"3"` de la efectiva, se retiraron al cerrar F4.1 (DTC-082), antes de esta revisión; el código muerto que quedaba de la `"1"` se borró el 11/10/2026. Una versión ausente, posterior o desconocida se rechaza. No hay migración automática ni modificación silenciosa; el programa escribe siempre la versión actual de cada clase. Versión del programa, `schema_version` y JSON Schema Draft 2020-12 son conceptos distintos. Los esquemas de las versiones retiradas se conservan en `schemas/` como ficheros congelados, sin lector activo: el campo técnico F3 no era una extensión inocua del contrato cerrado de la efectiva `"2"`. DTC-044 concreta la clase y el esquema del documento de diagnósticos **Nota fechada, 28/10/2026 (etapa alfa).** La etiqueta `v0.2.0-test` es un ejecutable de pruebas y **no una publicación**: mientras el proyecto esté en esta etapa, los esquemas y formatos se **retocan en su versión actual** en vez de crear una versión nueva, aunque el cambio añada campos o secciones. Lo que dice esta decisión sobre extensión por versión nueva rige desde que el responsable declare una publicación; hasta entonces no hay obligación de compatibilidad con lo ya escrito y desaparece el riesgo de colisión de números de versión entre planes. Esto sustituye, para la detección de microsatélites, la propuesta de versiones nuevas promovidas por contenido (DP-SSR-15). El texto de arriba se conserva como historia de las versiones ya escritas |
 | <a id="dtc-037"></a>DTC-037 | La aleatoriedad de v1 usa generadores ChaCha12 nombrados y locales, nunca `StdRng` ni un flujo global. La semilla raíz y cada subsemilla tienen 256 bits y se representan en TOML, configuración efectiva y manifiestos como exactamente 64 hexadecimales minúsculos. Si falta la raíz, se obtienen 32 bytes del CSPRNG del sistema operativo antes de simular y se registran valor y origen. Resolución de DTPD-004; REQ-CONF-26/27, REQ-CONF-101/111 a REQ-CONF-115 y REQ-EVO-12/62 | Aislar biología, muestreos y eventos para que el consumo de un proceso o la planificación no alteren decisiones ajenas y permitir paralelismo reproducible sin compartir estado mutable | BLAKE3 deriva cada subsemilla con el contexto ASCII exacto `genome_population_simulator/v1/subseed`. El material binario canónico contiene, en este orden, la raíz cruda de 32 bytes, la versión de derivación como `u32` big-endian, el número de componentes como `u32` big-endian y, para cada componente en el orden normativo del catálogo de ámbitos, nombre de campo ASCII y valor UTF-8, ambos precedidos por su longitud `u32` big-endian. La identidad de flujo nunca procede de posición accidental, iteración, hilo o planificación. Se separan al menos población inicial, generaciones y procesos biológicos, muestreos y cada evento técnico, afinando por unidades independientes. Cada consumidor solo avanza su generador. Se registran raíz, origen, ChaCha12, versión de derivación y subsemillas de evento; los ámbitos internos se reconstruyen desde IDs y reglas versionadas. Ninguna fila publicada de un catálogo, sus campos/orden ni sus vectores se reescribe: añadir ámbitos exige una nueva versión de catálogo y puede conservar la versión de derivación si codificación/contexto no cambian; alterar una fila existente exige además nueva versión de derivación. Cambiar ChaCha12, BLAKE3, esta codificación o un algoritmo de muestreo cambia la reproducibilidad. DTC-038 concreta la garantía; DTC-039 separa el dominio de IDs; DTC-043 rige dependencias; DTC-048 fija el lock; DTC-040 reserva SHA-256 para integridad publicada |
 | <a id="dtc-038"></a>DTC-038 | V1 declara por separado cuatro niveles de reproducibilidad: biología; decisiones y lecturas técnicas; equivalencia semántica de salidas; e identidad binaria. Resolución de DTPD-005; REQ-CONF-26/27 y REQ-CONF-111 a REQ-CONF-115, REQ-REP-22/23 y REQ-MAN-69 | Permitir repetir y comparar cada clase de resultado sin deducir una garantía más fuerte desde otra más débil | La biología se garantiza con la misma versión del simulador, plataforma inicialmente admitida, semilla raíz, configuración efectiva, contenidos de entrada, perfiles y esquema y algoritmos aleatorios versionados. El nivel técnico exige además la misma subsemilla de evento y versiones y condiciones de las dependencias participantes. La equivalencia semántica compara contenido lógico y, ante herramientas externas, exige sus mismas versiones, parámetros y condiciones verificadas. V1 no garantiza identidad binaria por defecto para ninguna clase; solo podrá declararse por formato y condiciones tras una prueba expresa. No se promete reproducibilidad entre versiones del simulador ni entre plataformas no verificadas. El manifiesto registra por nivel `garantizado`, `no garantizado` o `no aplicable`, condiciones, versiones, perfiles, herramientas y dependencias. Toda semilla generada se registra y puede reutilizarse. Se mantienen comparadores separados para verdad lógica, contenido técnico, semántica y bytes. DTC-042 fija la plataforma oficial inicial; crates, toolchain y formatos adicionales permanecen separados |
 | <a id="dtc-039"></a>DTC-039 | Cada entidad separa un identificador estable de una etiqueta humana Unicode opcional y no única. Los identificadores aportados son ASCII, sensibles a mayúsculas y cumplen conceptualmente `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`; no admiten espacios, rutas ni otros caracteres. En el dominio se usan tipos distintos como `IndividualId`, `EventId` o `ReferenceId`, nunca `String` genérico en una frontera. Resolución de DTPD-006; REQ-CONF-01/38/39/51/52/101, REQ-IND-25/26, REQ-RG-03/04/07, REQ-DAT-68 a REQ-DAT-71 y REQ-VER-10/12 | Evitar confundir categorías, etiquetas, rutas o ámbitos y mantener identidades reproducibles compatibles con formatos genómicos | Los IDs automáticos se derivan con BLAKE3 y el contexto ASCII exacto `genome_population_simulator/v1/id`, usando el material canónico de DTC-037 y el catálogo normativo de campos. Toman los primeros 128 bits del resultado, los codifican en Base32 RFC 4648 mayúscula sin relleno `=` y anteponen el prefijo ASCII de clase del catálogo. El ID de ejecución incluye como causas mínimas raíz y digest de configuración; los demás incluyen tipo e IDs causales estables según catálogo, nunca hilo, ruta, orden físico o reloj. Los catálogos de campos y prefijos y sus vectores son artefactos normativos de F1 y no cambian sin nueva versión de derivación. Toda colisión se detecta y hace fallar, también la de IDs aportados. **Excepción acotada F3.1.2:** `TemplateId` no usa BLAKE3: se compone exactamente como `TPL_<library_id>_<template_ordinal_decimal>` con decimal canónico sin ceros iniciales. `library_id` es único en el evento y el ordinal es único dentro de la biblioteca; por tanto el ID es único por construcción, conserva sintaxis y longitud compatibles con SAM, VCF y FASTQ. Por esa inyectividad demostrable, `TemplateId` no requiere registro ni detección de colisiones mediante estado retenido. Se respetan los ámbitos normativos: variantes locales al conjunto/VCF, `RG` único en la ejecución, lectura o plantilla única en el evento y mates con el mismo ID de plantilla y roles distintos; el ID de individuo se conserva en `SM`, VCF y manifiesto. Rutas y nombres físicos se derivan o escapan sin adquirir autoridad. El manifiesto relaciona ID opaco, clase, ámbito, causa y etiqueta. Los IDs automáticos permanecen compactos y válidos para SAM, VCF y FASTQ; no se fija aquí el layout de directorios |
@@ -2292,6 +2296,19 @@ la batería seguía en verde.
 La versión del algoritmo es `biological-slippage-v1` y se publica con cada
 abanico.
 
+**Ampliación del 28/10/2026 (detección de microsatélites, DTC-103).** Con la
+sección de microsatélites (REQ-CONF-142) el generador sirve también a los loci
+**detectados**: el **deslizamiento común** que esa sección declara —obligatorio
+y sin valores por omisión— es el generador de esta decisión, sin variante, y lo
+reciben los detectados y todo locus declarado que no declare el suyo. Un locus
+declarado que escribe sus alelos a mano los conserva y no usa el generador.
+Quedan **provisionales**, pendientes de la pausa de decisión de la entrega 1
+del plan de detección, dos cosas: el generador sigue rechazando un tramo que
+rebase el tope de unidades del locus, de modo que el tope con que se descartan
+los satélites detectados se fija allí; y las tres limitaciones declaradas, que
+hoy viajan en cada locus generado, se publicarían **una sola vez** si el
+catálogo se publica aparte (DTC-104) y no repetidas por cada locus.
+
 <a id="dtc-096"></a>
 
 ## DTC-096 — Ámbito de azar propio del deslizamiento biológico
@@ -2326,6 +2343,19 @@ genera **antes** que las lecturas. Lo que sí caza un ámbito compartido es
 comprobación antigua se conserva como prueba de sistema —es buena contra un
 generador que leyera la configuración del tartamudeo por error— y su
 documentación dice que no es la prueba del ámbito.
+
+**Ampliación del 28/10/2026 (detección de microsatélites, DTC-103).** El
+identificador de un locus **detectado depende solo de su propio tramo** —su
+secuencia, sus coordenadas y su motivo—, nunca del orden en que el barrido los
+encuentra ni de cuántos otros haya. Por eso **se conserva la propiedad que esta
+decisión exige**: añadir un locus a la referencia no cambia el abanico de los
+demás. **Provisional, pendiente de la pausa de la entrega 1:** la forma exacta
+del identificador; la propuesta es
+`SSR-<índice de secuencia>-<inicio>-<fin>-<motivo>` en base uno, que cabe en los
+64 caracteres que admite un identificador y no estrena clase de identificador.
+Un locus declarado conserva el que le puso el usuario, y uno declarado que
+imite el patrón y choque con un detectado se rechaza como identificador
+repetido.
 
 <a id="dtc-097"></a>
 
@@ -2474,6 +2504,19 @@ sección de loci del manifiesto también. Lo mismo vale sin inserción, contra l
 suministrada. Corregido el 01/10/2026 tras la revisión adversarial: la primera
 redacción decía que la verdad y el VCF se juzgaban contra la final, y antes de
 esa comprobación de nombres no los leía nadie.
+
+
+**Ampliación del 28/10/2026 (detección de microsatélites, DTC-103).** Con la
+sección de microsatélites, la detección corre **después** de construir la
+referencia final —inserción incluida— y antes de generar los abanicos: un tracto
+insertado se detecta en coordenadas **finales**, nunca de partida. El rechazo de
+una inserción junto a una reducción de referencia cambia de **texto**: su
+diagnóstico debe indicar el camino en dos ejecuciones —reducir en una,
+publicar el FASTA reducido y suministrarlo como `fasta` de la otra—, en vez del
+actual «la reducción se haría sobre la suministrada, sin el tracto». Que la
+detección en la misma ejecución que reduce se rechace con ese mismo diagnóstico
+es la propuesta del plan, **pendiente de confirmar** (DTF-067). Sigue sin haber
+versión de esquema nueva (DTC-036, nota del 28/10/2026).
 
 
 ## DTC-099 — Multiplicador configurable de la PCR en los homopolímeros
@@ -2642,6 +2685,17 @@ transformación que dice cubrir.
 **Cómo se mantiene.** Una transformación nueva que cambie las lecturas entra
 en el oráculo y en al menos un escenario de la batería en el mismo cambio que
 la introduce. Si no, la decisión deja de cubrirla.
+**Ampliación del 28/10/2026 (detección de microsatélites, DTC-103).** La batería
+gana escenarios que ejercitan loci **detectados**: referencia suministrada con
+tractos de periodos 1, 2 y 4 y tartamudeo de base encendido; inserción
+detectada con matriz generada; referencia simulada con tractos plantados y
+tartamudeo clonal; y un locus declarado que ajusta su deslizamiento y su tasa
+junto a detectados. Cada escenario exige que el oráculo haya visto
+`repeat_bases_sampled > 0` en un locus **detectado**, no solo en uno declarado, y
+el oráculo lee los loci de la **verdad publicada**, no del catálogo ni del
+detector. Los escenarios que hoy declaran loci sin detección se reescriben con
+la sección de microsatélites, porque ese régimen se retira.
+
 
 ## DTC-102 — El tartamudeo de una molécula quimérica, tramo a tramo
 
@@ -2680,3 +2734,116 @@ mínima de DT-060, el escenario de quimeras entre dos secuencias con
 microsatélites, el de linaje con quimeras —que exige que (a) haya ocurrido— y
 el saturado.
 
+<a id="dtc-103"></a>
+
+## DTC-103 — Detección de microsatélites sobre la referencia final
+
+Decisión del responsable de los días 27 y 28/10/2026, que concreta REQ-REF-38 a
+REQ-REF-40 y REQ-CONF-142. **Las partes marcadas «provisional» se fijan en la
+pausa de decisión de la entrega 1 del plan de detección, con las cifras
+medidas sobre el tomate reducido, y no se escriben aquí antes.**
+
+**Qué se decide.** La referencia final de la simulación —suministrada, con
+tractos insertados, o simulada con tractos plantados— se barre una vez para
+localizar sus microsatélites de 1 a 6 pb, y esos loci son los **únicos** que
+pueden variar. Se activa por la **presencia** de la sección de microsatélites;
+sin ella no hay microsatélites. Se retira el régimen anterior de loci
+declarados sin detección: los escenarios que lo usaban **cambian a propósito**.
+
+**El núcleo, copiado y no enlazado.** El algoritmo es el de `find_tandem_repeats`
+del proyecto hermano `pop_var_caller` (licencia MIT, «Copyright (c) 2026 Jose
+Blanca & Joaquin Cañizares», los mismos autores que este proyecto). Se **copia**
+con su atribución, sin depender del *crate*: la cabecera del fichero copiado
+lleva proyecto, licencia, autores, el commit de origen y la **nota de sala
+limpia** del original —derivado solo de la idea publicada por Benson (1999) y de
+código propio, **no** del código `TRF-mod` con licencia AGPL, que no se leyó—.
+Se quitan del original la dependencia de errores externos y el lector de
+regiones; el simulador no gana ninguna dependencia.
+
+**Puntuación fija.** Para cada periodo de 1 a 6, el detector compara cada base
+con la anterior desplazada un periodo: **+2** si coinciden y **−7** si no (una
+base que no sea A, C, G o T nunca coincide), toma los segmentos de puntuación
+máxima de Ruzzo y Tompa (1999) y emite solo motivos **primitivos** (`AA` es
+`A`), descartando la re-detección de un tracto con un periodo múltiplo cuando el
+periodo menor cubre la mitad o más. Devuelve intervalos semiabiertos en base
+cero; el motivo es la lectura de las bases al inicio del tramo. Los dos números
+son constantes del algoritmo y no se exponen como parámetro.
+
+**Criterios (REQ-REF-39).** Los de partida son el mínimo de copias por longitud
+de motivo `[8, 6, 6, 6, 5, 4]`, configurable, y la pureza y la tirada mínimas
+que ya rigen la admisión de todo locus. **Provisional:** sobre qué se cuentan
+las copias (la propuesta es las copias completas de la descomposición del
+simulador), las fronteras (las del detector, sin recortar), el desempate entre
+tramos solapados (mayor puntuación, luego más bases, luego periodo menor, luego
+el de la izquierda), el trato de los compuestos (la detección solo produce loci
+de un motivo y los compuestos se declaran), el tope de unidades para los
+satélites, y la `N` y los bordes de secuencia (al menos una base a cada lado).
+
+**Cuándo corre.** Después de preparar la referencia final y **antes del
+generador de deslizamiento** de DTC-095, igual en `validate` y en `run`, y antes
+de crear nada publicado: un rechazo suyo no deja un solo byte escrito. Con
+simulación la referencia ya está entera en memoria, de modo que el barrido no
+necesita lector propio.
+
+**El catálogo que deja.** Una sola lista de loci, **detectados y declarados
+juntos, sin solapes, ordenada por secuencia (en el orden de la referencia) y por
+inicio**, en coordenadas de la referencia final, cada uno con su **origen**
+(detectado o declarado). Admite la consulta de qué loci se solapan con un
+intervalo, por búsqueda binaria sobre ese orden: la usan la exclusión del
+generador de SNV (REQ-CONF-143) y el plan de *indels* poblacionales.
+
+**Coincidencia de los declarados (REQ-REF-40).** Un locus declarado, insertado o
+plantado debe coincidir con un tramo detectado. **Provisional:** la propuesta es
+que su intervalo se solape con un tramo detectado de la misma secuencia cuyo
+motivo sea una **rotación** de uno de los suyos, que manden las fronteras del
+declarado y que sustituya a los detectados que solapa. Un declarado de 7 o más
+pb queda exento.
+
+**Identificadores de los detectados:** ver DTC-096. **Versión del algoritmo:**
+`ssr-detection-v1`, que se publica con el catálogo.
+
+**Garantía de bytes.** Los escenarios **sin microsatélites** publican los mismos
+bytes que antes de esta decisión; lo vigila `tests/repeat_detection_frozen_identity.rs`
+con huellas obtenidas del commit `d101f8f` compilado aparte. Es una comprobación
+de cambios **involuntarios**, no una obligación de compatibilidad (DTC-036, nota
+del 28/10/2026).
+
+**Alcance.** No alcanza a la población fundadora de F5, que no tiene
+microsatélites (REQ-EVO-74). No cambia el modelo de deslizamiento (DTC-094 a
+DTC-097) ni el de tartamudeo (DTC-102).
+
+<a id="dtc-104"></a>
+
+## DTC-104 — Publicación y juez del catálogo de microsatélites
+
+Decisión del 28/10/2026 en lo que no depende de cifras, que concreta REQ-MAN-98
+y REQ-VAL-64. **La forma de publicar es provisional, pendiente de la pausa de la
+entrega 1.**
+
+**Publicación (provisional).** Está por decidir entre dos formas: cada locus
+detectado como uno más de `repeat_loci` de la configuración efectiva y del
+manifiesto con origen `detected`, o un **catálogo aparte** —una tabla con una
+fila por locus más un metadato con criterios, versión del algoritmo, recuentos
+de descarte y huella, como el par de la matriz de SNV (DTC-054)— y la
+configuración efectiva con los criterios, el deslizamiento común y el enlace
+con huella. La propuesta del plan es el catálogo aparte, porque los documentos
+JSON dejarían de crecer con el número de loci; depende de cuánto pese cada
+parte medida y de si se limitan regiones. La verdad y el VCF no cambian de
+formato en ninguna de las dos.
+
+**El juez no llama al productor ni al detector (decidido).** El juez que relee
+lo publicado trabaja contra el FASTA final publicado y con aritmética propia,
+sin invocar la medida de pureza ni la conversión de tramo en locus: hacerlo
+compararía el catálogo consigo mismo. Su lista de comprobaciones está en
+REQ-VAL-64. **Su límite se declara en su documentación:** no puede comprobar la
+exhaustividad, porque eso exige un detector; la cubren las pruebas con verdad
+plantada y con un buscador de tiradas exactas por fuerza bruta escrito aparte.
+Un tracto puro de muchas copias absorbido en un segmento impuro que falle la
+pureza desaparece sin aviso, y el juez no puede verlo.
+
+**Módulo y puerta de cobertura (propuesta).** Un módulo pequeño propio, con
+cada rechazo por la constructora de trazas del proyecto, que entra en la puerta
+de cobertura de los jueces tocando los cuatro sitios que exige `CLAUDE.md`: el
+array `judges` de `scripts/check-guard-coverage.sh`, la fila de
+`scripts/guard-coverage-baseline.tsv`, la lista de `tests/guard_constructors.rs`
+y el párrafo de `CLAUDE.md`.
