@@ -26,7 +26,7 @@ use crate::event_manifest::{
 };
 use crate::fastq_output::FinalPairedFastqStream;
 use crate::fastq_validation::F4CoverageReport;
-use crate::identity::{ReferenceId, derive_execution_id};
+use crate::identity::{ReferenceId, SequenceId, derive_execution_id};
 use crate::initial_individual_integration::IncompatibleGenotypeAuthorization;
 use crate::initial_individual_materialization::{
     InitialIndividualsMaterialization, InitialIndividualsMaterializationError,
@@ -2722,73 +2722,111 @@ fn admit_repeat_loci_against_small_variants(
     if effective.repeat_loci().is_empty() {
         return Ok(());
     }
+    // **Índices construidos una vez**, en vez de comparar cada locus con cada
+    // cambio directo y con cada fila de la matriz: con miles de loci y una
+    // matriz grande, eso crecía con el producto de los dos (paso F6.4.a.8h
+    // del plan de detección de microsatélites). Cada índice guarda, por
+    // posición, **el primero en su orden** —de declaración o de la matriz—,
+    // y de los que caen dentro de un locus se nombra el primero en ese orden:
+    // el mismo que encontraba el recorrido de antes.
+    //
+    // Una posición en base 1 igual a cero no cae dentro de ningún intervalo
+    // (su fin, en base 0, es el cero); por eso no entra en los índices.
+    let direct_events = effective.direct_events();
+    let mut events_by_id = BTreeMap::<&str, usize>::new();
+    let mut snp_events_by_position = BTreeMap::<(&str, u64), (usize, &SequenceId, u64)>::new();
+    for (index, event) in direct_events.iter().enumerate() {
+        events_by_id
+            .entry(event.event_id().as_str())
+            .or_insert(index);
+        // Solo el cambio de base declara su posición en coordenadas de la
+        // referencia. La inserción y la deleción la declaran en las
+        // vigentes, y compararlas aquí se equivoca en las dos direcciones:
+        // las juzga la cadena de segmentos, que no tiene deriva posible.
+        if let EffectiveDirectEvent::Snp {
+            sequence_id,
+            position_1based,
+            ..
+        } = event
+            && *position_1based > 0
+        {
+            snp_events_by_position
+                .entry((sequence_id.as_str(), position_1based - 1))
+                .or_insert((index, sequence_id, *position_1based));
+        }
+    }
+    let rows = matrix.map(|matrix| matrix.rows()).unwrap_or_default();
+    let mut rows_by_position = BTreeMap::<(&str, u64), usize>::new();
+    for (index, row) in rows.iter().enumerate() {
+        if row.position_1based() > 0 {
+            rows_by_position
+                .entry((row.contig().as_str(), row.position_1based() - 1))
+                .or_insert(index);
+        }
+    }
     for locus in effective.repeat_loci() {
         let interval = locus.declaration().interval();
         let sequence_id = interval.sequence_id().as_str();
         let (start, end) = (interval.start(), interval.end());
-        let invades = |other_sequence: &str, other_start: u64, other_end: u64| {
-            other_sequence == sequence_id && other_start < end && start < other_end
-        };
-        for event in effective.direct_events() {
-            // **El identificador del evento que coloca un alelo es el del
-            // propio locus**, de modo que un cambio directo llamado igual
-            // haría ambiguo el origen de la modificación en la verdad. Se
-            // rechaza aquí, sobre lo que el usuario escribió, en vez de morir
-            // al final con un error de formato sobre un documento producido.
-            if event.event_id().as_str() == locus.id() {
+        // **El identificador del evento que coloca un alelo es el del propio
+        // locus**, de modo que un cambio directo llamado igual haría ambiguo
+        // el origen de la modificación en la verdad. Se rechaza aquí, sobre
+        // lo que el usuario escribió, en vez de morir al final con un error
+        // de formato sobre un documento producido.
+        //
+        // Los dos rechazos por un cambio directo se comprueban juntos y gana
+        // el del cambio declarado antes, como cuando se recorrían en orden.
+        let named_like_the_locus = events_by_id.get(locus.id()).copied();
+        let invading = first_inside(&snp_events_by_position, sequence_id, start, end);
+        match (named_like_the_locus, invading) {
+            (Some(named), invading) if invading.is_none_or(|(invading, ..)| named <= invading) => {
                 return Err(repeat_admission_error(
                     locus.id(),
                     format!(
                         "el cambio directo {} lleva el mismo identificador que el locus, y el locus lo usa como identificador del evento que coloca su alelo",
-                        event.event_id()
+                        direct_events[named].event_id()
                     ),
                 ));
             }
-            // Solo el cambio de base declara su posición en coordenadas de la
-            // referencia. La inserción y la deleción la declaran en las
-            // vigentes, y compararlas aquí se equivoca en las dos direcciones:
-            // las juzga la cadena de segmentos, que no tiene deriva posible.
-            let EffectiveDirectEvent::Snp {
-                sequence_id: event_sequence,
-                position_1based,
-                ..
-            } = event
-            else {
-                continue;
-            };
-            if invades(
-                event_sequence.as_str(),
-                position_1based.saturating_sub(1),
-                *position_1based,
-            ) {
+            (_, Some((invading, event_sequence, position_1based))) => {
                 return Err(repeat_invasion_error(
                     locus,
                     &format!(
                         "el cambio de base {} en {event_sequence}:{position_1based}",
-                        event.event_id()
+                        direct_events[invading].event_id()
                     ),
                 ));
             }
+            (_, None) => {}
         }
-        for row in matrix.map(|matrix| matrix.rows()).unwrap_or_default() {
-            if invades(
-                row.contig().as_str(),
-                row.position_1based().saturating_sub(1),
-                row.position_1based(),
-            ) {
-                return Err(repeat_invasion_error(
-                    locus,
-                    &format!(
-                        "la variante {} de la matriz en {}:{}",
-                        row.variant_id(),
-                        row.contig(),
-                        row.position_1based()
-                    ),
-                ));
-            }
+        if let Some(invading) = first_inside(&rows_by_position, sequence_id, start, end) {
+            let row = &rows[invading];
+            return Err(repeat_invasion_error(
+                locus,
+                &format!(
+                    "la variante {} de la matriz en {}:{}",
+                    row.variant_id(),
+                    row.contig(),
+                    row.position_1based()
+                ),
+            ));
         }
     }
     Ok(())
+}
+
+/// El primero, en su orden, de los que un índice por posición tiene dentro de
+/// `[start, end)` de la secuencia.
+fn first_inside<'index, V: Copy + Ord>(
+    index: &BTreeMap<(&'index str, u64), V>,
+    sequence_id: &'index str,
+    start: u64,
+    end: u64,
+) -> Option<V> {
+    index
+        .range((sequence_id, start)..(sequence_id, end))
+        .map(|(_, value)| *value)
+        .min()
 }
 
 /// El diagnóstico que el usuario va a leer cuando invade un microsatélite.

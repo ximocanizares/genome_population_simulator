@@ -201,3 +201,185 @@ fn a_type_error_is_located_at_the_same_line_and_column_after_a_large_document() 
         "esperaba la línea {line}, columna 10, con CRLF: {rendered}"
     );
 }
+
+/// Loci de la prueba de admisión contra variantes pequeñas: `(id, secuencia,
+/// inicio en base 1, fin)`. `L1` y `L3` en `chr1`, `L2` en `chr2`, y `L2`
+/// ocupa en `chr2` unas coordenadas que en `chr1` no son de ningún locus.
+const ADMISSION_LOCI: [(&str, &str, usize, usize); 3] = [
+    ("L1", "chr1", 101, 120),
+    ("L2", "chr2", 301, 320),
+    ("L3", "chr1", 501, 520),
+];
+
+/// Ejecuta el preflight entero —el mismo de `validate` y de `run`— de un
+/// escenario con los loci de [`ADMISSION_LOCI`], las filas de la matriz
+/// `(secuencia, posición en base 1)` y los cambios de base directos
+/// `(identificador, secuencia, posición en base 1)` dados, en ese orden. La
+/// matriz lleva además una fila en `chr2:50`, fuera de todo locus.
+///
+/// Las bases de referencia de cada fila y de cada cambio se leen de la
+/// secuencia escrita aquí, para que ninguna otra guarda lo rechace antes.
+fn preflight_with_small_variants(
+    rows: &[(&str, usize)],
+    snps: &[(&str, &str, usize)],
+) -> Result<(), Diagnostic> {
+    use genome_population_simulator::application::load_and_validate_config;
+    use genome_population_simulator::execution::{
+        ExecutionAuthorizations, preflight_validated_config_with_authorizations,
+    };
+
+    let root = TemporaryRoot::new();
+    let mut sequences = Vec::new();
+    for sequence in ["chr1", "chr2"] {
+        let mut bases = "ACGT".repeat(250).into_bytes();
+        for (_, locus_sequence, start, end) in ADMISSION_LOCI {
+            if locus_sequence == sequence {
+                for (offset, base) in bases[start - 1..end].iter_mut().enumerate() {
+                    *base = if offset % 2 == 0 { b'C' } else { b'A' };
+                }
+            }
+        }
+        sequences.push((sequence, bases));
+    }
+    let base_at = |sequence: &str, position: usize| -> char {
+        let bases = &sequences
+            .iter()
+            .find(|(id, _)| *id == sequence)
+            .expect("secuencia")
+            .1;
+        char::from(bases[position - 1])
+    };
+    let other = |base: char| if base == 'G' { 'T' } else { 'G' };
+    let fasta = root.0.join("reference.fa");
+    fs::write(
+        &fasta,
+        sequences
+            .iter()
+            .map(|(id, bases)| format!(">{id}\n{}\n", std::str::from_utf8(bases).expect("ASCII")))
+            .collect::<String>(),
+    )
+    .expect("FASTA");
+    let mut matrix = String::from("contig\tposition\tref\talt\tpopulation_id\talt_af\n");
+    // Una fila fuera de todo locus, para que la matriz nunca esté vacía.
+    for (sequence, position) in [("chr2", 50)].iter().chain(rows) {
+        let reference = base_at(sequence, *position);
+        matrix.push_str(&format!(
+            "{sequence}\t{position}\t{reference}\t{}\tP1\t0.5\n",
+            other(reference)
+        ));
+    }
+    fs::write(root.0.join("population-snvs.tsv"), matrix).expect("matriz");
+    let mut text = format!(
+        "config_kind = \"general\"\nschema_version = \"4\"\nseed = \"{SEED}\"\n\n\
+         [population_snvs]\nmode = \"supplied\"\ninput_path = \"{}\"\n\n\
+         [reference]\nkind = \"supplied\"\nid = \"ref-main\"\nfasta = \"{}\"\n\n\
+         [[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\n\
+         [[reference.sequences]]\nid = \"chr2\"\nclass = \"chromosome\"\nlength = 1000\n\n",
+        root.0.join("population-snvs.tsv").display(),
+        fasta.display()
+    );
+    for (id, sequence, start, end) in ADMISSION_LOCI {
+        text.push_str(&format!(
+            "[[reference.repeat_loci]]\nid = \"{id}\"\nsequence = \"{sequence}\"\nstart = {start}\n\
+             end = {end}\nmotif = \"CA\"\n\n[[reference.repeat_loci.alleles]]\nunits = {}\n\
+             frequency = 1.0\n\n",
+            (end - start).div_ceil(2)
+        ));
+    }
+    text.push_str(
+        "[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nploidy = 2\n\
+         genotype_model = \"hwe\"\nindividual_ids = [\"S1\"]\n\n",
+    );
+    for (id, sequence, position) in snps {
+        let reference = base_at(sequence, *position);
+        text.push_str(&format!(
+            "[[direct_events]]\nevent_id = \"{id}\"\nindividual_id = \"S1\"\nphase = 0\n\
+             kind = \"snp\"\ncontig = \"{sequence}\"\nposition_1based = {position}\n\
+             ref = \"{reference}\"\nalt = \"{}\"\n\n",
+            other(reference)
+        ));
+    }
+    let path = root.0.join("general.toml");
+    fs::write(&path, text).expect("documento");
+    let effective = load_and_validate_config(&path)?;
+    preflight_validated_config_with_authorizations(&effective, ExecutionAuthorizations::default())
+}
+
+fn rejected_with(rows: &[(&str, usize)], snps: &[(&str, &str, usize)]) -> String {
+    match preflight_with_small_variants(rows, snps) {
+        Ok(()) => panic!("tenía que rechazarse: filas {rows:?}, cambios {snps:?}"),
+        Err(diagnostic) => diagnostic.render_human(),
+    }
+}
+
+/// **F6.4.a.8h. La admisión de los loci contra las variantes pequeñas da el
+/// mismo diagnóstico con índices por posición que comparando cada locus con
+/// cada cambio directo y con cada fila de la matriz.**
+///
+/// Cada caso fija un borde que un índice mal hecho pierde:
+///
+/// - el control: filas en la base de antes y la de después de `L1`, y en las
+///   coordenadas de `L1` y de `L2` **de la otra secuencia**, se admiten;
+/// - una fila en la **primera** base y otra en la **última** de un locus se
+///   rechazan (un rango que empiece en la base siguiente al inicio, o que
+///   acabe una antes del fin, las deja pasar);
+/// - de dos cambios directos dentro del mismo locus se nombra **el declarado
+///   antes**, aunque esté más a la derecha;
+/// - un cambio directo llamado como el locus y otro que lo invade: gana el
+///   declarado antes, en los dos órdenes;
+/// - un cambio directo gana a una fila de la matriz en el mismo locus, y un
+///   locus declarado antes gana a uno posterior aunque este tenga un cambio
+///   directo.
+#[test]
+fn the_small_variant_admission_names_the_same_invader_as_comparing_everything() {
+    preflight_with_small_variants(
+        &[("chr1", 100), ("chr1", 121), ("chr1", 310), ("chr2", 110)],
+        &[("snp-outside", "chr1", 300), ("snp-other", "chr2", 115)],
+    )
+    .unwrap_or_else(|diagnostic| panic!("control: {}", diagnostic.render_human()));
+
+    for (row, locus) in [
+        (("chr1", 101), "L1"),
+        (("chr1", 120), "L1"),
+        (("chr2", 301), "L2"),
+        (("chr2", 320), "L2"),
+    ] {
+        let rendered = rejected_with(&[("chr1", 50), row], &[]);
+        assert!(
+            rendered.contains(&format!("locus {locus}:"))
+                && rendered.contains(&format!("de la matriz en {}:{}", row.0, row.1)),
+            "fila {row:?}: {rendered}"
+        );
+    }
+
+    let rendered = rejected_with(
+        &[],
+        &[("snp-late", "chr1", 115), ("snp-early", "chr1", 105)],
+    );
+    assert!(
+        rendered.contains("el cambio de base snp-late en chr1:115"),
+        "{rendered}"
+    );
+
+    let rendered = rejected_with(&[], &[("snp-inside", "chr1", 115), ("L1", "chr1", 50)]);
+    assert!(
+        rendered.contains("el cambio de base snp-inside en chr1:115"),
+        "{rendered}"
+    );
+    let rendered = rejected_with(&[], &[("L1", "chr1", 50), ("snp-inside", "chr1", 115)]);
+    assert!(
+        rendered.contains("el cambio directo L1 lleva el mismo identificador que el locus"),
+        "{rendered}"
+    );
+
+    let rendered = rejected_with(&[("chr1", 110)], &[("snp-inside", "chr1", 115)]);
+    assert!(
+        rendered.contains("el cambio de base snp-inside en chr1:115"),
+        "{rendered}"
+    );
+    let rendered = rejected_with(&[("chr1", 110)], &[("snp-l3", "chr1", 505)]);
+    assert!(
+        rendered.contains("locus L1:") && rendered.contains("de la matriz en chr1:110"),
+        "{rendered}"
+    );
+}

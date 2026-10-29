@@ -522,6 +522,7 @@ pub(crate) fn validate_truth_with_copy_inspection<E>(
                 CopySummary {
                     source_slices,
                     pieces,
+                    repeat_history: repeat_history_by_interval(&copy.history),
                     history: Cow::Borrowed(&copy.history),
                     event_loci,
                     inherited_loss,
@@ -828,6 +829,7 @@ pub fn validate_and_reconstruct_truth(
                 CopySummary {
                     source_slices,
                     pieces,
+                    repeat_history: repeat_history_by_interval(&copy.history),
                     history: Cow::Borrowed(&copy.history),
                     event_loci,
                     inherited_loss,
@@ -873,6 +875,9 @@ struct CopySummary<'truth> {
     source_slices: Vec<SourceSlice>,
     pieces: Vec<PieceLayout>,
     history: Cow<'truth, [TruthHistoryEvent]>,
+    /// Posiciones en `history` de los alelos de repetición, por su intervalo y
+    /// en el orden del historial (ver [`repeat_history_by_interval`]).
+    repeat_history: BTreeMap<(u64, u64), Vec<usize>>,
     event_loci: EventLoci,
     inherited_loss: Option<(u64, u64)>,
     /// Procedencia declarada de la copia (`provenance.origin`).
@@ -888,12 +893,31 @@ impl<'truth> CopySummary<'truth> {
         Self {
             source_slices: value.source_slices,
             pieces: value.pieces,
+            repeat_history: repeat_history_by_interval(&history),
             history,
             event_loci: value.event_loci,
             inherited_loss: value.inherited_loss,
             origin,
         }
     }
+}
+
+/// Dónde están en el historial los alelos de repetición de una copia, por su
+/// intervalo y en el orden del historial.
+///
+/// El juez de cada caso de repetición buscaba el alelo de la copia recorriendo
+/// el historial entero, que tiene una entrada por locus aplicado: casos por
+/// loci (paso F6.4.a.8j del plan de detección de microsatélites). Con la tabla
+/// mira solo los alelos de ese intervalo, en el mismo orden, de modo que sigue
+/// encontrando **el primero** que cumple.
+fn repeat_history_by_interval(history: &[TruthHistoryEvent]) -> BTreeMap<(u64, u64), Vec<usize>> {
+    let mut table = BTreeMap::<(u64, u64), Vec<usize>>::new();
+    for (position, event) in history.iter().enumerate() {
+        if let TruthHistoryEvent::RepeatAllele { start, end, .. } = event {
+            table.entry((*start, *end)).or_default().push(position);
+        }
+    }
+    table
 }
 
 #[derive(Clone, Debug)]
@@ -2182,30 +2206,42 @@ fn validate_repeat_genotype(
         ));
     }
     let mut expected = BTreeMap::new();
-    for (identity, copy) in copies.iter().filter(|(identity, _)| {
-        identity.reference_id == genotype.reference_id
-            && identity.individual_id == genotype.individual_id
-            && identity.sequence_id == genotype.locus.sequence_id
-    }) {
-        let applied = copy.history.iter().find_map(|event| match event {
-            TruthHistoryEvent::RepeatAllele {
-                locus_id: applied_locus,
-                start,
-                end,
-                bases,
-                blocks,
-                ..
-            } if applied_locus == locus_id
-                && *start == genotype.locus.start
-                && *end == genotype.locus.end =>
-            {
-                Some((bases, blocks))
-            }
-            TruthHistoryEvent::RepeatAllele { .. }
-            | TruthHistoryEvent::Snp { .. }
-            | TruthHistoryEvent::Insertion { .. }
-            | TruthHistoryEvent::Deletion { .. } => None,
-        });
+    // Las copias de este individuo y esta secuencia son un tramo contiguo del
+    // mapa, que ordena por referencia, individuo, secuencia y copia: se toma
+    // ese tramo en vez de filtrar todas las copias de todos los individuos.
+    let copy_of = |copy_index| CopyIdentity {
+        reference_id: genotype.reference_id.clone(),
+        individual_id: genotype.individual_id.clone(),
+        sequence_id: genotype.locus.sequence_id.clone(),
+        copy_index,
+    };
+    for (identity, copy) in copies.range(copy_of(u8::MIN)..=copy_of(u8::MAX)) {
+        let interval = (genotype.locus.start, genotype.locus.end);
+        let applied = copy
+            .repeat_history
+            .get(&interval)
+            .into_iter()
+            .flatten()
+            .map(|&position| &copy.history[position])
+            .find_map(|event| match event {
+                TruthHistoryEvent::RepeatAllele {
+                    locus_id: applied_locus,
+                    start,
+                    end,
+                    bases,
+                    blocks,
+                    ..
+                } if applied_locus == locus_id
+                    && *start == genotype.locus.start
+                    && *end == genotype.locus.end =>
+                {
+                    Some((bases, blocks))
+                }
+                TruthHistoryEvent::RepeatAllele { .. }
+                | TruthHistoryEvent::Snp { .. }
+                | TruthHistoryEvent::Insertion { .. }
+                | TruthHistoryEvent::Deletion { .. } => None,
+            });
         let index = match applied {
             None => 0,
             Some((bases, blocks)) => genotype

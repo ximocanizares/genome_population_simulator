@@ -921,6 +921,17 @@ impl SegmentChain {
         Ok(index)
     }
 
+    /// Prepara un lote para comprobar y aplicar de una vez los alelos de
+    /// repetición de esta copia (ver [`RepeatAlleleBatch`]).
+    #[must_use]
+    pub fn repeat_allele_batch(&self) -> RepeatAlleleBatch<'_> {
+        RepeatAlleleBatch {
+            chain: self,
+            sources: ordered_source_index(&self.indel_state.pieces),
+            pending: Vec::new(),
+        }
+    }
+
     fn current_indel_state(&self) -> Result<CurrentIndelState, SegmentError> {
         Ok((*self.indel_state).clone())
     }
@@ -966,6 +977,233 @@ impl SegmentChain {
     pub fn is_shared_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.segments, &other.segments)
     }
+}
+
+/// Los alelos de repetición de **una copia**, comprobados y aplicados de una
+/// vez.
+///
+/// # Por qué existe
+///
+/// Aplicarlos locus a locus con [`SegmentChain::with_current_repeat_allele`]
+/// copia la lista entera de fragmentos por cada locus, y comprobar cada uno con
+/// [`SegmentChain::intact_repeat_interval`] la recorre desde el principio: con
+/// miles de loci en una secuencia el coste crece con el cuadrado de los loci
+/// (apartado 11.10 del plan de detección de microsatélites). El lote ordena una
+/// vez los fragmentos de fuente por su inicio, busca el de cada intervalo por
+/// búsqueda binaria y construye la cadena final en una sola pasada.
+///
+/// # Lo que garantiza
+///
+/// [`Self::intact_repeat_interval`] responde lo mismo que
+/// [`SegmentChain::intact_repeat_interval`] sobre la cadena original, y
+/// [`Self::finish`] devuelve **la misma cadena** que aplicar los alelos
+/// encolados uno a uno, en el orden en que se encolaron, con
+/// `with_current_repeat_allele`.
+///
+/// La comprobación se hace contra la cadena **original**, no contra la que va
+/// quedando, y da lo mismo porque los intervalos de los loci no se solapan (la
+/// admisión rechaza los que se pisan): aplicar un alelo solo parte en dos el
+/// fragmento que lo contiene, y otro intervalo disjunto sigue cayendo entero en
+/// uno de los dos restos, con los mismos cambios de base dentro.
+///
+/// Cuando algo de eso no se cumple, el lote **renuncia al índice** y hace
+/// exactamente lo de antes, alelo a alelo: si los fragmentos de fuente no
+/// están ordenados por inicio y sin solaparse, si no comparten secuencia, si
+/// los cambios de base de un fragmento no están ordenados, o si dos alelos
+/// encolados se pisan. Ninguna operación de este módulo produce una cadena
+/// así, pero [`SegmentChain::new`] acepta segmentos en cualquier orden.
+#[derive(Debug)]
+pub struct RepeatAlleleBatch<'chain> {
+    chain: &'chain SegmentChain,
+    /// Inicio de cada fragmento de fuente y su posición en la cadena, en orden
+    /// de inicio; `None` cuando la cadena no admite el índice.
+    sources: Option<Vec<(u64, usize)>>,
+    /// Posición del fragmento que contiene cada alelo y el alelo, en el orden
+    /// en que se encolaron.
+    pending: Vec<(usize, CurrentRepeatAllelePiece)>,
+}
+
+impl RepeatAlleleBatch<'_> {
+    /// Igual que [`SegmentChain::intact_repeat_interval`] sobre la cadena
+    /// original, sin recorrerla.
+    pub fn intact_repeat_interval(
+        &self,
+        interval: &GenomicInterval,
+    ) -> Result<usize, SegmentError> {
+        let Some(sources) = &self.sources else {
+            return self.chain.intact_repeat_interval(interval);
+        };
+        // El último fragmento que empieza en el inicio del intervalo o antes.
+        // Como los fragmentos están ordenados y no se solapan, es el único que
+        // puede contenerlo.
+        let candidate = sources.partition_point(|(start, _)| *start <= interval.start());
+        let Some(&(_, index)) = candidate.checked_sub(1).and_then(|at| sources.get(at)) else {
+            return Err(SegmentError::RepeatIntervalNotIntact);
+        };
+        let CurrentIndelPiece::Source(source) = &self.chain.indel_state.pieces[index] else {
+            return Err(SegmentError::RepeatIntervalNotIntact);
+        };
+        if source.source.reference_id() != interval.reference_id()
+            || source.source.sequence_id() != interval.sequence_id()
+            || source.source.sequence_length() != interval.sequence_length()
+            || interval.end() > source.source.end()
+        {
+            return Err(SegmentError::RepeatIntervalNotIntact);
+        }
+        let first_at_or_after = source
+            .snps
+            .partition_point(|snp| snp.position().offset() < interval.start());
+        if source
+            .snps
+            .get(first_at_or_after)
+            .is_some_and(|snp| snp.position().offset() < interval.end())
+        {
+            return Err(SegmentError::RepeatIntervalAlreadyModified);
+        }
+        Ok(index)
+    }
+
+    /// Encola un alelo, después de comprobar que su intervalo llega intacto.
+    pub fn push(&mut self, allele: CurrentRepeatAllelePiece) -> Result<(), SegmentError> {
+        let index = self.intact_repeat_interval(allele.interval())?;
+        self.pending.push((index, allele));
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+
+    /// La cadena con todos los alelos encolados aplicados. Si falla, devuelve
+    /// también la posición, en el orden de encolado, del alelo que falló.
+    pub fn finish(self) -> Result<SegmentChain, (usize, SegmentError)> {
+        let mut order = (0..self.pending.len()).collect::<Vec<_>>();
+        order.sort_by_key(|&at| {
+            let (index, allele) = &self.pending[at];
+            (*index, allele.interval().start())
+        });
+        let disjoint = order.windows(2).all(|pair| {
+            let (left_index, left) = &self.pending[pair[0]];
+            let (right_index, right) = &self.pending[pair[1]];
+            left_index != right_index || left.interval().end() <= right.interval().start()
+        });
+        if self.sources.is_none() || !disjoint {
+            return self.finish_one_by_one();
+        }
+        let state = &self.chain.indel_state;
+        let mut pieces = Vec::with_capacity(state.pieces.len() + 2 * self.pending.len());
+        let mut cursor = 0;
+        let mut queued = order.iter().map(|&at| (at, &self.pending[at])).peekable();
+        while cursor < state.pieces.len() {
+            let piece = &state.pieces[cursor];
+            let CurrentIndelPiece::Source(source) = piece else {
+                pieces.push(piece.clone());
+                cursor += 1;
+                continue;
+            };
+            // Los cambios de base de cada resto son los del fragmento entre
+            // el final del alelo anterior y el inicio del siguiente: lo mismo
+            // que dejan los dos filtros de `with_current_repeat_allele`
+            // aplicados uno tras otro.
+            let at = |offset: u64| {
+                source
+                    .snps
+                    .partition_point(|snp| snp.position().offset() < offset)
+            };
+            let mut start = source.source.start();
+            let mut first_snp = 0;
+            let mut last_allele = None;
+            while let Some((position, (_, allele))) =
+                queued.next_if(|(_, (index, _))| *index == cursor)
+            {
+                let interval = allele.interval();
+                let last_snp = at(interval.start());
+                push_source_piece(
+                    &mut pieces,
+                    &source.source,
+                    start,
+                    interval.start(),
+                    &source.snps[first_snp..last_snp],
+                )
+                .map_err(|error| (position, error))?;
+                pieces.push(CurrentIndelPiece::RepeatAllele(allele.clone()));
+                start = interval.end();
+                first_snp = at(interval.end());
+                last_allele = Some(position);
+            }
+            if let Some(position) = last_allele {
+                push_source_piece(
+                    &mut pieces,
+                    &source.source,
+                    start,
+                    source.source.end(),
+                    &source.snps[first_snp..],
+                )
+                .map_err(|error| (position, error))?;
+            } else {
+                pieces.push(piece.clone());
+            }
+            cursor += 1;
+        }
+        let mut events = Vec::with_capacity(state.events.len() + self.pending.len());
+        events.extend_from_slice(&state.events);
+        events.extend(
+            self.pending
+                .into_iter()
+                .map(|(_, allele)| CurrentIndelEvent::RepeatAllele { allele }),
+        );
+        Ok(SegmentChain {
+            segments: self.chain.segments.clone(),
+            indel_state: Arc::new(CurrentIndelState {
+                pieces: Arc::from(pieces),
+                events: Arc::from(events),
+            }),
+        })
+    }
+
+    /// Lo de antes del lote: un alelo detrás de otro.
+    fn finish_one_by_one(self) -> Result<SegmentChain, (usize, SegmentError)> {
+        let mut chain = self.chain.clone();
+        for (at, (_, allele)) in self.pending.into_iter().enumerate() {
+            chain = chain
+                .with_current_repeat_allele(allele)
+                .map_err(|error| (at, error))?;
+        }
+        Ok(chain)
+    }
+}
+
+/// Inicio y posición de los fragmentos de fuente, ordenados por inicio, si la
+/// cadena admite el índice de [`RepeatAlleleBatch`]: fragmentos de fuente
+/// ordenados y sin solaparse, todos de la misma secuencia, y cambios de base
+/// ordenados dentro de cada uno.
+fn ordered_source_index(pieces: &[CurrentIndelPiece]) -> Option<Vec<(u64, usize)>> {
+    let mut index = Vec::new();
+    let mut previous: Option<&GenomicInterval> = None;
+    for (at, piece) in pieces.iter().enumerate() {
+        let CurrentIndelPiece::Source(source) = piece else {
+            continue;
+        };
+        if let Some(previous) = previous
+            && (previous.reference_id() != source.source.reference_id()
+                || previous.sequence_id() != source.source.sequence_id()
+                || previous.sequence_length() != source.source.sequence_length()
+                || previous.end() > source.source.start())
+        {
+            return None;
+        }
+        if source
+            .snps
+            .windows(2)
+            .any(|pair| pair[0].position().offset() > pair[1].position().offset())
+        {
+            return None;
+        }
+        index.push((source.source.start(), at));
+        previous = Some(&source.source);
+    }
+    Some(index)
 }
 
 #[derive(Clone, Copy)]
@@ -1502,6 +1740,211 @@ mod tests {
             Segment::new(interval(0, 10), vec![other_space]),
             Err(SegmentError::ModificationSourceMismatch)
         );
+    }
+
+    /// Intervalo de una secuencia de 200 bases.
+    fn long_interval(start: u64, end: u64) -> GenomicInterval {
+        GenomicInterval::new(
+            ReferenceId::parse("ref", "test").expect("reference"),
+            SequenceId::parse("chr1", "test").expect("sequence"),
+            start,
+            end,
+            200,
+        )
+        .expect("interval")
+    }
+
+    fn long_snp(offset: u64) -> SnpModification {
+        SnpModification::new(
+            BasePosition::new(
+                ReferenceId::parse("ref", "test").expect("reference"),
+                SequenceId::parse("chr1", "test").expect("sequence"),
+                offset,
+                200,
+            )
+            .expect("position"),
+            CanonicalBase::A,
+            CanonicalBase::C,
+            provenance(),
+        )
+        .expect("SNP")
+    }
+
+    fn repeat_allele(id: &str, start: u64, end: u64) -> CurrentRepeatAllelePiece {
+        use crate::identity::RepeatLocusId;
+        use crate::tandem_repeat::{RepeatMotif, TandemRepeatTract};
+        CurrentRepeatAllelePiece::new(
+            RepeatLocusId::parse(id, "test").expect("locus id"),
+            long_interval(start, end),
+            TandemRepeatTract::new(RepeatMotif::new(b"CA").expect("motif"), b"CACACA")
+                .expect("tract"),
+            ModificationProvenance::random(EventId::parse(id, "test").expect("event")),
+        )
+    }
+
+    /// Lo de antes del lote: los alelos aplicados uno a uno.
+    fn one_by_one(
+        chain: &SegmentChain,
+        alleles: &[CurrentRepeatAllelePiece],
+    ) -> Result<SegmentChain, (usize, SegmentError)> {
+        let mut applied = chain.clone();
+        for (at, allele) in alleles.iter().enumerate() {
+            applied = applied
+                .with_current_repeat_allele(allele.clone())
+                .map_err(|error| (at, error))?;
+        }
+        Ok(applied)
+    }
+
+    fn batched(
+        chain: &SegmentChain,
+        alleles: &[CurrentRepeatAllelePiece],
+    ) -> Result<SegmentChain, (usize, SegmentError)> {
+        let mut batch = chain.repeat_allele_batch();
+        for (at, allele) in alleles.iter().enumerate() {
+            batch.push(allele.clone()).map_err(|error| (at, error))?;
+        }
+        batch.finish()
+    }
+
+    /// **El lote da la misma cadena, y la misma respuesta a «¿llega intacto?»,
+    /// que aplicar los alelos uno a uno** (paso F6.4.a.8f del plan de detección
+    /// de microsatélites).
+    ///
+    /// La copia tiene cambios de base dentro del fragmento que parten los
+    /// alelos, una deleción y una inserción que dejan tres fragmentos de
+    /// fuente, dos loci pegados y, sobre todo, **dos loci que empiezan justo
+    /// donde empieza un fragmento** —tras la deleción y tras la inserción—,
+    /// que es lo que pierde un índice que busque el fragmento con `<` en vez
+    /// de `<=`. Las consultas sueltas incluyen un cambio de base **en la
+    /// primera base** del intervalo, que es lo que pierde la búsqueda binaria
+    /// de los cambios de base mal acotada, y en la base siguiente al final,
+    /// que no cuenta. Los alelos se encolan desordenados.
+    #[test]
+    fn the_repeat_allele_batch_matches_applying_one_allele_at_a_time() {
+        let mut chain = SegmentChain::intact(long_interval(0, 200));
+        for offset in [10, 49, 60, 120, 190] {
+            chain = chain.with_snp(long_snp(offset)).expect("SNP");
+        }
+        // Fuente [30, 40) borrada: fragmentos [0, 30) y [40, 200).
+        chain = chain
+            .with_current_deletion(30, 40, provenance())
+            .expect("deletion");
+        // La base vigente 150 es la de fuente 160: [40, 160), inserción,
+        // [160, 200).
+        chain = chain
+            .with_current_insertion(150, Arc::from(&b"TT"[..]), provenance())
+            .expect("insertion");
+        let sources = chain
+            .current_modifications()
+            .iter()
+            .filter_map(|piece| match piece {
+                CurrentIndelPiece::Source(source) => {
+                    Some((source.source().start(), source.source().end()))
+                }
+                CurrentIndelPiece::Inserted(_) | CurrentIndelPiece::RepeatAllele(_) => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sources, [(0, 30), (40, 160), (160, 200)], "el fixture");
+
+        let batch = chain.repeat_allele_batch();
+        assert!(batch.sources.is_some(), "esta cadena admite el índice");
+        let other_sequence = GenomicInterval::new(
+            ReferenceId::parse("ref", "test").expect("reference"),
+            SequenceId::parse("chr2", "test").expect("sequence"),
+            50,
+            60,
+            200,
+        )
+        .expect("interval");
+        let mut queries = vec![other_sequence];
+        for (start, end) in [
+            (0, 1),
+            (5, 9),
+            (9, 11),
+            (10, 11),
+            (11, 30),
+            (29, 31),
+            (40, 48),
+            (39, 41),
+            (48, 50),
+            (49, 50),
+            (50, 60),
+            (60, 70),
+            (61, 70),
+            (155, 165),
+            (160, 170),
+            (159, 160),
+            (199, 200),
+        ] {
+            queries.push(long_interval(start, end));
+        }
+        for query in &queries {
+            assert_eq!(
+                batch.intact_repeat_interval(query),
+                chain.intact_repeat_interval(query),
+                "{query:?}"
+            );
+        }
+        assert_eq!(
+            batch.intact_repeat_interval(&long_interval(40, 48)),
+            Ok(chain
+                .current_modifications()
+                .iter()
+                .position(|piece| matches!(piece, CurrentIndelPiece::Source(source)
+                    if source.source().start() == 40))
+                .expect("the fragment")),
+            "el locus que empieza justo donde empieza el fragmento"
+        );
+        assert_eq!(
+            batch.intact_repeat_interval(&long_interval(49, 50)),
+            Err(SegmentError::RepeatIntervalAlreadyModified),
+            "un cambio de base en la primera base del intervalo"
+        );
+
+        let alleles = [
+            repeat_allele("D", 100, 110),
+            repeat_allele("B", 50, 60),
+            repeat_allele("F", 5, 9),
+            repeat_allele("E", 160, 170),
+            repeat_allele("C", 61, 70),
+            repeat_allele("A", 40, 48),
+            repeat_allele("G", 170, 180),
+        ];
+        let expected = one_by_one(&chain, &alleles).expect("one by one");
+        assert_eq!(batched(&chain, &alleles), Ok(expected));
+    }
+
+    /// **Sin índice posible, el lote hace lo de antes**: una cadena con los
+    /// segmentos desordenados —`SegmentChain::new` la acepta— y dos alelos que
+    /// se pisan dan lo mismo que aplicarlos uno a uno, error incluido.
+    #[test]
+    fn the_repeat_allele_batch_falls_back_to_one_at_a_time_when_it_cannot_index() {
+        let unordered = SegmentChain::new(vec![
+            Segment::new(long_interval(100, 200), vec![]).expect("segment"),
+            Segment::new(long_interval(0, 100), vec![]).expect("segment"),
+        ])
+        .expect("chain");
+        assert!(unordered.repeat_allele_batch().sources.is_none());
+        let alleles = [repeat_allele("A", 150, 160), repeat_allele("B", 10, 20)];
+        assert_eq!(
+            batched(&unordered, &alleles),
+            one_by_one(&unordered, &alleles)
+        );
+        for (start, end) in [(10, 20), (95, 105), (150, 160)] {
+            assert_eq!(
+                unordered
+                    .repeat_allele_batch()
+                    .intact_repeat_interval(&long_interval(start, end)),
+                unordered.intact_repeat_interval(&long_interval(start, end))
+            );
+        }
+
+        let ordered = SegmentChain::intact(long_interval(0, 200));
+        let overlapping = [repeat_allele("A", 50, 60), repeat_allele("B", 55, 65)];
+        let expected = one_by_one(&ordered, &overlapping);
+        assert_eq!(expected, Err((1, SegmentError::RepeatIntervalNotIntact)));
+        assert_eq!(batched(&ordered, &overlapping), expected);
     }
 
     /// **Un tracto de repetición cuenta como base de referencia al anclar.**

@@ -62,17 +62,20 @@
 //! sorteo es **bit a bit** el de Hardy-Weinberg, y con F = 1 la copia 1 no
 //! consume ni una palabra.
 
+use std::collections::BTreeMap;
+
 use crate::application::{EffectiveConfig, EffectiveInitialGenotypeModel, EffectiveRepeatLocus};
 use crate::diagnostics::Diagnostic;
-use crate::haplotype::{HaplotypeCopy, HaplotypeStateError, Individual};
-use crate::identity::{EventId, IndividualId, PopulationId};
+use crate::haplotype::{HaplotypeCopy, HaplotypePhase, HaplotypeStateError, Individual};
+use crate::identity::{EventId, IndividualId, PopulationId, SequenceId};
 use crate::randomness::{
     CATEGORICAL_F64_ALGORITHM, RandomWordSource, RootSeed, RuntimeSubseedScope,
     categorical_f64_with_source, derive_subseed,
 };
 use crate::reference::Reference;
 use crate::segments::{
-    CurrentIndelEvent, CurrentRepeatAllelePiece, ModificationProvenance, SegmentError,
+    CurrentIndelEvent, CurrentRepeatAllelePiece, ModificationProvenance, RepeatAlleleBatch,
+    SegmentError,
 };
 
 /// Ámbito de subsemilla del sorteo, tal y como lo publica el catálogo.
@@ -276,6 +279,16 @@ fn categorical_draw(
 /// referencia, no se aplica nada: no hay variante que publicar. Es lo que hace
 /// que un escenario cuyo único alelo es el de la referencia produzca una verdad
 /// idéntica a la de antes de que existieran los microsatélites.
+///
+/// # Un lote por copia, aplicado al final
+///
+/// Los alelos de cada copia se comprueban en el orden de siempre —locus a
+/// locus, copia a copia, de modo que el primer rechazo es el mismo— pero se
+/// aplican todos de una vez al final, con un [`RepeatAlleleBatch`] por copia.
+/// Aplicarlos uno a uno copiaba la lista entera de fragmentos de la copia por
+/// cada locus, y con miles de loci en una secuencia el coste crecía con el
+/// cuadrado (paso F6.4.a.8f del plan de detección de microsatélites). El lote
+/// da la misma cadena que aplicarlos uno a uno.
 pub fn apply_repeat_alleles(
     individual: &Individual,
     reference: &Reference,
@@ -292,23 +305,30 @@ pub fn apply_repeat_alleles(
         });
     }
     let root_seed = config.reproducibility().root_seed();
+    // Por copia: el lote y, en el mismo orden que sus alelos, el locus de cada
+    // uno, para que un rechazo al aplicar nombre el mismo locus que antes.
+    let mut batches = BTreeMap::<
+        (&SequenceId, HaplotypePhase),
+        (
+            &HaplotypeCopy,
+            RepeatAlleleBatch<'_>,
+            Vec<&EffectiveRepeatLocus>,
+        ),
+    >::new();
     for locus in config.repeat_loci() {
         let interval = locus.declaration().interval();
         let sequence_id = interval.sequence_id();
         let reference_tract = reference_tract(reference, locus)?;
         let event_id = repeat_event_id(locus)?;
-        let copies = individual
-            .copies_for(sequence_id)
-            .ok_or_else(|| {
-                repeat_genotype_error(
-                    locus.id(),
-                    format!("el individuo no tiene copias de {sequence_id}"),
-                )
-            })?
-            .iter()
-            .map(|copy| (copy.phase(), copy.phase().copy_index()))
-            .collect::<Vec<_>>();
-        for (phase, copy_index) in copies {
+        let copies = individual.copies_for(sequence_id).ok_or_else(|| {
+            repeat_genotype_error(
+                locus.id(),
+                format!("el individuo no tiene copias de {sequence_id}"),
+            )
+        })?;
+        for copy in copies {
+            let phase = copy.phase();
+            let copy_index = phase.copy_index();
             let allele_index = draw_repeat_allele_index(
                 root_seed,
                 config.simulation_reference_id(),
@@ -327,45 +347,51 @@ pub fn apply_repeat_alleles(
                 copy_index,
                 allele_index,
             });
-            let copy = updated
-                .copies_for(sequence_id)
-                .and_then(|copies| copies.iter().find(|copy| copy.phase() == phase))
-                .ok_or_else(|| {
-                    repeat_genotype_error(locus.id(), "la copia objetivo desapareció")
-                })?;
+            let (copy, batch, loci) = batches
+                .entry((sequence_id, phase))
+                .or_insert_with(|| (copy, copy.segments().repeat_allele_batch(), Vec::new()));
             // **La condición se comprueba siempre, se aplique o no el alelo.**
             // Cuando el alelo sorteado coincide con el tracto de la referencia
             // no hay nada que escribir, pero la verdad va a publicar que esta
             // copia conserva ese tracto, y eso sería falso si algo lo hubiera
             // tocado. Comprobarlo solo al aplicar hacía que el rechazo
             // dependiera del sorteo y, con él, de la semilla.
-            copy.segments()
+            batch
                 .intact_repeat_interval(interval)
                 .map_err(|error| invaded_locus_error(locus, copy_index, copy, error))?;
             if allele.tract().bases() == reference_tract.as_slice() {
                 continue;
             }
-            let segments = copy
-                .segments()
-                .with_current_repeat_allele(CurrentRepeatAllelePiece::new(
+            batch
+                .push(CurrentRepeatAllelePiece::new(
                     locus.declaration().id().clone(),
                     interval.clone(),
                     allele.tract().clone(),
                     ModificationProvenance::random(event_id.clone()),
                 ))
                 .map_err(|error| invaded_locus_error(locus, copy_index, copy, error))?;
-            updated = updated
-                .with_copy_segments(sequence_id, phase, segments)
-                .map_err(|error| {
-                    repeat_genotype_error(
-                        locus.id(),
-                        format!(
-                            "no se pudo sustituir la copia {copy_index}: {}",
-                            describe_haplotype_error(error)
-                        ),
-                    )
-                })?;
+            loci.push(locus);
         }
+    }
+    for ((sequence_id, phase), (copy, batch, loci)) in batches {
+        if batch.is_empty() {
+            continue;
+        }
+        let copy_index = phase.copy_index();
+        let segments = batch
+            .finish()
+            .map_err(|(at, error)| invaded_locus_error(loci[at], copy_index, copy, error))?;
+        updated
+            .replace_copy_segments(sequence_id, phase, segments)
+            .map_err(|error| {
+                repeat_genotype_error(
+                    loci[0].id(),
+                    format!(
+                        "no se pudo sustituir la copia {copy_index}: {}",
+                        describe_haplotype_error(error)
+                    ),
+                )
+            })?;
     }
     Ok(AppliedRepeatAlleles {
         individual: updated,

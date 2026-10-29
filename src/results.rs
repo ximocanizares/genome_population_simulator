@@ -819,17 +819,20 @@ pub fn publish_measured_vcf_tract_bases(document: &mut Value, realized: &Realize
         json!(truth.saturating_add(realized.vcf_bases)),
     );
     if let Some(loci) = budget.get_mut("per_locus").and_then(Value::as_array_mut) {
+        // Las bases medidas por locus, en un mapa construido una vez y no
+        // buscadas en la lista por cada locus, que crecía con el cuadrado de
+        // los loci (paso F6.4.a.8i del plan de detección de microsatélites).
+        // Se queda la **primera** entrada de cada locus, como la búsqueda de
+        // antes.
+        let mut measured_by_locus = BTreeMap::<&str, u64>::new();
+        for (locus, bases) in &realized.vcf_by_locus {
+            measured_by_locus.entry(locus.as_str()).or_insert(*bases);
+        }
         for locus in loci {
             let measured = locus
                 .get("id")
                 .and_then(Value::as_str)
-                .and_then(|id| {
-                    realized
-                        .vcf_by_locus
-                        .iter()
-                        .find(|(locus, _)| locus == id)
-                        .map(|(_, bases)| *bases)
-                })
+                .and_then(|id| measured_by_locus.get(id).copied())
                 .unwrap_or(0);
             locus["vcf_tract_bases_bound"] = json!(measured);
         }

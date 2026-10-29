@@ -25,8 +25,9 @@ use crate::publication::ExecutionWorkspace;
 use crate::reference::Reference;
 use crate::results::ArtifactRecord;
 use crate::segments::{
-    CanonicalBase, CurrentIndelEvent, CurrentIndelPiece, CurrentSourcePiece, DeletionModification,
-    InsertionModification, ModificationOrigin, SmallModification, SnpModification,
+    CanonicalBase, CurrentIndelEvent, CurrentIndelPiece, CurrentRepeatAllelePiece,
+    CurrentSourcePiece, DeletionModification, InsertionModification, ModificationOrigin,
+    SmallModification, SnpModification,
 };
 use crate::truth_schema::{
     AlleleCarrier, CopyIdentity, CopyProvenance, GenotypeCaseKind, GenotypeRecord,
@@ -127,19 +128,25 @@ impl std::error::Error for TruthProjectionError {}
 pub fn project_truth(
     input: TruthProjectionInput<'_>,
 ) -> Result<TruthDocument, TruthProjectionError> {
+    // Las procedencias con huella, en un conjunto: cada fragmento, cada cambio
+    // y cada fila comprueba la suya, y recorrer la lista entera cada vez
+    // crecía con el producto de loci por loci (paso F6.4.a.8g del plan de
+    // detección de microsatélites).
+    let known_groups = known_sources(input.group_digests);
+    let known_sources = known_sources(input.source_digests);
     let reference_source = reference_source(input.reference);
-    require_digest(input.source_digests, &reference_source)?;
+    require_digest(&known_sources, &reference_source)?;
     if input.matrix.reference_id() != input.reference.id() {
         return Err(TruthProjectionError::MatrixReferenceMismatch);
     }
     let matrix_artifact = matrix_artifact_source(input.matrix);
-    require_digest(input.source_digests, &matrix_artifact)?;
+    require_digest(&known_sources, &matrix_artifact)?;
     // El catálogo es obligatorio incluso para loci todo-REF. Verificar aquí
     // sus identidades impide que un caso sin ALT materializado oculte una
     // matriz suministrada/reutilizada sin procedencia publicable.
     for population_id in input.matrix.population_ids() {
         require_digest(
-            input.group_digests,
+            &known_groups,
             &TruthSourceRef {
                 kind: TruthSourceKind::Matrix,
                 source_id: population_id.as_str().to_owned(),
@@ -148,7 +155,7 @@ pub fn project_truth(
     }
     for row in input.matrix.rows() {
         require_digest(
-            input.source_digests,
+            &known_sources,
             &TruthSourceRef {
                 kind: TruthSourceKind::Matrix,
                 source_id: matrix_source_id(row.source_id()).to_owned(),
@@ -163,7 +170,7 @@ pub fn project_truth(
                 records.push(TruthRecord::HaplotypeCopy(project_copy(
                     individual,
                     copy,
-                    input.source_digests,
+                    &known_sources,
                 )?));
             }
         }
@@ -363,7 +370,7 @@ pub(crate) fn verify_publication_against_simulation(
 fn project_copy(
     individual: &MaterializedInitialIndividual,
     copy: &HaplotypeCopy,
-    source_digests: &[NamedDigest],
+    source_digests: &KnownSources<'_>,
 ) -> Result<HaplotypeCopyRecord, TruthProjectionError> {
     let identity = copy_identity(copy);
     let mut sources = BTreeSet::new();
@@ -442,7 +449,7 @@ fn project_copy(
 
 fn project_current_piece(
     piece: &CurrentIndelPiece,
-    source_digests: &[NamedDigest],
+    source_digests: &KnownSources<'_>,
 ) -> Result<TruthCurrentPiece, TruthProjectionError> {
     match piece {
         CurrentIndelPiece::Source(source) => project_current_source(source, source_digests),
@@ -504,7 +511,7 @@ fn segment_source(
 
 fn project_current_source(
     source: &CurrentSourcePiece,
-    source_digests: &[NamedDigest],
+    source_digests: &KnownSources<'_>,
 ) -> Result<TruthCurrentPiece, TruthProjectionError> {
     let source_ref = reference_source_from_id(source.source().reference_id().as_str());
     require_digest(source_digests, &source_ref)?;
@@ -536,7 +543,7 @@ fn project_current_source(
 
 fn project_history_event(
     event: &CurrentIndelEvent,
-    source_digests: &[NamedDigest],
+    source_digests: &KnownSources<'_>,
 ) -> Result<TruthHistoryEvent, TruthProjectionError> {
     match event {
         CurrentIndelEvent::Snp { snp } => Ok(TruthHistoryEvent::Snp {
@@ -595,7 +602,7 @@ fn project_history_event(
 
 fn project_modification(
     modification: &SmallModification,
-    source_digests: &[NamedDigest],
+    source_digests: &KnownSources<'_>,
 ) -> Result<TruthModification, TruthProjectionError> {
     match modification {
         SmallModification::Snp(snp) => project_snp(snp, source_digests),
@@ -606,7 +613,7 @@ fn project_modification(
 
 fn project_snp(
     snp: &SnpModification,
-    source_digests: &[NamedDigest],
+    source_digests: &KnownSources<'_>,
 ) -> Result<TruthModification, TruthProjectionError> {
     let provenance = snp_provenance(snp, source_digests)?;
     Ok(TruthModification::Snp {
@@ -620,7 +627,7 @@ fn project_snp(
 
 fn project_insertion(
     insertion: &InsertionModification,
-    source_digests: &[NamedDigest],
+    source_digests: &KnownSources<'_>,
 ) -> Result<TruthModification, TruthProjectionError> {
     let event_id = insertion.provenance().event_id().as_str().to_owned();
     let source = domain_source(insertion.provenance());
@@ -640,7 +647,7 @@ fn project_insertion(
 
 fn project_deletion(
     deletion: &DeletionModification,
-    source_digests: &[NamedDigest],
+    source_digests: &KnownSources<'_>,
 ) -> Result<TruthModification, TruthProjectionError> {
     let event_id = deletion.provenance().event_id().as_str().to_owned();
     let source = domain_source(deletion.provenance());
@@ -655,7 +662,7 @@ fn project_deletion(
 
 fn snp_provenance(
     snp: &SnpModification,
-    source_digests: &[NamedDigest],
+    source_digests: &KnownSources<'_>,
 ) -> Result<ModificationProvenance, TruthProjectionError> {
     match (
         snp.matrix_source_id(),
@@ -1151,6 +1158,14 @@ fn project_repeat_genotypes(
                 }
             }
         }
+        // El alelo realizado de cada copia, por intervalo, buscado una vez por
+        // secuencia y no recorriendo los fragmentos de la copia por cada caso:
+        // con miles de loci en una secuencia, eso crecía con el cuadrado (paso
+        // F6.4.a.8g del plan de detección de microsatélites). Los casos llegan
+        // ordenados por secuencia, de modo que basta con rehacer la tabla
+        // cuando la secuencia cambia. Se queda el **primer** fragmento de cada
+        // intervalo, que es el que encontraba la búsqueda de antes.
+        let mut observed_by_copy: Option<(String, Vec<RepeatAllelesByInterval<'_>>)> = None;
         for ((sequence_id, start, end), alleles) in cases {
             let locus = TruthLocus {
                 sequence_id: sequence_id.clone(),
@@ -1170,23 +1185,21 @@ fn project_repeat_genotypes(
                 .individual()
                 .copies_for(&sequence_key)
                 .ok_or_else(|| TruthProjectionError::MissingRepeatSequence(sequence_id.clone()))?;
+            if observed_by_copy
+                .as_ref()
+                .is_none_or(|(cached, _)| *cached != sequence_id)
+            {
+                observed_by_copy = Some((
+                    sequence_id.clone(),
+                    copies.iter().map(repeat_alleles_by_interval).collect(),
+                ));
+            }
+            let (_, observed_by_copy) = observed_by_copy
+                .as_ref()
+                .expect("the table of the sequence was just built");
             let mut carriers = Vec::with_capacity(copies.len());
-            for copy in copies {
-                let observed = copy
-                    .segments()
-                    .current_modifications()
-                    .iter()
-                    .find_map(|piece| match piece {
-                        CurrentIndelPiece::RepeatAllele(allele)
-                            if allele.interval().start() == start
-                                && allele.interval().end() == end =>
-                        {
-                            Some(allele)
-                        }
-                        CurrentIndelPiece::RepeatAllele(_)
-                        | CurrentIndelPiece::Source(_)
-                        | CurrentIndelPiece::Inserted(_) => None,
-                    });
+            for (copy, observed) in copies.iter().zip(observed_by_copy) {
+                let observed = observed.get(&(start, end)).copied();
                 let allele_index = match observed {
                     None => 0,
                     Some(allele) => {
@@ -1231,6 +1244,22 @@ fn project_repeat_genotypes(
         }
     }
     Ok(())
+}
+
+/// Alelos de repetición realizados de una copia, por su intervalo.
+type RepeatAllelesByInterval<'copy> = BTreeMap<(u64, u64), &'copy CurrentRepeatAllelePiece>;
+
+/// La tabla de una copia: el **primer** fragmento de alelo de cada intervalo.
+fn repeat_alleles_by_interval(copy: &HaplotypeCopy) -> RepeatAllelesByInterval<'_> {
+    let mut table = RepeatAllelesByInterval::new();
+    for piece in copy.segments().current_modifications() {
+        if let CurrentIndelPiece::RepeatAllele(allele) = piece {
+            table
+                .entry((allele.interval().start(), allele.interval().end()))
+                .or_insert(allele);
+        }
+    }
+    table
 }
 
 /// Enlaces a los fragmentos vigentes que todavía proceden de una inserción.
@@ -1611,11 +1640,18 @@ fn copy_identity(copy: &HaplotypeCopy) -> CopyIdentity {
         copy_index: copy.id().copy_index(),
     }
 }
+/// Procedencias que tienen huella publicada.
+type KnownSources<'digests> = BTreeSet<&'digests TruthSourceRef>;
+
+fn known_sources(digests: &[NamedDigest]) -> KnownSources<'_> {
+    digests.iter().map(|digest| &digest.source).collect()
+}
+
 fn require_digest(
-    digests: &[NamedDigest],
+    known: &KnownSources<'_>,
     source: &TruthSourceRef,
 ) -> Result<(), TruthProjectionError> {
-    if digests.iter().any(|digest| &digest.source == source) {
+    if known.contains(source) {
         Ok(())
     } else {
         Err(TruthProjectionError::MissingDigest(source.clone()))

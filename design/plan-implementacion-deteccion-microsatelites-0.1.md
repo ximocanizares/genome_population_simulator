@@ -909,7 +909,9 @@ DP-SSR-17): **se arreglan los cuatro costes cuadráticos** del apartado 11.5 —
 VCF y su oráculo, la validación física final, el tartamudeo y la lectura del
 TOML— antes de conectar la detección, más la comprobación de solapes, que es
 barata. El punto 5 de 11.5 (los recorridos localizados solo por lectura, sin
-peso medido) **no** se toca. Cada arreglo es de **rendimiento**: no puede
+peso medido) **no** se tocaba; **el 29/10/2026, con las mediciones de 11.9
+delante, el responsable decide arreglarlo también** (pasos F6.4.a.8f a
+F6.4.a.8j, apartado 11.10). Cada arreglo es de **rendimiento**: no puede
 cambiar ni un byte de lo publicado.
 
 **Condición de entrada de todos los pasos: una huella con microsatélites.**
@@ -1039,6 +1041,99 @@ del VCF y los que la medición añadió llevan sufijo.
   - Se comprueba con: la huella intacta (publica `drawn_copies` y
     `realized_copies` de cada alelo).
   - **Debe fallar contra:** perder el primer sorteo de cada locus al agrupar.
+- ☐ **F6.4.a.8f.** Alelos de repetición: comprobar y aplicar los de cada copia
+  en un lote, sin recorrer ni copiar sus fragmentos por cada locus.
+  - Depende de: la huella de entrada.
+  - Procede de: apartado 11.5, punto 5, **medido** en 11.10: con 50 284 loci
+    es el coste mayor (546 s de 973 en la copia instrumentada), y se paga
+    cuatro veces por ejecución —los dos preflights y las dos llamadas del
+    juez de las estadísticas de la población inicial—.
+  - Cambia: `src/segments.rs` (`RepeatAlleleBatch`: los fragmentos de fuente
+    de la copia ordenados por inicio una vez, el de cada locus por búsqueda
+    binaria, los cambios de base del fragmento también por búsqueda binaria,
+    y la cadena final construida en una sola pasada; si la cadena no admite
+    el índice —fragmentos desordenados o que se pisan, que ninguna operación
+    del módulo produce— o dos alelos encolados se pisan, hace lo de antes,
+    alelo a alelo) y `src/repeat_genotypes.rs` (`apply_repeat_alleles`: la
+    comprobación de cada locus y copia en el orden de siempre, contra la
+    cadena original, y un lote por copia aplicado al final).
+  - Se comprueba con: las pruebas unitarias
+    `the_repeat_allele_batch_matches_applying_one_allele_at_a_time` (misma
+    cadena y misma respuesta a «¿llega intacto?» que uno a uno, con loci que
+    empiezan justo donde empieza un fragmento y un cambio de base en la
+    primera base del intervalo) y
+    `the_repeat_allele_batch_falls_back_to_one_at_a_time_when_it_cannot_index`;
+    las dos huellas intactas.
+  - **Debe fallar contra:** un índice que busque el fragmento con `<` en vez
+    de `<=` y pierda el que empieza justo en el inicio del locus.
+- ☐ **F6.4.a.8g.** Verdad: el alelo de cada caso y la huella de cada
+  procedencia, sin recorrer listas enteras.
+  - Depende de: la huella de entrada.
+  - Procede de: apartado 11.5, punto 5 (`src/truth_projection.rs:1177`) y,
+    **corregido por la medición** (11.10), la comprobación de huellas: el
+    crecimiento ×6,0 de la verdad no estaba en el alelo de cada caso sino en
+    `require_digest`, que recorría por cada fragmento y cada evento de cada
+    copia la lista de procedencias, que tiene una por locus aplicado.
+  - Cambia: `src/truth_projection.rs` (`project_repeat_genotypes`: una tabla
+    por copia de sus alelos por intervalo, rehecha al cambiar de secuencia y
+    con el primer fragmento de cada intervalo; `project_truth` y los que
+    proyectan cada copia: las procedencias con huella en un conjunto).
+  - Se comprueba con: las dos huellas intactas (dos secuencias con loci, de
+    modo que la tabla tiene que rehacerse).
+  - **Debe fallar contra:** reutilizar la tabla de la secuencia anterior al
+    cambiar de secuencia.
+- ☐ **F6.4.a.8h.** Admisión de los loci contra las variantes pequeñas por
+  índices de posición.
+  - Depende de: la huella de entrada.
+  - Procede de: apartado 11.5, punto 5 (`src/execution.rs:2725`). Con la
+    matriz de una fila de la medición no pesa; con una matriz grande crece
+    con loci × filas.
+  - Cambia: `src/execution.rs` (`admit_repeat_loci_against_small_variants`:
+    los cambios de base directos y las filas de la matriz en mapas por
+    secuencia y posición, con el primero en su orden; los identificadores de
+    los cambios directos en otro; por cada locus se nombra el primero en su
+    orden de los que caen dentro, y entre un cambio llamado como el locus y
+    uno que lo invade, el declarado antes).
+  - Se comprueba con: `tests/repeat_scale_regressions.rs`,
+    `the_small_variant_admission_names_the_same_invader_as_comparing_everything`
+    (primera y última base de un locus, las mismas coordenadas en la otra
+    secuencia, dos cambios en el mismo locus, el cambio llamado como el locus
+    en los dos órdenes, cambio contra fila y locus contra locus), que pasa
+    igual con el código de antes; `tests/repeat_locus_invasion.rs`.
+  - **Debe fallar contra:** un rango que empiece en la base siguiente al
+    inicio del locus y deje pasar la fila que cae en la primera.
+- ☐ **F6.4.a.8i.** Configuración efectiva: las bases del VCF por locus en un
+  mapa.
+  - Depende de: la huella de entrada.
+  - Procede de: la medición (11.10): el crecimiento ×10,6 de la etapa
+    «configuración efectiva y manifiesto» que 11.9 dejó sin explicar es
+    `publish_measured_vcf_tract_bases`, que buscaba las bases de cada locus
+    recorriendo la lista de todos (16 s con 50 284 loci).
+  - Cambia: `src/results.rs` (`publish_measured_vcf_tract_bases`).
+  - Se comprueba con: la huella intacta (publica `vcf_tract_bases_bound` de
+    cada locus en la configuración efectiva).
+  - **Debe fallar contra:** perder la primera entrada de la lista al hacer el
+    mapa.
+- ☐ **F6.4.a.8j.** Juez de la verdad: el alelo de cada caso de repetición sin
+  recorrer el historial entero de cada copia ni todas las copias.
+  - Depende de: la huella de entrada.
+  - Procede de: la medición de los pasos anteriores (11.10): arreglados
+    F6.4.a.8f a F6.4.a.8i, lo único que seguía creciendo con el cuadrado era
+    `validate_repeat_genotype` (`src/truth_validation.rs`), que por cada caso
+    de repetición recorría todas las copias de todos los individuos y, en
+    cada una de las suyas, el historial entero, con una entrada por locus
+    aplicado (×9,9 al pasar de 16 000 a 50 284 loci; 31 s). Es la misma
+    clase de coste; el juez corre en cada ejecución.
+  - Cambia: `src/truth_validation.rs` (`CopySummary` guarda las posiciones de
+    los alelos de repetición del historial por intervalo, en su orden;
+    `validate_repeat_genotype` toma el tramo del mapa de copias de ese
+    individuo y esa secuencia y busca en la tabla, conservando el primero que
+    cumple). No añade ni quita comprobaciones: la puerta de cobertura de los
+    jueces no cambia.
+  - Se comprueba con: las dos huellas intactas;
+    `tests/truth_validation_guards.rs` y `tests/truth_validation.rs`.
+  - **Debe fallar contra:** un tramo de copias que acabe antes de la última
+    copia del individuo.
 
 > **Revisión de la entrega 2:** cada etapa arreglada crece en línea recta al
 > doblar los loci, con la huella intacta (apartado 11.9).
@@ -1047,6 +1142,11 @@ del VCF y los que la medición añadió llevan sufijo.
 > puertas en verde y cada «debe fallar contra» comprobado mutando una copia
 > aparte (apartado 11.9.3). Falta la revisión adversarial; por eso siguen sin
 > marcar.
+>
+> **Estado, 29/10/2026 (noche):** los cinco pasos añadidos, F6.4.a.8f a
+> F6.4.a.8j, están implementados, con las puertas en verde, las huellas
+> intactas y cada «debe fallar contra» comprobado mutando una copia aparte
+> (apartado 11.10). Sin revisión adversarial y sin *commit*.
 
 ### Entrega 3 — detección en el producto
 
@@ -1950,3 +2050,240 @@ Cómo se extrapola, para que se pueda rehacer:
    depende del número de loci: es el muestreo de las lecturas del genoma
    entero.
 
+
+
+### 11.10. Entrega 2, segunda parte: el punto 5 y los tres crecimientos sin explicar (29/10/2026)
+
+Medido el 29/10/2026 por el implementador de los pasos F6.4.a.8f a
+F6.4.a.8j, que el responsable añadió a la entrega 2 ese mismo día. Mismos
+comandos que el apartado 11.1 (`measure_publication`), mismo FASTA, misma
+máquina y **los mismos documentos** que 11.9 (preparados con el detector de
+hoy; el de 16 000 loci y 100 individuos se preparó aparte con los mismos
+16 000 loci). `rustc 1.97.1`.
+
+#### 11.10.1. Dónde estaba cada coste, medido
+
+Cronómetros acumulados por función, en una copia instrumentada aparte de
+`ed30469` (el código de 11.9), con 8 000, 16 000 y 50 284 loci y 10
+individuos; una pasada cada una, con la máquina en reposo. Segundos de
+pared; entre paréntesis, el número de llamadas con 50 284 loci. El
+crecimiento esperado si fuera lineal es ×2 de 8 000 a 16 000 y ×3,14 de
+16 000 a 50 284.
+
+| Función (fichero) | 8 000 | 16 000 | 50 284 | ×2 | ×3,14 |
+|---|---:|---:|---:|---:|---:|
+| **Aplicar los alelos** (`apply_repeat_alleles`, `src/repeat_genotypes.rs`; 40) | 13,8 | 54,5 | 545,8 | ×3,96 | **×10,0** |
+| — copiar la cadena por cada locus (`with_current_repeat_allele`, `src/segments.rs`; 2,2 millones) | 7,3 | 30,5 | 319,5 | ×4,2 | ×10,5 |
+| — comprobar que el tramo llega intacto (`intact_repeat_interval`; 6,2 millones) | 1,1 | 4,4 | 42,4 | ×4,0 | ×9,7 |
+| de ella, en los dos preflights (`preflight_initial_individuals`; 2) | 8,1 | 28,8 | 273,6 | ×3,6 | ×9,5 |
+| y en el juez de la población inicial (`validate_physical_initial_population_statistics`; 2) | 8,1 | 28,4 | 275,2 | ×3,5 | ×9,7 |
+| **Proyectar cada copia en la verdad** (`project_copy`, `src/truth_projection.rs`; 260) | 2,0 | 8,4 | 89,3 | ×4,3 | **×10,6** |
+| Buscar el alelo de cada caso (`project_repeat_genotypes`; 1) | 0,16 | 0,41 | 2,9 | ×2,7 | ×7,0 |
+| **Bases del VCF por locus en la efectiva** (`publish_measured_vcf_tract_bases`, `src/results.rs`; 3) | 0,33 | 1,4 | 16,1 | ×4,1 | **×11,8** |
+| Admisión contra variantes pequeñas (`admit_repeat_loci_against_small_variants`; 2) | 0,00 | 0,00 | 0,00 | — | — |
+| Escribir y validar la verdad (`write_truth_artifact`; 1) | 15,9 | 32,3 | 100,9 | ×2,0 | ×3,1 |
+| Ejecución entera | 62,9 | 145,3 | 834,6 | ×2,3 | ×5,7 |
+
+Lo que esto dice de los tres crecimientos que 11.9 dejó sin explicar:
+
+1. **Preflight ×12,1**: es el punto 5, como 11.9 suponía. Pero el coste no
+   estaba en recorrer las piezas para buscar el tramo intacto (42 s), sino
+   en **copiar la lista entera de fragmentos** de la copia por cada locus
+   aplicado (320 s). Los unos 190 s de `apply_repeat_alleles` que quedan
+   fuera de las funciones cronometradas no se midieron por separado; por
+   lectura, son sobre todo soltar la lista anterior de fragmentos cada vez
+   que se sustituye la copia, que también es proporcional a su longitud.
+2. **Verdad ×6,0**: **no** era la búsqueda del alelo de cada caso que 11.5
+   señalaba por lectura (`src/truth_projection.rs:1177`, 2,9 s), sino
+   `require_digest`: al proyectar cada fragmento y cada evento de cada copia
+   se comprobaba que su procedencia tuviera huella **recorriendo la lista de
+   procedencias**, que tiene una entrada por locus aplicado (89 s). Se
+   arreglaron las dos (F6.4.a.8g).
+3. **Efectiva y manifiesto ×10,6**: `publish_measured_vcf_tract_bases`, que
+   para escribir en la configuración efectiva las bases del VCF de cada locus
+   las buscaba en la lista de todos (16 s). No es memoria ni la escritura de
+   los 480 MB de JSON: el resto de la etapa crece ×3,1 a ×3,5.
+4. **La admisión contra variantes pequeñas no pesa** con la matriz de una
+   fila de la medición (menos de 5 ms). Se arregló porque es de la misma
+   clase y crece con loci × filas (F6.4.a.8h), no por lo medido.
+
+Con esos cuatro arreglos, una segunda copia instrumentada (del árbol ya
+arreglado) mostró un quinto coste de la misma clase, más pequeño:
+`validate_repeat_genotype` (`src/truth_validation.rs`), el juez de cada caso
+de repetición, crecía ×9,9 de 16 000 a 50 284 loci (3,2 → 31,3 s) porque
+recorría todas las copias de todos los individuos y el historial entero de
+cada una. Se arregló también (F6.4.a.8j).
+
+#### 11.10.2. Qué cambió en cada paso
+
+| Paso | Ficheros | Qué recorría antes | Qué consulta ahora |
+|---|---|---|---|
+| F6.4.a.8f | `src/segments.rs`, `src/repeat_genotypes.rs` | por locus y copia, los fragmentos de la copia hasta el suyo, y copiaba la lista entera | los fragmentos de fuente de la copia por búsqueda binaria; la cadena final se construye una vez por copia |
+| F6.4.a.8g | `src/truth_projection.rs` | por caso, los fragmentos de cada copia; por fragmento y evento, todas las procedencias | una tabla de alelos por copia y secuencia; las procedencias en un conjunto |
+| F6.4.a.8h | `src/execution.rs` | por locus, todos los cambios directos y todas las filas de la matriz | los que caen en su intervalo, en mapas por secuencia y posición |
+| F6.4.a.8i | `src/results.rs` | por locus, la lista de bases del VCF de todos | un mapa por locus |
+| F6.4.a.8j | `src/truth_validation.rs` | por caso, todas las copias de todos los individuos y el historial entero de cada una | las copias de ese individuo y esa secuencia; los alelos del historial con ese intervalo |
+
+En todos se conserva **el primero** que encontraba el recorrido de antes:
+el primer fragmento que contiene el intervalo, el primer alelo del
+intervalo, el primer cambio o fila en su orden, la primera entrada de cada
+locus, el primer evento del historial que cumple. En F6.4.a.8f la
+comprobación de cada locus sigue haciéndose en el mismo orden (locus a
+locus, copia a copia), de modo que el primer rechazo es el mismo; y el lote
+renuncia al índice y aplica los alelos uno a uno si la cadena no lo admite
+(ver la documentación de `RepeatAlleleBatch`). F6.4.a.8j no añade ni quita
+ninguna comprobación del juez: la puerta de cobertura sale con las mismas
+cifras (121 comprobaciones y 32 sin disparar en `src/truth_validation.rs`) y
+la línea base no se tocó.
+
+#### 11.10.3. Huella y mutaciones
+
+**La huella.** Las dos congeladas siguen pasando sin tocar un literal:
+`tests/repeat_scale_frozen_identity.rs` (tres pruebas) y
+`tests/repeat_detection_frozen_identity.rs` (cuatro). Cubren los caminos
+tocados así: los escenarios 1 y 2 de la de escala llevan quince loci en dos
+secuencias **y una matriz de tres filas** entre ellos (los cambios de base
+de la matriz caen dentro de fragmentos que los alelos parten, que es lo que
+el lote reparte), VCF y configuración efectiva con las bases por locus; los
+veintiún escenarios de la revisión de la fusión del VCF llevan indels y
+tractos, de modo que hay copias con varios fragmentos de fuente. **No hacía
+falta un escenario nuevo**: la matriz con microsatélites ya está; lo que la
+huella no puede ver de la admisión son sus **rechazos**, que no se publican,
+y para eso está la regresión de F6.4.a.8h. Esa regresión se ejecutó también
+contra el código de `ed30469` (extraído con `git archive`, con su propio
+directorio de compilación) y **pasa igual**: el diagnóstico es el de antes.
+
+**Mutaciones**, todas sobre una copia aparte del árbol (extraída con
+`git ls-files -co --exclude-standard`, sin `.vscode/`), con su propio
+`CARGO_TARGET_DIR`, la copia de seguridad fuera de git y el SHA-256 del
+fichero antes, mutado y restaurado (doce primeras cifras). Las de
+`src/truth_projection.rs`, `src/execution.rs` y `src/results.rs` se hicieron
+antes de renumerar en los comentarios los pasos F6.4.a.8g a F6.4.a.8i, por
+eso su SHA difiere del del árbol; el código es el mismo. «Huella: revisión»,
+«base» y «clonal» son las tres pruebas de la huella de escala; «huella F6»
+son las cuatro de `tests/repeat_detection_frozen_identity.rs`. Cuando una
+batería de pruebas muere, `cargo test` no ejecuta las siguientes: «solo»
+quiere decir que las demás que se ejecutaron pasaron.
+
+| Mutación | Paso | Fichero | SHA antes / mutado / restaurado | Lo que muere |
+|---|---|---|---|---|
+| El índice busca el fragmento con `<` y pierde el que empieza en el inicio del locus | F6.4.a.8f | `src/segments.rs` | `63bbfef94552` / `b277841bdd93` / `63bbfef94552` | la prueba unitaria; huella: revisión |
+| La búsqueda de cambios de base con `<=` pierde el de la primera base | F6.4.a.8f | `src/segments.rs` | `63bbfef94552` / `1e810714e32c` / `63bbfef94552` | **solo** la prueba unitaria |
+| El lote pierde los cambios de base de los restos anteriores a cada alelo | F6.4.a.8f | `src/segments.rs` | `63bbfef94552` / `2674527fadba` / `63bbfef94552` | la prueba unitaria; huella: revisión, base y clonal |
+| El lote escribe los eventos en orden de posición y no de aplicación | F6.4.a.8f | `src/segments.rs` | `63bbfef94552` / `cb33c153a1b4` / `63bbfef94552` | **solo** la prueba unitaria |
+| La tabla de alelos de la verdad no se rehace al cambiar de secuencia | F6.4.a.8g | `src/truth_projection.rs` | `85a1d8aaf8ce` / `0a277d040b86` / `85a1d8aaf8ce` | huella: base y clonal |
+| El conjunto de procedencias pierde la primera | F6.4.a.8g | `src/truth_projection.rs` | `85a1d8aaf8ce` / `5debf179a5c7` / `85a1d8aaf8ce` | huella F6 (las cuatro) |
+| El rango de la admisión empieza en la base siguiente al inicio del locus | F6.4.a.8h | `src/execution.rs` | `2f0dc7d315f1` / `205b6fb76e47` / `2f0dc7d315f1` | **solo** la regresión de F6.4.a.8h |
+| La admisión nombra el primero por posición y no el primero declarado | F6.4.a.8h | `src/execution.rs` | `2f0dc7d315f1` / `6bb386d7ca12` / `2f0dc7d315f1` | **solo** la regresión de F6.4.a.8h |
+| El mapa de bases del VCF pierde la primera entrada | F6.4.a.8i | `src/results.rs` | `cd82b57f2b7a` / `0af9761921b9` / `cd82b57f2b7a` | huella: revisión, base y clonal |
+| El tramo de copias del juez acaba antes de la segunda copia | F6.4.a.8j | `src/truth_validation.rs` | `7c99bc18f6ae` / `d8a95d114642` / `7c99bc18f6ae` | huella: revisión, base y clonal; 27 pruebas de `tests/truth_validation.rs` y `tests/truth_validation_guards.rs` |
+| El juez busca el alelo por un intervalo que acaba una base después | F6.4.a.8j | `src/truth_validation.rs` | `7c99bc18f6ae` / `2977ef681b1a` / `7c99bc18f6ae` | las mismas |
+
+Lo que esto dice, sin adornos: la huella **no** ve que el lote pierda un
+cambio de base en la primera base de un locus (ningún escenario lo tiene:
+la admisión lo rechaza antes) ni el orden de los eventos (en los escenarios
+los loci se declaran en orden de posición); los dos los caza la prueba
+unitaria. Los rechazos de la admisión no se publican: solo los caza su
+regresión. Que el conjunto de procedencias o el mapa de bases del VCF
+conserven **la primera** entrada repetida no se puede comprobar: los
+productores no repiten ni procedencias (se deduplican antes) ni loci.
+
+#### 11.10.4. Tiempos antes y después
+
+Segundos de pared por etapa, como en 11.9. «Antes (11.9)» es la columna
+«después» de 11.9 (dos pasadas, media; la de 50 284 loci, una). «Antes
+(`ed30469`)» es el mismo código medido otra vez ahora, una pasada, para
+tener un antes en las mismas condiciones. «Después» es el binario de pruebas
+optimizado de este árbol (SHA-256 `07c9bb90a4a6…`), **dos pasadas**
+separadas por una barra. La máquina no tenía nada más en marcha (comprobado
+con `ps` antes de cada ejecución); la campaña corrió en segundo plano y se
+esperó a su notificación.
+
+| Loci | Indiv. | Binario | Lectura TOML | Preflight | Preflight interno | Verdad | VCF | Efectiva y manifiesto | Validación final | Total | Memoria máx. (MiB) |
+|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 8 000 | 10 | antes (11.9) | 0,07 | 4,6 | 4,8 | 21,6 | 2,6 | 1,8 | 34,9 | 70,2 | 1 801 |
+| 8 000 | 10 | después | 0,07 / 0,08 | 1,1 / 1,5 | 1,5 / 2,2 | 22,1 / 26,2 | 2,7 / 2,6 | 1,9 / 1,9 | 33,5 / 31,7 | 62,9 / 66,1 | 1 806 |
+| 16 000 | 10 | antes (11.9) | 0,15 | 16,6 | 16,7 | 48,5 | 4,3 | 4,2 | 85,5 | 175,8 | 3 512 |
+| 16 000 | 10 | antes (`ed30469`) | 0,17 | 22,3 | 20,7 | 55,5 | 5,4 | 5,8 | 96,0 | 205,8 | 3 499 |
+| 16 000 | 10 | después | 0,16 / 0,16 | 1,9 / 1,9 | 2,7 / 2,3 | 43,4 / 42,6 | 4,2 / 4,4 | 4,0 / 4,4 | 62,6 / 58,2 | 119,0 / 114,0 | 3 511 |
+| 50 284 | 10 | antes (11.9) | 0,61 | 201,4 | 205,6 | 290,1 | 21,7 | 44,5 | 673,3 | 1 437,2 | 10 801 |
+| 50 284 | 10 | antes (`ed30469`) | 0,53 | 178,3 | 190,7 | 243,8 | 21,3 | 25,4 | 530,1 | 1 190,2 | 11 294 |
+| 50 284 | 10 | después | 0,58 / 0,55 | 4,8 / 3,6 | 4,7 / 4,1 | 131,5 / 131,1 | 12,0 / 12,1 | 15,1 / 12,0 | 211,3 / 186,8 | 380,2 / 350,3 | 10 795 |
+| 4 000 | 100 | antes (11.9) | 0,04 | 16,5 | 18,1 | 129,1 | 29,8 | 2,0 | 126,7 | 322,0 | 2 818 |
+| 4 000 | 100 | después | 0,04 / 0,04 | 11,4 / 10,3 | 10,8 / 10,3 | 124,6 / 139,5 | 19,8 / 21,9 | 2,3 / 2,3 | 96,2 / 107,1 | 265,1 / 291,5 | 2 869 |
+| 16 000 | 100 | después | 0,16 / 0,17 | 14,2 / 15,3 | 14,6 / 15,4 | 424,6 / 460,5 | 47,4 / 49,2 | 9,2 / 9,9 | 307,2 / 319,0 | 817,3 / 869,4 | 11 022 |
+
+El catálogo entero del tomate reducido con 10 individuos pasa de 1 190 a
+1 437 s (según cuál de los dos «antes») a **350–380 s**, unos seis minutos,
+con la misma memoria. Las dos mediciones del «antes» difieren entre sí un
+17 % con 16 000 loci y un 21 % con 50 284, en direcciones opuestas: la
+máquina no da más precisión que esa entre sesiones, y la de 50 284 de 11.9
+fue una sola ejecución. Ninguna de las conclusiones de abajo depende de
+cuál se tome.
+
+**Crecimiento de cada etapa de 16 000 a 50 284 loci** (×3,14; media de las
+dos pasadas, 10 individuos). El criterio de la entrega es ≈ ×3,1:
+
+| Etapa | Antes (11.9) | Después | Lineal |
+|---|---:|---:|---|
+| Preflight | ×12,1 | ×2,2 | sí (lo que queda son costes fijos: 4 s) |
+| Preflight interno | ×12,3 | ×1,8 | sí (ídem) |
+| Verdad | ×6,0 | ×3,05 | **sí** |
+| VCF | ×5,1 | ×2,8 | sí |
+| Efectiva y manifiesto | ×10,6 | ×3,2 | **sí** |
+| Validación final | ×7,9 | ×3,3 | casi: ver 11.10.6 |
+| Total | ×8,2 | ×3,1 | sí |
+
+Y con 100 individuos, de 4 000 a 16 000 loci (×4): verdad ×3,4, VCF ×2,3,
+validación final ×3,1, total ×3,0.
+
+#### 11.10.5. Extrapolación al catálogo del tomate reducido
+
+| Catálogo de 50 284 loci | 11.9 | Ahora |
+|---|---|---|
+| 10 individuos, sin tartamudeo | medido: 1 437 s, 10 801 MiB | **medido: 350–380 s, 10 795 MiB** |
+| 10 individuos, con evento técnico a 0,1× | unos 1 530 s | unos 430–475 s (lo anterior más los 80–95 s del evento, que no dependen de los loci; extrapolado) |
+| 100 individuos, sin tartamudeo | unas 3,6 a 3,8 horas; unos 33 800 MiB | **unos 41 a 44 minutos**; unos **34 300 MiB** (extrapolado) |
+
+Cómo se extrapola, para que se pueda rehacer:
+
+- **Tiempo con 100 individuos**, dos cuentas: (a) en línea recta por los
+  loci desde las medias medidas con 4 000 y 16 000 loci (278,3 y 843,4 s:
+  0,0471 s por locus) da 2 458 s; (b) el crecimiento medido con 10
+  individuos de 16 000 a 50 284 loci (×3,135) aplicado a los 843,4 s da
+  2 644 s. Ya no hay término cuadrático que ajustar: 11.9 avisaba de que
+  su ajuste se quedaba corto porque lo había; ahora el crecimiento con 10
+  individuos es el de los loci.
+- **Memoria**: en línea recta, 0,679 MiB por locus con 100 individuos (de
+  2 869 a 11 022 MiB entre 4 000 y 16 000 loci). **Con 100 individuos el
+  catálogo entero sigue sin caber en esta máquina** (27 GB): la memoria no
+  era objeto de estos pasos. La bajan el catálogo aparte de la entrega 4 y,
+  si hace falta, DP-SSR-18 (11.7).
+
+#### 11.10.6. Lo que queda
+
+1. **La validación final crece ×3,3** para ×3,14 loci. Medido por función en
+   la copia instrumentada del árbol arreglado, lo que crece algo más que los
+   loci es de otra clase o pesa poco: `json_document_bytes` ×6,2 (0,3 →
+   1,7 s; árboles JSON de 480 MB), `repeat_loci_manifest_json` ×4,1 (6 →
+   25 s en cinco llamadas; recorre los sorteos agrupados, sin búsquedas: es
+   la construcción de los árboles JSON) y la lectura de la verdad
+   publicada, ×3,4. Memoria y árboles JSON: no se tocaron.
+2. **Dos recorridos de la misma clase en el juez de la verdad, pequeños, sin
+   arreglar**: `expected_repeat_alleles` (`src/truth_validation.rs`, el
+   juez del conjunto de casos) busca el alelo de cada caso recorriendo el
+   historial de cada copia (0,4 → 2,6 s de 16 000 a 50 284 loci, ×6,9), y la
+   réplica del historial (`replay_event`) busca el fragmento de cada alelo
+   de repetición recorriendo los fragmentos y lo sustituye desplazando la
+   lista (0,7 → 3,9 s, ×5,6). Entre los dos son 6,5 s de 374 con el catálogo
+   entero; el primero se arregla con la tabla de F6.4.a.8j, y el segundo
+   exige rehacer la réplica por lotes en un juez que es independiente a
+   propósito. Se dejaron para no reabrir la campaña de medición por menos
+   del 2 %.
+3. **Sin medir, de la misma clase**: el juez de cada caso SNP
+   (`validate_snp_genotype`) recorre todas las copias de todos los
+   individuos y, en cada una, sus tramos de fuente, que crecen con los loci
+   de la secuencia. Con la matriz de una fila de la medición no pesa; con
+   una matriz grande y muchos loci, sí.
+4. **Lo de 11.9.6 que sigue igual**: los dos recorridos cuadráticos del
+   juez semántico del VCF, `copy_is_reference_at` y la memoria.
