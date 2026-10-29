@@ -69,6 +69,7 @@ pub mod reference_generation;
 pub mod reference_reduction;
 pub mod reference_reduction_io;
 pub mod reference_tract_insertion;
+pub mod repeat_detection;
 pub mod repeat_genotypes;
 pub mod repeat_slippage;
 pub mod results;

@@ -1155,5 +1155,292 @@ Pendientes; este plan no las resuelve.
 
 ## 11. Medición de la entrega 1
 
-Vacía hasta que se ejecute F6.4.a.5. Cada cifra irá con el comando que la
-produjo, la versión del binario y la huella del FASTA.
+Medida el 28/10/2026 por el implementador de la entrega 1. **Son cifras, no
+decisiones**: las propuestas del apartado 11.7 las decide el responsable en la
+pausa.
+
+### 11.1. Entorno y forma de medir
+
+- **Código:** `43d0ecd` (la entrega 0, que solo añade documentos y la huella
+  a `d101f8f`) más los pasos F6.4.a.3 y F6.4.a.4 sin *commit*; `rustc 1.97.1 (8bab26f4f 2026-07-14)`.
+  Ningún fichero de `src/` cambia de comportamiento: `src/repeat_detection.rs`
+  es nuevo y no lo llama nada del producto.
+- **Binario:** el de pruebas optimizado (`--release`) de
+  `tests/repeat_detection_measurement.rs`, copiado fuera de `target/` para que
+  ninguna compilación lo pisara. Recuentos y barrido con el de SHA-256
+  `c7e468d3…`; publicación con el `7268cb7e…`, que solo difiere en el texto
+  del evento técnico (faltaban dos pasos de tartamudeo).
+- **FASTA:** `results/tomato-sl4-retain-10pct-canonical/resources/references/tomato-sl4-retain-10pct.fa`,
+  SHA-256 `f5a8d13a2fb91e0d62157733645b7cf5727ffe7d892451ab994b9f08d3bfea0a`,
+  13 secuencias, 78 252 003 bases.
+- **Máquina:** WSL2, 14 núcleos, 27 GB de RAM. Nada más corría durante las
+  mediciones (comprobado con `ps`), sin bucles de espera; cada medición se
+  lanzó en primer plano o en segundo plano esperando su notificación.
+- **Repetición:** todo se ejecutó **dos veces**. Los recuentos de las dos
+  pasadas son idénticos línea a línea, y en las diez publicaciones las SHA-256
+  de **todos** los ficheros publicados coinciden entre las dos pasadas.
+- **Comandos.** `B` es el binario y `FA` el FASTA:
+
+  ```text
+  cargo test --release --locked --test repeat_detection_measurement --no-run
+  GPS_SSR_FASTA=$FA /usr/bin/time -v $B --ignored --exact measure_load_only --nocapture
+  GPS_SSR_FASTA=$FA /usr/bin/time -v $B --ignored --exact measure_scan --nocapture
+  GPS_SSR_FASTA=$FA /usr/bin/time -v $B --ignored --exact measure_detection_stages --nocapture
+  GPS_SSR_FASTA=$FA GPS_SSR_DIR=<dir> GPS_SSR_LOCI=<n> GPS_SSR_INDIVIDUALS=<i> GPS_SSR_STUTTER=<0|1> \
+      $B --ignored --exact prepare_publication --nocapture
+  GPS_SSR_TOML=<dir>/general.toml GPS_SSR_DEST=<nuevo> /usr/bin/time -v \
+      $B --ignored --exact measure_publication --nocapture
+  ```
+
+  Los guiones que encadenan esto y las salidas brutas están en
+  `/tmp/claude-1000/-home-ximo-devel-genome-population-simulator/953bb011-7c8c-40a4-9795-e622407914a7/scratchpad/entrega1/`
+  (`run_publication.sh`, `ladder_all.sh`, `m/`, `pub/`, `heap/`, `mtimes/`).
+
+### 11.2. Punto 1: candidatos por etapa y longitud de motivo
+
+Criterios provisionales de DP-SSR-02 a 08 (copias completas, pureza ≥ 0,8,
+tirada ≥ 3, tope 200 unidades, una base A/C/G/T a cada lado, desempate de
+solapes por puntuación, bases, periodo e inicio). Cada tramo se cuenta en la
+**primera** etapa que no supera. `measure_detection_stages`:
+
+| Suelo | Etapa | p1 | p2 | p3 | p4 | p5 | p6 | Total |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| todos | Intervalos del detector | 15 813 346 | 2 781 558 | 1 168 533 | 337 030 | 132 229 | 56 284 | 20 288 980 |
+| todos | Motivo con base no ACGT | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| **`[8,6,6,6,5,4]`** | Suelo de copias | 15 766 649 | 2 776 236 | 1 167 318 | 336 932 | 132 200 | 56 138 | 20 235 473 |
+| | Pureza | 2 133 | 736 | 313 | 29 | 6 | 71 | 3 288 |
+| | Tirada | 0 | 0 | 0 | 0 | 0 | 2 | 2 |
+| | Tope | 0 | 0 | 2 | 0 | 0 | 0 | 2 |
+| | Borde | 1 | 0 | 1 | 0 | 0 | 0 | 2 |
+| | Solape | 7 | 7 | 9 | 1 | 0 | 0 | 24 |
+| | **Aceptados** | 44 556 | 4 579 | 890 | 68 | 23 | 73 | **50 189** |
+| `[6,4,4,4,3,3]` (bajo) | Aceptados | 217 412 | 34 675 | 5 042 | 901 | 1 965 | 638 | 260 633 |
+| | Pureza / tirada / solape | | | | | | | 7 882 / 56 / 652 |
+| `[10,8,8,8,7,6]` (alto) | Aceptados | 10 343 | 2 885 | 398 | 12 | 3 | 5 | 13 646 |
+| | Pureza / tirada / solape | | | | | | | 1 418 / 0 / 5 |
+
+Bases cubiertas por los aceptados: 559 260 (0,715 % del genoma) con el suelo
+por omisión; 2 017 050 (2,58 %) con el bajo; 238 774 (0,31 %) con el alto. Con
+el de omisión, entre 582 y 769 candidatos por Mb en cada cromosoma (299 en el
+*scaffold* `ch00`). El sondeo de la sección 2.3 contó 50 233: la diferencia
+de 44 la explican los solapes (24) y los bordes (2), que el sondeo no
+resolvía, los 16 tramos que el sondeo admitía contando copias por longitud y
+aquí no pasan por copias completas, y los 2 del tope, que el sondeo no
+descartaba.
+
+Cifras auxiliares, con el suelo por omisión:
+
+- **DP-SSR-02.** 8 960 intervalos alcanzan el suelo contando copias por
+  **longitud** y no por **copias completas**; solo **16** de ellos (13 de
+  periodo 4 y 3 de periodo 5) superarían además pureza y tirada. Elegir una u
+  otra forma de contar cambia el catálogo en 16 loci de 50 189.
+- **DP-SSR-04.** 2 873 aceptados (5,7 %) acaban en una copia parcial
+  (ninguno de periodo 1). Pureza media de los aceptados: 0,9955. Longitud en
+  pb: mediana 9, percentil 90 15, percentil 99 55, máxima 459.
+- **DP-SSR-07.** Sin tope saldrían 50 190 (uno más: de los dos de periodo 3
+  que el tope descarta, uno perdería además un solape). Con más de 50
+  unidades, 50; de 100, 6; de 200, 1; ninguno de 500. Máximo: 422 unidades.
+- **DP-SSR-08.** Ningún aceptado contiene una `N`; solo 2 se descartan por
+  borde. Un solo par de aceptados se toca sin solaparse.
+
+### 11.3. Punto 2: tiempo y memoria del barrido
+
+`/usr/bin/time -v` sobre `measure_load_only` y `measure_scan`, dos pasadas:
+
+| Medida | Pasada 1 | Pasada 2 |
+|---|---:|---:|
+| Leer el FASTA (memoria residente máxima) | 156 924 kB | 157 052 kB |
+| Leer y barrer (memoria residente máxima) | 229 540 kB | 229 752 kB |
+| Barrido de las 13 secuencias (tiempo propio) | 5,27 s | 5,44 s |
+| Ejecución entera (pared) | 5,39 s | 5,55 s |
+
+El barrido secuencia a secuencia (DP-SSR-17, opción (a)) añade unos **73 MB**
+sobre lo que ya ocupa la referencia cargada, y tarda unos **5,3 s**.
+
+### 11.4. Punto 3: publicar el catálogo con el código de hoy
+
+`prepare_publication` toma uno de cada `k` de los 50 189 candidatos, en orden
+de referencia, y los declara a mano con deslizamiento `stepwise`,
+`mean_events = 1`, una población diploide HWE, VCF de texto y una matriz de
+una fila fuera de todo tracto; con tartamudeo, añade un evento técnico sobre
+los diez primeros individuos a cobertura 0,1 con el tartamudeo de base
+encendido. `measure_publication` lo publica por la biblioteca. «Ejecución»
+incluye un segundo preflight interno; lo propio de publicar es ejecución menos
+preflight. Pasada 1 / pasada 2:
+
+| Loci | Indiv. | Tartamudeo | Lectura TOML (s) | Resolución (s) | Preflight (s) | Ejecución (s) | Pared | Memoria máx. |
+|---:|---:|:---:|---:|---:|---:|---:|---:|---:|
+| 1 000 | 10 | no | 0,20 / 0,21 | 0,00 / 0,00 | 0,99 / 1,03 | 15,7 / 15,8 | 0:17 / 0:15 | 317 MB |
+| 2 000 | 10 | no | 0,75 / 0,82 | 0,01 / 0,01 | 1,13 / 1,30 | 26,8 / 27,2 | 0:28 / 0:27 | 539 MB |
+| 4 000 | 10 | no | 3,15 / 3,18 | 0,03 / 0,04 | 1,89 / 2,02 | 60,8 / 60,7 | 1:03 / 1:03 | 967 MB |
+| 8 000 | 10 | no | 12,5 / 13,1 | 0,15 / 0,17 | 4,41 / 4,40 | 244 / 243 | 4:08 / 4:08 | 1 848 MB |
+| 1 000 | 100 | no | 0,21 / 0,20 | 0,00 / 0,00 | 7,25 / 7,52 | 147 / 146 | 2:27 / 2:27 | 835 MB |
+| 2 000 | 100 | no | 0,83 / 0,78 | 0,01 / 0,01 | 9,52 / 9,81 | 282 / 282 | 4:39 / 4:39 | 1 505 MB |
+| 4 000 | 100 | no | 3,44 / 4,16 | 0,03 / 0,05 | 16,5 / 20,0 | 1 081 / 1 165 | 17:36 / 18:55 | 2 887 MB |
+| 1 000 | 10 | sí | 0,26 / 0,25 | 0,00 / 0,00 | 1,20 / 1,26 | 111 / 111 | 1:48 / 1:48 | 317 MB |
+| 2 000 | 10 | sí | 0,96 / 0,93 | 0,01 / 0,01 | 1,45 / 1,41 | 162 / 168 | 2:44 / 2:36 | 539 MB |
+| 4 000 | 10 | sí | 4,35 / 3,55 | 0,03 / 0,03 | 2,41 / 2,31 | 353 / 354 | 5:44 / 5:44 | 968 MB |
+
+«Lectura TOML» es `admit_toml_header` más `parse_declared_config`;
+«Resolución», `build_effective_config`. La memoria de las dos pasadas difiere
+en menos de 1 MB. Una anomalía del reloj: el tiempo interno del proceso supera
+en un 5 % a la pared de `/usr/bin/time` en las ejecuciones largas (261 s frente
+a 248 s con 8 000 loci); en WSL los dos relojes no siempre concuerdan. Las
+tendencias no cambian con uno u otro.
+
+**El catálogo entero (50 189 loci) no se ha publicado**, porque es inviable
+con el código de hoy: extrapolando el último tramo, ya cuadrático (de 4 000 a
+8 000 loci la ejecución se multiplica por 4,0), serían del orden de **2 a 3
+horas** con 10 individuos y de **dos días** con 100; y la memoria, que crece en
+línea recta (unos 0,22 MB por locus con 10 individuos y 0,68 MB con 100), rondaría
+**11 GB** y **34 GB**: lo segundo no cabe en esta máquina. Es extrapolación.
+
+### 11.5. Punto 4: dónde está cada coste cuadrático
+
+Tres instrumentos. **(1) Tiempos por fase** (tabla anterior). **(2) Línea de
+tiempo de la publicación**, leyendo la hora de modificación de cada fichero
+publicado con 2 000, 4 000 y 8 000 loci y 10 individuos (una pasada,
+`mtimes/`), que dice cuándo termina cada etapa. **(3) `heaptrack`** con 1 000 y
+2 000 loci (`heap/`). No hay `perf` ni `gdb` en la máquina, así que **no hay
+perfil de CPU por función**: lo que sigue combina la etapa medida con la
+lectura del código, y se dice cuál es cuál.
+
+Duración de cada etapa de la ejecución (segundos de pared):
+
+| Etapa (fichero que la cierra) | 2 000 | 4 000 | 8 000 | Crecimiento |
+|---|---:|---:|---:|---|
+| Preflight interno y copia de entradas y referencia | 1,4 | 2,3 | ≈ 4 | — |
+| Verdad (`truth.jsonl`) | 6,2 | 11,0 | 19,4 | lineal |
+| **VCF (`truth.vcf`)** | **3,9** | **17,8** | **132,0** | **×4,5 y ×7,4** |
+| Configuración efectiva y manifiesto | 0,8 | 2,3 | 11,3 | algo más que lineal |
+| **Validación física final** (tras el manifiesto) | **12,0** | **23,5** | **62,6** | ×2,0 y ×2,7 |
+
+Lo localizado:
+
+1. **La proyección del VCF y su oráculo** (medido por etapa; función por
+   lectura). Por cada registro con tracto, `tracts_in`
+   (`src/vcf_projection.rs:1743`) y la construcción de `realized`
+   (`src/vcf_projection.rs:1532`) recorren **todos los tractos de todas las
+   copias** de la secuencia, y `annotate_tract_alleles`
+   (`src/vcf_projection.rs:1800`) busca la copia y su tracto recorriendo
+   listas enteras. El oráculo semántico del VCF repite el patrón
+   (`src/vcf_semantic_validation.rs:726`, `:1449` y `:1566`). Coste: registros
+   × copias × loci de la secuencia. Es **el mayor**: 132 de 245 s con 8 000
+   loci.
+2. **La validación física final** (medido por etapa; función por lectura).
+   `truth_repeat_tally` busca el locus de cada caso de la verdad recorriendo
+   todos los loci (`src/results.rs:4595`), y el recuento de bases del VCF hace
+   lo mismo por cada registro (`src/results.rs:714`). Además se reconstruyen y
+   comparan enteros, como árboles JSON, los loci de la efectiva y del
+   manifiesto (`src/results.rs:4205` y `:4243`).
+3. **La lectura del TOML** (medido: 0,20 → 0,75 → 3,15 → 12,5 s; función por
+   lectura). `SourceLocation::from_offset` (`src/configuration.rs:113`) cuenta
+   los saltos de línea **desde el principio del fichero** para cada valor
+   leído: valores × bytes. **Corrige la sección 2.3**, que atribuía el coste
+   de la configuración a la comprobación de solapes de
+   `src/application.rs:4921`: esa, la de F6.4.a.6, solo cuesta 0,15 s con
+   8 000 loci.
+4. **El tartamudeo** (medido: el evento con tartamudeo añade 96, 135 y 292 s
+   con 1 000, 2 000 y 4 000 loci; función por lectura). Por cada tramo de
+   molécula, `place_tracts_in_segments` (`src/stutter.rs:1467`) recorre todos
+   los loci de la secuencia, y para cada uno `locate_tract_in_copy`
+   (`src/stutter.rs:1526`) recorre los fragmentos de la copia hasta el suyo:
+   moléculas × loci², no solo moléculas × loci como decía la sección 2.1.
+5. **Por lectura, sin peso medido apreciable hasta 8 000 loci:** aplicar los
+   alelos (`apply_repeat_alleles`, `src/repeat_genotypes.rs:295`) busca el
+   tramo intacto recorriendo los fragmentos de la copia y copia la lista
+   entera de fragmentos por cada locus (`with_current_repeat_allele`,
+   `src/segments.rs:830`); la verdad busca el alelo de cada caso recorriendo
+   los fragmentos (`src/truth_projection.rs:1177`); y la admisión contra
+   variantes pequeñas compara cada locus con cada fila de la matriz
+   (`src/execution.rs:2725`), lineal en loci pero multiplicada por las filas.
+
+**Memoria (`heaptrack`).** Las llamadas a asignación crecen en línea recta (49
+millones con 1 000 loci, 98 millones con 2 000), y también el pico (263 MB y
+447 MB de montón): **la memoria no tiene tramo cuadrático**. El pico lo
+dominan los árboles JSON en memoria de la configuración efectiva y del
+manifiesto (`serde_json::Value` en `BTreeMap`, unos 180 MB de los 447) y sus
+clones al compararlos (`clone_subtree`, 51 MB), además de los 78 MB de la
+referencia.
+
+### 11.6. Punto 5: peso de cada parte publicada, por locus
+
+Pendiente de la recta entre 1 000 y 8 000 loci (10 individuos) y entre 1 000 y
+4 000 (100 individuos); los bytes son idénticos en las dos pasadas:
+
+| Fichero | 10 individuos | 100 individuos | Para 50 189 loci (10 / 100) |
+|---|---:|---:|---:|
+| Configuración efectiva (`effective-config.json`) | 4 634 B/locus | 6 036 B/locus | 233 MB / 303 MB |
+| Manifiesto (`manifest.json`) | 4 888 B/locus | 6 595 B/locus | 245 MB / 331 MB |
+| **Verdad (`truth.jsonl`)** | 15 463 B/locus | 154 544 B/locus | **776 MB / 7,8 GB** |
+| VCF de texto (`truth.vcf`) | 682 B/locus | 5 686 B/locus | 34 MB / 285 MB |
+| Documento general copiado | 180 B/locus | 180 B/locus | 9 MB |
+| Manifiesto del evento técnico | 226 B/locus | — | 11 MB |
+| FASTQ (0,1×, 10 individuos) | 0 | — | no depende de los loci |
+
+La verdad crece con locus × individuo, unos **1,55 kB por par**, igual con 10
+que con 100 individuos; el VCF, unos 57 B por par con 100 individuos y 68 B
+con 10. La configuración efectiva y
+el manifiesto crecen con el locus y algo con los individuos (el abanico de
+alelos tiene más linajes). Un catálogo aparte en TSV ocuparía del orden de
+50 B por locus. **La verdad no es objeto de DP-SSR-13** (su formato no
+cambia), y con 100 individuos es ella, no la configuración, lo que manda en
+bytes.
+
+### 11.6 bis. Hallazgos y límites de la medición (revisión adversarial)
+
+- **Pendiente de decisión del responsable: un microsatélite pegado a un
+  homopolímero de su misma base se pierde entero.** `A×6 (GA)×10` no da
+  ningún intervalo de periodo 2: el segmento de Ruzzo y Tompa empieza dentro
+  del poli-A, el motivo leído en su inicio es `AA`, que no es primitivo, y el
+  filtro de motivos del núcleo copiado lo descarta entero. La revisión estima
+  unos **126 tramos** así en el tomate reducido. No se ha tocado el núcleo:
+  cualquier arreglo (recortar el inicio hasta la primera fase primitiva, por
+  ejemplo) cambia el algoritmo copiado y se decide en la pausa.
+- **«Una `N` corta el tramo» (DP-SSR-08) es falso.** `(CA)×20 N (CA)×20` da
+  **un solo** candidato, con la `N` dentro (pureza 80/81). En el tomate
+  reducido no ocurre (cero candidatos con `N` interna, apartado 11.2), pero la
+  entrega 3 debe probar la `N` interna y decidir qué hace con ella.
+- **No se midió 100 individuos con tartamudeo**: la escalera con tartamudeo
+  es solo de 10 individuos (1 000, 2 000 y 4 000 loci).
+- **El tercer oráculo del riesgo R-1, el catálogo dorado de `trf-mod`** del
+  otro proyecto, **no se copió**: queda para el paso del juez independiente.
+  La entrega 1 usa los otros dos (verdad plantada y buscador de tiradas
+  exactas por fuerza bruta).
+
+### 11.7. Propuestas para la pausa (no tomadas)
+
+- **DP-SSR-02:** copias completas (opción (b)), como recomendaba el plan. La
+  medida dice que la elección apenas cambia el catálogo (16 loci de 50 189), así
+  que conviene la que coincide con cómo anota el simulador. Suelo
+  `[8, 6, 6, 6, 5, 4]` por omisión: da 0,7 % del genoma, y el bajo lo
+  quintuplica.
+- **DP-SSR-03:** motivo en la fase del inicio del tramo (opción (a)). Ningún
+  motivo detectado llevó una base no ACGT.
+- **DP-SSR-04:** fronteras del detector sin recortar (opción (a)); el 5,7 % con
+  copia parcial final lo absorbe el modelo de unidades fraccionarias.
+- **DP-SSR-05:** la regla fija propuesta (opción (a)). Solo hay 24 solapes:
+  la regla importa por determinismo, no por volumen.
+- **DP-SSR-06:** solo loci de un motivo, como se recomendaba; la pureza
+  descarta 3 288 tramos, que es el techo de lo que una descomposición en
+  bloques podría recuperar.
+- **DP-SSR-07:** tope común de 200 unidades, declarable. Solo descarta 2
+  tramos; el mayor tiene 422 unidades.
+- **DP-SSR-08:** una base A/C/G/T a cada lado (opción (a)); solo 2 descartes
+  y ningún tracto con `N` dentro.
+- **DP-SSR-13:** catálogo aparte (opción (b)). Con 50 189 loci, la efectiva y
+  el manifiesto sumarían 480–630 MB de JSON que hoy se cargan enteros en
+  memoria como árboles y se comparan enteros en la validación; en TSV serían
+  unos 2,5 MB.
+- **DP-SSR-17:** barrido secuencia a secuencia (opción (a)): 5,3 s y 73 MB
+  sobre la referencia cargada. Arreglar en la entrega 2, en este orden de
+  peso medido: el VCF y su oráculo, la validación física final, el tartamudeo
+  y la lectura del TOML. La comprobación de solapes de F6.4.a.6 es la menor de
+  todas (0,15 s con 8 000 loci); se puede hacer de paso, pero no resuelve nada.
+- **DP-SSR-18:** ofrecer una **lista opcional de regiones**, con el genoma
+  entero por omisión. Aun con todos los tramos cuadráticos arreglados, lo
+  lineal del catálogo entero con 100 individuos (unos 7,8 GB de verdad y unos
+  34 GB de memoria al ritmo medido) no cabe en esta máquina; con 10
+  individuos sí cabría. Si la meta es 100 individuos sobre el genoma entero,
+  hace falta además bajar la memoria por locus, que hoy dominan los árboles
+  JSON.
