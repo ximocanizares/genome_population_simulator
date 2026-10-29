@@ -305,6 +305,10 @@ decide a la vez las regiones (decisión 7) y la forma de la publicación
 
 ## 3. Decisiones que el responsable no ha fijado
 
+> **Pausa de la entrega 1, 29 de octubre de 2026:** DP-SSR-02 a 08, 13, 17 y
+> 18 quedan decididas según las propuestas del apartado 11.7, que recoge la
+> decisión.
+
 > **Decisiones del responsable, 28 de octubre de 2026.**
 >
 > - **DP-SSR-11 — aceptada como paso provisional, con tarea obligatoria
@@ -1192,9 +1196,12 @@ pausa.
       $B --ignored --exact measure_publication --nocapture
   ```
 
-  Los guiones que encadenan esto y las salidas brutas están en
-  `/tmp/claude-1000/-home-ximo-devel-genome-population-simulator/953bb011-7c8c-40a4-9795-e622407914a7/scratchpad/entrega1/`
-  (`run_publication.sh`, `ladder_all.sh`, `m/`, `pub/`, `heap/`, `mtimes/`).
+  Para reproducir cualquier cifra basta con estos comandos y las funciones de
+  `tests/repeat_detection_measurement.rs`, cuya cabecera explica cada
+  variable. Las publicaciones se lanzaron una tras otra, cada una dos veces,
+  con `prepare_publication` una vez y `measure_publication` dos sobre el mismo
+  documento. Las salidas brutas y los guiones auxiliares vivían en un
+  directorio temporal que ya no existe; no se conservan.
 
 ### 11.2. Punto 1: candidatos por etapa y longitud de motivo
 
@@ -1299,9 +1306,10 @@ línea recta (unos 0,22 MB por locus con 10 individuos y 0,68 MB con 100), ronda
 
 Tres instrumentos. **(1) Tiempos por fase** (tabla anterior). **(2) Línea de
 tiempo de la publicación**, leyendo la hora de modificación de cada fichero
-publicado con 2 000, 4 000 y 8 000 loci y 10 individuos (una pasada,
-`mtimes/`), que dice cuándo termina cada etapa. **(3) `heaptrack`** con 1 000 y
-2 000 loci (`heap/`). No hay `perf` ni `gdb` en la máquina, así que **no hay
+publicado con 2 000, 4 000 y 8 000 loci y 10 individuos (una pasada, con
+`find -printf '%T@'` sobre el directorio publicado por `measure_publication`),
+que dice cuándo termina cada etapa. **(3) `heaptrack`** con 1 000 y 2 000 loci
+(`heaptrack` y `heaptrack_print` sobre `measure_publication`). No hay `perf` ni `gdb` en la máquina, así que **no hay
 perfil de CPU por función**: lo que sigue combina la etapa medida con la
 lectura del código, y se dice cuál es cuál.
 
@@ -1389,14 +1397,13 @@ bytes.
 
 ### 11.6 bis. Hallazgos y límites de la medición (revisión adversarial)
 
-- **Pendiente de decisión del responsable: un microsatélite pegado a un
-  homopolímero de su misma base se pierde entero.** `A×6 (GA)×10` no da
+- **Resuelto el 29/10/2026 (apartado 11.8): un microsatélite pegado a un
+  homopolímero de su misma base se perdía entero.** `A×6 (GA)×10` no daba
   ningún intervalo de periodo 2: el segmento de Ruzzo y Tompa empieza dentro
   del poli-A, el motivo leído en su inicio es `AA`, que no es primitivo, y el
-  filtro de motivos del núcleo copiado lo descarta entero. La revisión estima
-  unos **126 tramos** así en el tomate reducido. No se ha tocado el núcleo:
-  cualquier arreglo (recortar el inicio hasta la primera fase primitiva, por
-  ejemplo) cambia el algoritmo copiado y se decide en la pausa.
+  filtro de motivos del núcleo copiado lo descartaba entero. La revisión
+  estimó unos **126 tramos** así en el tomate reducido. El responsable decidió
+  arreglarlo en el núcleo; el arreglo y sus cifras están en el apartado 11.8.
 - **«Una `N` corta el tramo» (DP-SSR-08) es falso.** `(CA)×20 N (CA)×20` da
   **un solo** candidato, con la `N` dentro (pureza 80/81). En el tomate
   reducido no ocurre (cero candidatos con `N` interna, apartado 11.2), pero la
@@ -1408,7 +1415,18 @@ bytes.
   La entrega 1 usa los otros dos (verdad plantada y buscador de tiradas
   exactas por fuerza bruta).
 
-### 11.7. Propuestas para la pausa (no tomadas)
+### 11.7. Propuestas para la pausa
+
+> **Decisión del responsable, 29 de octubre de 2026: se aceptan todas las
+> propuestas de este apartado tal como están escritas.** En concreto:
+> regiones opcionales con el genoma entero por omisión (DP-SSR-18); los cuatro
+> costes cuadráticos se arreglan en una entrega propia antes de conectar la
+> detección (DP-SSR-17); catálogo aparte en TSV con su metadato JSON
+> (DP-SSR-13, opción (b)); y los criterios de DP-SSR-02 a 08 como se proponen
+> abajo. Además, el defecto del núcleo copiado que perdía un microsatélite
+> pegado a una tira de su misma base **se corrige** en el núcleo (apartado
+> 11.8), y el inicio recortado sale de la tira para que la tira y el
+> microsatélite solo se toquen.
 
 - **DP-SSR-02:** copias completas (opción (b)), como recomendaba el plan. La
   medida dice que la elección apenas cambia el catálogo (16 loci de 50 189), así
@@ -1444,3 +1462,101 @@ bytes.
   individuos sí cabría. Si la meta es 100 individuos sobre el genoma entero,
   hace falta además bajar la memoria por locus, que hoy dominan los árboles
   JSON.
+
+### 11.8. Arreglo del inicio en fase primitiva y nueva medición del barrido (29/10/2026)
+
+**Qué cambia en el núcleo copiado** (decisión del responsable; única
+desviación del algoritmo original, documentada en la cabecera de
+`src/repeat_detection.rs`). Si el motivo leído al inicio de un segmento no es
+primitivo, el original descartaba el intervalo entero; ahora el inicio
+**avanza base a base hasta la primera fase cuyo motivo de periodo `p` sea
+primitivo**, y solo se descarta si no queda ninguna antes de que el tramo baje
+del mínimo de copias del detector. La puntuación del tramo recortado se
+**recalcula** (la del segmento menos la del prefijo quitado), de modo que
+siempre es la suma de las comparaciones del propio tramo, que es lo que usa el
+desempate de solapes. Un tramo cuyo motivo inicial ya era primitivo sale
+idéntico; uno puro de motivo no primitivo (alias de un homopolímero o de un
+dinucleótido) no tiene ninguna fase primitiva y se sigue descartando. Ejemplos,
+con sus pruebas: `A×6 (GA)×10 C` da `[5, 26)` con motivo `AG`; `A×8 (GA)×10`
+da el poli-A `[0, 8)` y `[7, 28)` con motivo `AG`; `T×12 (CTT)×7` da el poli-T
+`[0, 12)` y `[10, 33)` con motivo `TTC`; `A×4 (GA)×10`, que ya funcionaba, no
+cambia.
+
+**Nueva medición** (mismos comandos del apartado 11.1, binario de pruebas
+optimizado de SHA-256 `71c54c58…`, dos pasadas con recuentos idénticos línea a
+línea). Antes → ahora, suelo por omisión:
+
+| Etapa | p1 | p2 | p3 | p4 | p5 | p6 | Total |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Intervalos del detector | 15 813 346 → 15 813 346 | 2 781 558 → 2 784 397 | 1 168 533 → 1 170 281 | 337 030 → 338 635 | 132 229 → 132 490 | 56 284 → 56 606 | 20 288 980 → **20 295 755** |
+| Suelo de copias | 15 766 649 → 15 766 649 | 2 776 236 → 2 778 949 | 1 167 318 → 1 169 053 | 336 932 → 338 484 | 132 200 → 132 461 | 56 138 → 56 445 | 20 235 473 → 20 242 041 |
+| Pureza | 2 133 → 2 133 | 736 → 752 | 313 → 316 | 29 → 59 | 6 → 6 | 71 → 80 | 3 288 → 3 346 |
+| Tirada | 0 → 0 | 0 → 0 | 0 → 0 | 0 → 0 | 0 → 0 | 2 → 2 | 2 → 2 |
+| Tope | 0 → 0 | 0 → 0 | 2 → 2 | 0 → 0 | 0 → 0 | 0 → 0 | 2 → 2 |
+| Borde | 1 → 1 | 0 → 0 | 1 → 1 | 0 → 0 | 0 → 0 | 0 → 0 | 2 → 2 |
+| Solape | 7 → 60 | 7 → 27 | 9 → 9 | 1 → 10 | 0 → 0 | 0 → 1 | 24 → **107** |
+| **Aceptados** | 44 556 → **44 503** | 4 579 → **4 669** | 890 → **900** | 68 → **82** | 23 → 23 | 73 → **78** | 50 189 → **50 255** |
+
+Con los otros suelos: el bajo pasa de 260 633 a 260 663 aceptados (solapes de
+652 a 1 457) y el alto de 13 646 a 13 682 (solapes de 5 a 24). Bases en
+candidatos con el suelo por omisión: 559 260 → 561 327 (0,715 % → 0,717 %).
+Cifras auxiliares: copia parcial final 2 873 → 2 937; pares que se tocan 1 →
+2; pureza media 0,9955 → 0,9954; DP-SSR-02, 8 960 → 9 083 intervalos que pasan
+por longitud y no por copias completas, y siguen siendo **16** los que
+superarían además pureza y tirada; DP-SSR-07 y la longitud de los tramos, sin
+cambio. Barrido: 5,3 s → **6,2 y 6,6 s** (pasadas 1 y 2), memoria máxima
+229 540 kB → 229 268 y 229 780 kB.
+
+**Lo que hay que saber de estas cifras, sin decidirlo aquí.** Se ganan 119
+microsatélites de periodo 2 a 6 (90, 10, 14, 0 y 5), pero se **pierden 53
+homopolímeros** que antes se aceptaban: los descartes por solape de periodo 1
+suben exactamente en 53 (de 7 a 60). La causa, comprobada en las pruebas con
+`A×8 (GA)×10`: el tramo recortado empieza en la **última base del
+homopolímero** (`[7, 28)`, fase `AG`), los dos se solapan en esa base y la
+regla de solapes de DP-SSR-05 deja solo el de más puntuación. El saldo es
++66. Avanzar el
+inicio hasta la primera fase primitiva **que no empiece dentro del
+homopolímero** (`[8, 28)`, fase `GA`, que solo toca al poli-A) conservaría los
+dos, pero es una regla de fronteras (DP-SSR-04) y de solapes (DP-SSR-05), así
+que la decide el responsable, no el implementador.
+
+**Tercera versión: el inicio recortado sale de la tira (decisión del
+responsable, 29/10/2026).** Un intervalo cuyo inicio se recortó no puede
+empezar dentro de la tira de una sola base que lo precede: avanza hasta la
+primera fase primitiva **cuya base sea distinta de la anterior**. Los
+intervalos no recortados no cambian. `A×8 (GA)×10` da el poli-A `[0, 8)` y
+`[8, 28)` con motivo `GA`, que solo se tocan; `T×12 (CTT)×7` da `[0, 12)` y
+`[12, 33)` con motivo `CTT`; `A×6 (GA)×10 C` da `[6, 26)`. Medido con el
+binario de SHA-256 `5bc796da…`, dos pasadas idénticas línea a línea. Original →
+primera fase primitiva → tercera versión, suelo por omisión:
+
+| Etapa | p1 | p2 | p3 | p4 | p5 | p6 | Total |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Intervalos del detector | 15 813 346 (igual en las tres) | 2 781 558 → 2 784 397 → 2 784 387 | 1 168 533 → 1 170 281 → 1 169 475 | 337 030 → 338 635 → 338 019 | 132 229 → 132 490 → 132 284 | 56 284 → 56 606 → 56 536 | 20 288 980 → 20 295 755 → **20 294 047** |
+| Pureza | 2 133 (igual) | 736 → 752 → 744 | 313 → 316 → 315 | 29 → 59 → 59 | 6 (igual) | 71 → 80 → 80 | 3 288 → 3 346 → 3 337 |
+| Solape | 7 → 60 → **7** | 7 → 27 → 20 | 9 (igual) | 1 → 10 → 10 | 0 (igual) | 0 → 1 → 1 | 24 → 107 → **47** |
+| **Aceptados** | 44 556 → 44 503 → **44 556** | 4 579 → 4 669 → **4 651** | 890 → 900 → **895** | 68 → 82 → **81** | 23 (igual) | 73 → 78 → **78** | 50 189 → 50 255 → **50 284** |
+
+Tirada, tope y borde no cambian (2, 2 y 2). Suelo bajo: 260 633 → 260 663 →
+261 122 aceptados; suelo alto: 13 646 → 13 682 → 13 690. Bases en candidatos:
+559 260 → 561 327 → 561 431. Pares de candidatos que se tocan: 1 → 2 → **48**.
+Barrido: 5,3 s → 6,2–6,6 s → 7,1–8,1 s (pasadas 1 y 2); memoria máxima, 230 MB
+en las tres.
+
+**Se recuperan las 53 tiras, pero de los 119 microsatélites ganados se quedan
+95.** Comparando, locus a locus, los candidatos de la segunda y la tercera
+versión: los 53 homopolímeros vuelven (los descartes por solape de periodo 1
+bajan de 60 a 7, los del original); 83 microsatélites siguen, con el inicio
+desplazado fuera de la tira; y **32 microsatélites de la segunda versión
+desaparecen** (26 de periodo 2, 5 de periodo 3 y 1 de periodo 4). Todos
+alcanzaban su suelo de copias **solo contando bases de la tira**. Ejemplos del
+tomate: `…TTTTTTTTT ATATATATATA…`, que en la segunda versión era `(TA)×6`
+empezando en la última `T` y ahora es `(AT)×5 A`, por debajo del suelo de 6;
+y `…AAAAAAAAA GAAGAAGAAGAAGAAGA…`, que era `(AAG)×6` empezando en las dos
+últimas `A` y ahora es `(GAA)×5 GA`, por debajo de 6. En el segundo tipo (el
+motivo empieza por la base de la tira) no hay forma de saber dónde acaba la
+tira y empieza el microsatélite. **Decisión del responsable, 29/10/2026: se
+acepta esa pérdida.** Esos 32 solo alcanzaban el suelo contando dos veces una
+base ambigua, el núcleo original tampoco los encontraba, y recuperarlos
+exigiría contar la base compartida para el suelo pero no para las
+coordenadas, una regla más compleja que no compensa.

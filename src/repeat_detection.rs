@@ -28,8 +28,31 @@
 //!   proyecto (`crate::fasta`) y su error de lectura (`ScanError`), toda la
 //!   parte de regiones y ventanas (`SegmentOptions`, `Region`,
 //!   `RegionScanner`, `scan_windowed` y compañía) y la función muerta
-//!   `bases_match`. Los comentarios se han traducido; el algoritmo y sus
-//!   pruebas no se han tocado.
+//!   `bases_match`. Los comentarios se han traducido y las pruebas copiadas
+//!   no se han tocado.
+//! - **Única desviación del algoritmo (decisión del responsable, 29/10/2026):
+//!   el inicio del tramo se avanza hasta la primera fase primitiva.** En el
+//!   original, si el motivo leído al inicio del segmento no es primitivo, el
+//!   intervalo **entero** se descarta. Eso pierde un microsatélite pegado a un
+//!   homopolímero de su misma base: en `A×8 (GA)×10` el segmento de periodo 2
+//!   empieza dentro del poli-A (allí también coinciden las bases a distancia
+//!   2), lee `AA`, que no es primitivo, y el `(GA)n` desaparece sin contarse.
+//!   Aquí, en vez de descartarlo, el inicio avanza base a base hasta la primera
+//!   fase cuyo motivo de periodo `p` sea primitivo **y cuya base sea distinta
+//!   de la anterior**; solo se descarta si no queda ninguna antes de que el
+//!   tramo baje del mínimo de copias. La segunda condición (decisión del
+//!   responsable, 29/10/2026) saca el inicio de la tira de una sola base que
+//!   precede al microsatélite: `A×8 (GA)×10` da `[8, 28)` con motivo `GA`, que
+//!   solo toca al poli-A `[0, 8)`, y se conservan los dos; con solo la primera
+//!   condición empezaría en `[7, 28)`, dentro del poli-A, y la regla de
+//!   solapes dejaría uno. La
+//!   puntuación del intervalo recortado **se recalcula** restando la del
+//!   prefijo quitado, de modo que siempre es la suma de las comparaciones del
+//!   propio tramo (la usa el desempate de solapes). Un tramo cuyo motivo al
+//!   inicio ya es primitivo sale exactamente igual que en el original, y uno
+//!   puro de un motivo no primitivo (un alias de un homopolímero o de un
+//!   dinucleótido) no tiene ninguna fase primitiva y se sigue descartando.
+//!   Ver `find_tandem_repeats`.
 //!
 //! # La conversión en candidatos (propia de este proyecto)
 //!
@@ -404,26 +427,52 @@ pub fn find_tandem_repeats(
             .iter()
             .zip(here.iter())
             .map(|(&b, &h)| if h != 0 && h == b { reward } else { penalty });
+        let min_bases = u64::from(params.min_copies) * u64::from(period);
         maximal_scoring_subsequences(scores, |k0, k1, score| {
             // Segmento [k0, k1] → tramo [k0, k1 + p + 1): la primera base
             // implicada es `j0 - p = k0` y la última `j1 = k1 + p`, así que el
             // fin exclusivo es `k1 + p + 1`.
-            let tract_start = k0 as u64;
-            let tract_end = (k1 + p + 1) as u64;
-            let copies = (tract_end - tract_start) / u64::from(period);
+            let tract_end = k1 + p + 1;
             // Solo repeticiones de periodo PRIMITIVO: `AAAAAA` se detecta en
             // periodo 2, pero su motivo `AA` se reduce a `A`; es un
             // homopolímero, no un dinucleótido, e informarlo como periodo 2
             // sería incumplir el contrato del detector.
-            let motif = &seq[tract_start as usize..tract_start as usize + p];
-            if copies >= u64::from(params.min_copies) && is_primitive_motif(motif) {
-                out.push(RepeatInterval {
-                    start: tract_start,
-                    end: tract_end,
-                    period,
-                    score: i32::try_from(score).unwrap_or(i32::MAX),
-                });
-            }
+            //
+            // **Desviación respecto al original** (ver la cabecera): si el
+            // motivo del inicio no es primitivo, el inicio avanza hasta la
+            // primera fase que sí lo sea **y cuya base sea distinta de la
+            // anterior**, mientras el tramo conserve el mínimo de copias. La
+            // segunda condición saca el inicio de la tira de una sola base que
+            // lo precede, para que tira y microsatélite solo se toquen. Sin
+            // ninguna posición así, se descarta como en el original. Con el
+            // inicio en `k0` (motivo ya primitivo) no cambia nada.
+            let Some(start) = (k0..=k1)
+                .take_while(|&start| (tract_end - start) as u64 >= min_bases)
+                .find(|&start| {
+                    is_primitive_motif(&seq[start..start + p])
+                        && (start == k0 || canonical[start] != canonical[start - 1])
+                })
+            else {
+                return;
+            };
+            // La puntuación del tramo recortado es la del segmento menos la
+            // del prefijo quitado: la suma de las comparaciones del propio
+            // tramo, igual que un tramo sin recortar.
+            let removed: i64 = (k0..start)
+                .map(|k| {
+                    if here[k] != 0 && here[k] == back[k] {
+                        reward
+                    } else {
+                        penalty
+                    }
+                })
+                .sum();
+            out.push(RepeatInterval {
+                start: start as u64,
+                end: tract_end as u64,
+                period,
+                score: i32::try_from(score - removed).unwrap_or(i32::MAX),
+            });
         });
     }
 
@@ -1245,6 +1294,247 @@ mod tests {
         );
     }
 
+    // ---- Desviación: inicio avanzado hasta la primera fase primitiva ------
+
+    /// El intervalo de periodo `p` de `seq` que contiene `[from, to)`.
+    fn covering(seq: &[u8], period: u8, from: u64, to: u64) -> Option<RepeatInterval> {
+        find_tandem_repeats(seq, p(1, 6), &ScanParams::default())
+            .into_iter()
+            .find(|r| r.period == period && r.start <= from && to <= r.end)
+    }
+
+    /// Puntuación calculada aparte, desde la definición: +2 por cada base del
+    /// tramo igual a la que está `p` antes **dentro del tramo**, −7 por cada
+    /// una distinta.
+    fn own_score(seq: &[u8], interval: &RepeatInterval) -> i32 {
+        let p = usize::from(interval.period);
+        (interval.start as usize + p..interval.end as usize)
+            .map(|j| {
+                let (a, b) = (seq[j].to_ascii_uppercase(), seq[j - p].to_ascii_uppercase());
+                if a == b && b"ACGT".contains(&a) {
+                    2
+                } else {
+                    -7
+                }
+            })
+            .sum()
+    }
+
+    /// Inicio y fin relativos al núcleo, motivo y puntuación.
+    type CoreCandidate = (u64, u64, Vec<u8>, i32);
+
+    /// Pasa `core` por `detect_repeat_candidates` entre dos fondos sin
+    /// repeticiones y unas bases de flanco elegidas para no alargar nada.
+    /// Devuelve los candidatos con coordenadas relativas a `core` y el
+    /// recuento.
+    fn detect_core(
+        left: &[u8],
+        core: &[u8],
+        right: &[u8],
+    ) -> (Vec<CoreCandidate>, DetectionCounts) {
+        let mut sequence = background(0xD1, 30);
+        sequence.extend_from_slice(left);
+        let offset = sequence.len() as u64;
+        sequence.extend_from_slice(core);
+        sequence.extend_from_slice(right);
+        sequence.extend(background(0xD2, 30));
+        let detection = detect_repeat_candidates(&sequence, &DetectionCriteria::default());
+        let candidates = detection
+            .candidates()
+            .iter()
+            .map(|c| {
+                (
+                    c.start() - offset,
+                    c.end() - offset,
+                    c.motif().bases().to_vec(),
+                    c.score(),
+                )
+            })
+            .collect();
+        (candidates, detection.counts().clone())
+    }
+
+    /// **Regresión: `A×8 (GA)×10`.** Con el núcleo original solo salía el
+    /// poli-A. El segmento de periodo 2 empieza dentro del poli-A (motivo
+    /// `AA`, no primitivo); el inicio avanza a la primera fase primitiva **fuera
+    /// de la tira de `A`**: `[8, 28)`, motivo `GA`, puntuación 36 (18
+    /// coincidencias propias, no las del segmento con el poli-A dentro). El
+    /// poli-A `[0, 8)` y el `(GA)n` solo se tocan, y `detect_repeat_candidates`
+    /// acepta los dos sin ningún descarte por solape.
+    #[test]
+    fn a_microsatellite_after_a_long_homopolymer_of_its_base_is_found() {
+        let seq = [&b"AAAAAAAA"[..], &b"GA".repeat(10)].concat();
+        let got = find_tandem_repeats(&seq, p(1, 6), &ScanParams::default());
+        assert!(got.contains(&RepeatInterval {
+            start: 0,
+            end: 8,
+            period: 1,
+            score: 14
+        }));
+        assert!(got.contains(&RepeatInterval {
+            start: 8,
+            end: 28,
+            period: 2,
+            score: 36
+        }));
+        let (candidates, counts) = detect_core(b"C", &seq, b"C");
+        assert_eq!(
+            candidates,
+            vec![(0, 8, b"A".to_vec(), 14), (8, 28, b"GA".to_vec(), 36)]
+        );
+        assert_eq!(counts.discarded_total(DetectionStage::Overlap), 0);
+    }
+
+    /// **Regresión: `T×12 (CTT)×7`.** Con el núcleo original solo salía el
+    /// poli-T. Ahora el de periodo 3 empieza en 12, motivo `CTT` (la primera
+    /// fase primitiva, `TTC` en 10, está dentro de la tira de `T`), y llega al
+    /// final: `[12, 33)`, puntuación 36. Los dos se aceptan, sin solape. Y la
+    /// re-detección de periodo 6, que también empieza dentro del poli-T y se
+    /// recorta, la sigue quitando el descarte geométrico.
+    #[test]
+    fn a_trinucleotide_after_a_homopolymer_of_its_base_is_found() {
+        let seq = [&b"TTTTTTTTTTTT"[..], &b"CTT".repeat(7)].concat();
+        let got = find_tandem_repeats(&seq, p(1, 6), &ScanParams::default());
+        assert!(got.contains(&RepeatInterval {
+            start: 0,
+            end: 12,
+            period: 1,
+            score: 22
+        }));
+        assert!(got.contains(&RepeatInterval {
+            start: 12,
+            end: 33,
+            period: 3,
+            score: 36
+        }));
+        assert!(
+            got.iter().all(|r| r.period != 2 && r.period != 6),
+            "{got:?}"
+        );
+        let (candidates, counts) = detect_core(b"G", &seq, b"G");
+        assert_eq!(
+            candidates,
+            vec![(0, 12, b"T".to_vec(), 22), (12, 33, b"CTT".to_vec(), 36)]
+        );
+        assert_eq!(counts.discarded_total(DetectionStage::Overlap), 0);
+    }
+
+    /// **Regresión: `A×6 (GA)×10 C`.** El `(GA)n` sale desde 6: `[6, 26)`,
+    /// motivo `GA`, puntuación 36. El poli-A de 6 también sale del detector,
+    /// pero no alcanza su suelo de 8 copias y se descarta en esa etapa: el
+    /// único candidato es el `(GA)n`.
+    #[test]
+    fn a_microsatellite_after_a_short_homopolymer_of_its_base_is_found() {
+        let seq = [&b"AAAAAA"[..], &b"GA".repeat(10), b"C"].concat();
+        assert_eq!(
+            covering(&seq, 2, 6, 26),
+            Some(RepeatInterval {
+                start: 6,
+                end: 26,
+                period: 2,
+                score: 36
+            })
+        );
+        let (candidates, counts) = detect_core(b"C", &seq, b"T");
+        assert_eq!(candidates, vec![(6, 26, b"GA".to_vec(), 36)]);
+        assert!(counts.discarded(DetectionStage::MinCopies, 1) >= 1);
+        assert_eq!(counts.discarded_total(DetectionStage::Overlap), 0);
+    }
+
+    /// **El caso que ya funcionaba, `A×4 (GA)×10`, no cambia:** el poli-A es
+    /// demasiado corto para que el segmento de periodo 2 empiece dentro de él
+    /// con un motivo no primitivo; el segmento empieza ya en fase `AG` en la
+    /// última `A`, no hay recorte y no se aplica ninguna de las dos reglas.
+    #[test]
+    fn a_tract_whose_start_is_already_primitive_is_unchanged() {
+        let seq = [&b"AAAA"[..], &b"GA".repeat(10)].concat();
+        assert_eq!(
+            covering(&seq, 2, 4, 24),
+            Some(RepeatInterval {
+                start: 3,
+                end: 24,
+                period: 2,
+                score: 38
+            })
+        );
+    }
+
+    /// **El recorte respeta el mínimo de copias del detector**, contado sobre
+    /// el tramo final y no sobre el segmento: con un mínimo de 10 copias,
+    /// `A×8 (GA)×10` deja `[8, 28)`, 20 bases (10 copias), y sale; `A×8
+    /// (GA)×9` deja 18 (9 copias) y no sale, aunque el segmento entero tenga 26
+    /// bases (13 copias).
+    #[test]
+    fn trimming_keeps_the_detector_minimum_copies() {
+        let params = ScanParams {
+            min_copies: 10,
+            ..ScanParams::default()
+        };
+        let ten = [&b"AAAAAAAA"[..], &b"GA".repeat(10)].concat();
+        let nine = [&b"AAAAAAAA"[..], &b"GA".repeat(9)].concat();
+        let period_two =
+            |seq: &[u8]| -> Vec<RepeatInterval> { find_tandem_repeats(seq, p(2, 2), &params) };
+        assert_eq!(
+            period_two(&ten),
+            vec![RepeatInterval {
+                start: 8,
+                end: 28,
+                period: 2,
+                score: 36
+            }]
+        );
+        assert_eq!(period_two(&nine), vec![]);
+    }
+
+    /// **La puntuación de todo intervalo es la de sus propias comparaciones**,
+    /// recortado o no, contra un cálculo hecho aparte. Sobre una secuencia con
+    /// microsatélites de periodos 1 a 6 pegados a homopolímeros de su base, a
+    /// homopolímeros de otra base y con interrupciones.
+    #[test]
+    fn every_interval_score_is_the_score_of_its_own_comparisons() {
+        let mut seq = background(0x51, 30);
+        let blocks: [(&[u8], usize, &[u8]); 8] = [
+            (b"AAAAAAAA", 10, b"GA"),
+            (b"TTTTTTTTTTTT", 7, b"CTT"),
+            (b"CCCCCCCCC", 6, b"ACCG"),
+            (b"GGGGGGGGGG", 5, b"GGATC"),
+            (b"AAAAAAAAA", 4, b"AATCGA"),
+            (b"CCCC", 9, b"CA"),
+            (b"TTTTTTTT", 8, b"TA"),
+            (b"", 6, b"CAGCAT"),
+        ];
+        let mut trimmed = 0;
+        for (index, (homopolymer, copies, motif)) in blocks.iter().enumerate() {
+            seq.extend_from_slice(homopolymer);
+            seq.extend(motif.repeat(*copies));
+            seq.extend(background(0x60 + index as u64, 30));
+        }
+        let got = find_tandem_repeats(&seq, p(1, 6), &ScanParams::default());
+        for interval in &got {
+            assert_eq!(interval.score, own_score(&seq, interval), "{interval:?}");
+            let period = usize::from(interval.period);
+            let start = interval.start as usize;
+            assert!(is_primitive_motif(&seq[start..start + period]));
+            // Probablemente recortado: de periodo 2 o más y justo detrás de
+            // una tira de al menos cuatro bases iguales. Solo sirve para
+            // comprobar que la secuencia ejercita el caso; no distingue un
+            // tramo recortado de uno que ya empezaba ahí (`CCCC (CA)×9` empieza
+            // sin recorte en la primera `C` del dinucleótido).
+            if interval.period > 1
+                && start >= 4
+                && seq[start - 4..start]
+                    .iter()
+                    .all(|&base| base == seq[start - 1])
+            {
+                trimmed += 1;
+            }
+        }
+        assert!(
+            trimmed >= 3,
+            "la secuencia debe ejercitar el recorte: {got:?}"
+        );
+    }
+
     /// El suelo `min_copies` descarta segmentos cortos (p. ej. una coincidencia
     /// casual suelta).
     #[test]
@@ -1701,10 +1991,15 @@ mod tests {
     /// - solape, periodo 2 contra 3: `(CA)×10 G (CAG)×7`; el tramo de periodo
     ///   3 empieza en el último `CA` del dinucleótido (`CAG` con la `G`) y lo
     ///   pisa dos bases; el `(CA)×10` (puntuación 36) pierde ante el `(CAG)×8`
-    ///   (puntuación 42). Un poli-A delante de un `(CA)n` **no** sirve de
-    ///   solape: el tramo de periodo 2 se alarga hacia el poli-A, su motivo
-    ///   sale `AA` y el filtro de motivos lo descarta entero (pendiente de
-    ///   decisión en la pausa).
+    ///   (puntuación 42);
+    /// - solape, periodo 1 contra 2: `(CA)×40 A×8`. El tramo de periodo 2 se
+    ///   alarga por el poli-A del final (allí también coinciden las bases a
+    ///   distancia 2) y conserva pureza 80/88; el poli-A, que empieza en la
+    ///   última `A` del dinucleótido, queda dentro y pierde por puntuación.
+    ///   Un poli-A **delante** de un `(CA)n` ya no sirve: desde que el inicio
+    ///   recortado sale de la tira de una sola base, los dos solo se tocan y se
+    ///   aceptan ambos (lo prueban las regresiones de `A×8 (GA)×10` y `T×12
+    ///   (CTT)×7`).
     #[test]
     fn counts_purity_run_and_overlap_through_the_detector() {
         let criteria = DetectionCriteria {
@@ -1722,6 +2017,9 @@ mod tests {
         sequence.extend(b"CA".repeat(10));
         sequence.push(b'G');
         sequence.extend(b"CAG".repeat(7));
+        sequence.extend(background(0x105, 40));
+        sequence.extend(b"CA".repeat(40));
+        sequence.extend_from_slice(&[b'A'; 8]);
         sequence.extend(background(0x104, 40));
         let detection = detect_repeat_candidates(&sequence, &criteria);
         let counts = detection.counts();
@@ -1752,8 +2050,13 @@ mod tests {
             "{counts:?}"
         );
         assert_eq!(
-            counts.discarded_total(DetectionStage::Overlap),
+            counts.discarded(DetectionStage::Overlap, 1),
             1,
+            "{counts:?}"
+        );
+        assert_eq!(
+            counts.discarded_total(DetectionStage::Overlap),
+            2,
             "{counts:?}"
         );
         assert_eq!(
@@ -1761,8 +2064,8 @@ mod tests {
                 .into_iter()
                 .map(|(_, _, motif)| motif)
                 .collect::<Vec<_>>(),
-            vec![b"CAG".to_vec()],
-            "solo queda el (CAG)n, que gana el solape"
+            vec![b"CAG".to_vec(), b"CA".to_vec()],
+            "quedan el (CAG)n y el (CA)n, que ganan sus solapes"
         );
     }
 
