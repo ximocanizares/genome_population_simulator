@@ -143,8 +143,15 @@ fn tract_bases_by_locus(
             .any(|sequences| !sequences.is_empty())
     }) {
         let end = record.position + record.reference.len() as u64;
+        // El primero en el orden del mapa, como al recorrerlo entero, pero
+        // solo entre los loci de su secuencia que empiezan dentro del registro:
+        // un locus contenido empieza en `[position, end]`. Recorrer todos los
+        // loci por cada registro era cuadrático (F6.4.a.8a).
         let locus = loci
-            .iter()
+            .range((record.sequence_id.clone(), record.position, 0)..)
+            .take_while(|((sequence, start, _), _)| {
+                *sequence == record.sequence_id && *start <= end
+            })
             .find(|((sequence, start, stop), _)| {
                 *sequence == record.sequence_id && record.position <= *start && *stop <= end
             })

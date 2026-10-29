@@ -711,9 +711,17 @@ fn recount_vcf_tract_bases(
             .saturating_sub(1);
         // Un registro de repetición contiene siempre el intervalo de su
         // locus; si no contiene ninguno, el fichero no es el que se publicó.
-        let Some((_, _, _, id)) = loci.iter().find(|(sequence, start, end, _)| {
-            sequence == fields[0] && position <= *start && *end <= last
-        }) else {
+        // Se toma el **primero** en el orden del conjunto, como al recorrerlo
+        // entero, pero solo entre los loci de su secuencia que empiezan dentro
+        // del registro: un locus contenido empieza en `[position, last]`
+        // (F6.4.a.8d; antes, registros × loci).
+        let Some((_, _, _, id)) = loci
+            .range((fields[0].to_owned(), position, 0, String::new())..)
+            .take_while(|(sequence, start, _, _)| sequence == fields[0] && *start <= last)
+            .find(|(sequence, start, end, _)| {
+                sequence == fields[0] && position <= *start && *end <= last
+            })
+        else {
             return Err(repeat_section_error(
                 manifest_path,
                 "un registro de repetición del VCF no contiene el intervalo de ningún locus",
@@ -1010,12 +1018,21 @@ pub fn repeat_loci_manifest_json(
     if config.repeat_loci().is_empty() {
         return Ok(None);
     }
+    // Los sorteos de cada locus, agrupados una sola vez: recorrerlos todos por
+    // cada locus era loci × sorteos, cuadrático con miles de loci (12 s con
+    // 8 000, medido el 29/10/2026; F6.4.a.8e).
+    let mut draws_by_locus = BTreeMap::<_, Vec<&RepeatAlleleDraw>>::new();
+    for draw in draws {
+        draws_by_locus
+            .entry(draw.locus_id())
+            .or_default()
+            .push(draw);
+    }
     let mut loci = Vec::with_capacity(config.repeat_loci().len());
     for locus in config.repeat_loci() {
-        let drawn = draws
-            .iter()
-            .filter(|draw| draw.locus_id() == locus.id())
-            .collect::<Vec<_>>();
+        let drawn = draws_by_locus
+            .get(locus.id())
+            .map_or(&[][..], Vec::as_slice);
         let drawn_copies = drawn.len() as u64;
         let alleles = locus
             .alleles()
@@ -4574,6 +4591,30 @@ fn truth_repeat_tally(
     config: &EffectiveConfig,
 ) -> TruthRepeatTally {
     use crate::truth_schema::{TruthAllele, TruthRecord};
+    // Cada locus por su intervalo entero, el **primero** en el orden de la
+    // configuración si dos compartieran intervalo, como al buscarlo recorriendo
+    // la lista; y las copias de la verdad por secuencia. Antes, casos × loci y
+    // loci × registros (F6.4.a.8d).
+    let mut by_interval = BTreeMap::<(&str, u64, u64), _>::new();
+    for locus in config.repeat_loci() {
+        let interval = locus.declaration().interval();
+        by_interval
+            .entry((
+                interval.sequence_id().as_str(),
+                interval.start(),
+                interval.end(),
+            ))
+            .or_insert(locus);
+    }
+    let mut copies_by_sequence = BTreeMap::<&str, Vec<_>>::new();
+    for record in &document.records {
+        if let TruthRecord::HaplotypeCopy(copy) = record {
+            copies_by_sequence
+                .entry(copy.identity.sequence_id.as_str())
+                .or_default()
+                .push(&copy.identity);
+        }
+    }
     let mut carried = BTreeMap::new();
     for record in &document.records {
         let TruthRecord::Genotype(genotype) = record else {
@@ -4592,12 +4633,11 @@ fn truth_repeat_tally(
         // porque la verdad ordena esa inserción **antes** del caso del locus y
         // este la sobrescribe. Es frágil: si cambiara ese orden, el final haría
         // falta igual que el inicio.
-        let Some(locus) = config.repeat_loci().iter().find(|locus| {
-            let interval = locus.declaration().interval();
-            interval.sequence_id().as_str() == genotype.locus.sequence_id
-                && interval.start() == genotype.locus.start
-                && interval.end() == genotype.locus.end
-        }) else {
+        let Some(locus) = by_interval.get(&(
+            genotype.locus.sequence_id.as_str(),
+            genotype.locus.start,
+            genotype.locus.end,
+        )) else {
             continue;
         };
         for carrier in &genotype.carriers {
@@ -4619,17 +4659,8 @@ fn truth_repeat_tally(
         .map(|locus| {
             let sequence = locus.declaration().interval().sequence_id().as_str();
             let mut tally = BTreeMap::<TruthTractKey, u64>::new();
-            for record in &document.records {
-                let TruthRecord::HaplotypeCopy(copy) = record else {
-                    continue;
-                };
-                if copy.identity.sequence_id != sequence {
-                    continue;
-                }
-                let key = carried
-                    .get(&(locus.id(), &copy.identity))
-                    .cloned()
-                    .flatten();
+            for identity in copies_by_sequence.get(sequence).into_iter().flatten() {
+                let key = carried.get(&(locus.id(), *identity)).cloned().flatten();
                 *tally.entry(key).or_default() += 1;
             }
             (locus.id().to_owned(), tally)

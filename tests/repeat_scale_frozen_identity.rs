@@ -1,0 +1,953 @@
+//! **Huella de los escenarios con muchos microsatélites, para la entrega 2
+//! («escala») del plan de detección.**
+//!
+//! # Qué protege, dicho sin rodeos
+//!
+//! La entrega 2 cambia cómo se **recorren** los loci de repetición en cinco
+//! sitios —la lectura del TOML, la comprobación de solapes, el tartamudeo, la
+//! proyección del VCF y la validación física final— para que el coste crezca
+//! en línea recta con el número de loci. Son arreglos de rendimiento: **no
+//! puede cambiar un solo byte publicado**. La huella de
+//! `tests/repeat_detection_frozen_identity.rs` solo cubre escenarios **sin**
+//! microsatélites, así que no ve nada de lo que esta entrega toca. Esta sí.
+//!
+//! # De dónde salen los literales, y por qué no es circular
+//!
+//! Se obtuvieron el 29 de octubre de 2026 ejecutando **este mismo fichero**
+//! sobre un árbol aparte extraído con `git archive deecb79` —el commit anterior
+//! a la entrega 2, sin un solo cambio en `src/`—, con su propio directorio de
+//! compilación. No se calcularon con el árbol de trabajo. Todos los escenarios
+//! ejecutan el binario `run`, no la biblioteca, y le pasan la configuración por
+//! una ruta relativa: la ruta escrita en la línea de órdenes se publica en la
+//! configuración efectiva y en el manifiesto, y con una absoluta, distinta en
+//! cada ejecución, esos ficheros no tendrían una huella estable.
+//!
+//! # Qué tiene cada escenario, y qué ejercita
+//!
+//! 1. **Muchos loci con tartamudeo de base y quimeras entre secuencias.**
+//!    Referencia suministrada de dos secuencias con quince microsatélites
+//!    plantados (nueve en `chrA` y seis en `chrB`), de periodos 1 a 4, dos
+//!    parejas de loci **pegados** (el final de uno es el inicio del otro), la
+//!    mayoría con alelos generados por deslizamiento y dos con alelos escritos
+//!    a mano, de modo que los alelos varían entre individuos. Cuatro
+//!    individuos diploides, VCF de texto y un evento técnico con tartamudeo de
+//!    base encendido en todos los periodos y la mitad de las parejas
+//!    quiméricas (DTC-102: el sufijo puede salir de la otra secuencia). Con
+//!    cientos de moléculas sobre unas pocas decenas de tractos, muchas empiezan
+//!    o acaban **dentro** de un tracto: el tracto empieza antes del tramo de la
+//!    molécula y acaba dentro, que es justo lo que un índice mal hecho pierde.
+//! 2. **Lo mismo con PCR y tartamudeo clonal por linaje**, que sitúa los
+//!    tractos por el mismo camino (`place_tracts`) desde la molécula original
+//!    de la familia.
+//! 3. **Los escenarios de la revisión adversarial de la fusión del VCF**
+//!    (`tests/fixtures/vcf-fusion/review`, 2 de octubre de 2026): un tracto que
+//!    una deleción cruza al alinearse, dos copias con las mismas bases y
+//!    anotaciones distintas, el límite de alineación a la izquierda, tractos
+//!    pegados a un indel... Son los casos que ejercitan cada rama de la
+//!    proyección del VCF que la entrega 2 reindexa. Cada uno se congela en un
+//!    solo literal, la huella del árbol publicado entero; si cambia, el
+//!    mensaje imprime la tabla fichero a fichero.
+//!
+//! Además, en los escenarios 1 y 2 el **juez semántico del VCF**
+//! (`validate_published_vcf_semantics`), que la entrega 2 también reindexa,
+//! tiene que aceptar lo publicado.
+//!
+//! # Qué discrimina, comprobado el 29/10/2026
+//!
+//! Sobre una copia del árbol, fuera de git y con copia de seguridad aparte:
+//!
+//! - un salto de línea de más al final de los JSON publicados
+//!   (`json_document_bytes`) mata las tres pruebas;
+//! - el índice del tartamudeo, el del agrupador del VCF, el reparto de bases
+//!   por locus, las piezas de cada ventana de la proyección, los componentes
+//!   que atraviesa un alelo al alinearse, el recuento del
+//!   juez físico y el reparto de sorteos del manifiesto, mutados para que
+//!   pierdan lo que empieza antes de la ventana (o un sorteo), matan al menos
+//!   una de las tres.
+//!
+//! **Lo que no ve, dicho sin adornos:** el índice de tractos de la proyección
+//! y el del juez semántico mutados del mismo modo **no** la hacen fallar (los
+//! escenarios no tienen un tracto que empiece antes de un registro fundido y
+//! lo pise; el juez mutado es más permisivo, no más estricto), y la posición
+//! de un error del TOML no se publica. Esos tres los cazan sus pruebas
+//! unitarias.
+//!
+//! El detalle de las mutaciones, con sus SHA y la prueba que muere con cada
+//! una, está en el apartado 11.9 del plan
+//! `design/plan-implementacion-deteccion-microsatelites-0.1.md`.
+//!
+//! # Qué hacer cuando esta prueba falle
+//!
+//! El mensaje imprime la tabla observada. **No se copia sin más**: la entrega 2
+//! no puede cambiar bytes; una huella que cambia es un defecto del índice, o
+//! una decisión que hay que escribir antes de tocar el literal.
+//!
+//! # Honestidad sobre el compresor
+//!
+//! Los `.gz` los comprime `noodles-bgzf`, que puede elegir rutina según el
+//! procesador. Cada fichero comprimido lleva **dos** huellas: la del fichero y
+//! la de su contenido descomprimido (entrada `#content`). Si solo fallara la
+//! primera, el culpable sería el compresor y no el productor.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use genome_population_simulator::vcf_semantic_validation::validate_published_vcf_semantics;
+use noodles_bgzf as bgzf;
+use sha2::{Digest, Sha256};
+
+const SEED: &str = "5e2a9c7b1d3f4068a2c4e6f8091b3d5f7a9c1e3f5072b4d6f8a0c2e4f6a8b0c2";
+static NONCE: AtomicU64 = AtomicU64::new(0);
+
+// ---------------------------------------------------------------------------
+// Los literales congelados, obtenidos con el commit `deecb79` compilado aparte.
+// ---------------------------------------------------------------------------
+
+const MANY_LOCI_BASE_STUTTER: &[(&str, &str)] = &[
+    (
+        "effective-config.json",
+        "ca72667bf66b0c52c1701bb6c19ded23616795b89619e007b6a0829c23f56095",
+    ),
+    (
+        "events/reads-main/manifest.json",
+        "b1694d258e89195fd398206c55c3a235769ec68cef96d01816320e6a98ff1320",
+    ),
+    (
+        "inputs/config/general.toml",
+        "5ffffc5c827e0eb01993c5feedbd47cdcf376a683135f948b7b3b1399d2d7532",
+    ),
+    (
+        "manifest.json",
+        "342c6ad4df354f6597743b65515e1f6d5ce826e332fd8d6b660741566d203e0d",
+    ),
+    (
+        "outputs/fastq/reads-main/S1_R1.fastq.gz",
+        "b422901e6a74c89bc9d6fa500e5621617528f55d26547b982e5280672319b3d7",
+    ),
+    (
+        "outputs/fastq/reads-main/S1_R1.fastq.gz#content",
+        "e57f462c8f00b02ec294746c4e8687206a8873ca0a6cb35b23d68444ccdb4b9f",
+    ),
+    (
+        "outputs/fastq/reads-main/S1_R2.fastq.gz",
+        "d2e29a74e83e94453102f9f4493eb7c4b01d166e70939d614db757e00ac7cb4c",
+    ),
+    (
+        "outputs/fastq/reads-main/S1_R2.fastq.gz#content",
+        "2ab58fd86236904f32ec58540b617d9291ada0a26cab0384f34aa88cb36451bd",
+    ),
+    (
+        "outputs/fastq/reads-main/S2_R1.fastq.gz",
+        "7f67857ec426bce05bfd953d3ba669ec364e5089c2b5ba4e605c499604e88a99",
+    ),
+    (
+        "outputs/fastq/reads-main/S2_R1.fastq.gz#content",
+        "7408cb04fce5b9e7fb044d26d2369fcab37b09a24fb1fde4e90d4dea952a739b",
+    ),
+    (
+        "outputs/fastq/reads-main/S2_R2.fastq.gz",
+        "8a2b2a00b6428bd854adb3393d012372dda15fa63c1c22b5be2b6a74c6269c0e",
+    ),
+    (
+        "outputs/fastq/reads-main/S2_R2.fastq.gz#content",
+        "bbe088dae8f924deff6cd7d60ed4163516a30940b162bc1b876a1a5efe0a429c",
+    ),
+    (
+        "outputs/fastq/reads-main/S3_R1.fastq.gz",
+        "8ab8baedc2ed9bb921d1c444942cedfb3089fa7e344ec20049439f848fe93911",
+    ),
+    (
+        "outputs/fastq/reads-main/S3_R1.fastq.gz#content",
+        "73285913902cf44b3228fc85cbfd3918136d2e7c3694db5fa32d5af9ad790d69",
+    ),
+    (
+        "outputs/fastq/reads-main/S3_R2.fastq.gz",
+        "7c60fe5f249d5eee11480ae4a6b2b7439deec12f7a1e7a9744da3e199dd35b79",
+    ),
+    (
+        "outputs/fastq/reads-main/S3_R2.fastq.gz#content",
+        "7ac0fe582dd42faa27cdaca13b8927f55fe776318dca5b78346ce3e05d45285d",
+    ),
+    (
+        "outputs/fastq/reads-main/S4_R1.fastq.gz",
+        "e80d108d77f47d13ed8529558ebe0a704fb93fc3a74e3ee4810da4e3253caf13",
+    ),
+    (
+        "outputs/fastq/reads-main/S4_R1.fastq.gz#content",
+        "991f79ccfe47d22c348453a3a040b9b4a58c03b706c7f075946d9a7ac437da0e",
+    ),
+    (
+        "outputs/fastq/reads-main/S4_R2.fastq.gz",
+        "dc61707820f79b8ca7175213cac1316c435e744d218637771b255ab5ac968bb6",
+    ),
+    (
+        "outputs/fastq/reads-main/S4_R2.fastq.gz#content",
+        "f25b888ffc7471a2cd7a2b6fb29e0eca6eb95c305ca12789d2edd62a8f7e35ef",
+    ),
+    (
+        "outputs/truth.jsonl",
+        "1fd07c26434c4894bad6c91faf6a6d08e866a3c272401562676cae32cddae284",
+    ),
+    (
+        "outputs/truth.vcf",
+        "8c351edd706e3c17cef11c77c811ad1bc1da6b2b845f32935ee6e57b0bef6c3f",
+    ),
+    (
+        "population_snvs.metadata.json",
+        "408a28ebcba661a4fc9790a6fd3c18fdd7fd13de6042a87771e42b4510842a7e",
+    ),
+    (
+        "population_snvs.tsv",
+        "7fcce4afec94295fe656b24476f1915a1e2234e19d371d529f1c77d6a4c28851",
+    ),
+    (
+        "resources/references/ref-main.fa",
+        "04cd04f7f550804f32f80d6cae03895278689d34bbbb144d48486eca11a08c0a",
+    ),
+];
+
+const MANY_LOCI_PCR_CLONAL: &[(&str, &str)] = &[
+    (
+        "effective-config.json",
+        "3e508e8a14d5b92b1520e8db61183edca3d6ba07bca94980a1fb5e529b97d7e8",
+    ),
+    (
+        "events/reads-main/manifest.json",
+        "7cdfba62478ec28a8b184123c270a5ebec4815455aac5f7280fe3fd2f0f16b02",
+    ),
+    (
+        "inputs/config/general.toml",
+        "4f5ea87401d4c0741d8d79efd9a5884093fc11c8bb39d52f12cef707100ee42c",
+    ),
+    (
+        "manifest.json",
+        "1b8c98b3fef19d9819ffddb50caad768e0e3ca8770bfcae19be06806098adcb4",
+    ),
+    (
+        "outputs/fastq/reads-main/S1_R1.fastq.gz",
+        "0b0710fe8b0a9c87632f1424a3e4b2599e5d579af89bb527b881651a942371e2",
+    ),
+    (
+        "outputs/fastq/reads-main/S1_R1.fastq.gz#content",
+        "33117427107f7d1472b08059ec78a856cb57a1aeefac6ae4dbb33707dbf0edca",
+    ),
+    (
+        "outputs/fastq/reads-main/S1_R2.fastq.gz",
+        "32e4db035208399cd5ee6d62f1c212a1768a9e353434ee97775b562e4eb64bdf",
+    ),
+    (
+        "outputs/fastq/reads-main/S1_R2.fastq.gz#content",
+        "91f488ac56754ad228d2418771c83b900ef191e187e2c436e74044d61fbdd3a3",
+    ),
+    (
+        "outputs/fastq/reads-main/S2_R1.fastq.gz",
+        "1f4c8295173a5fe1cd4ab9d608bf4b8427931afe6a8be368be65ce6db5ca4cda",
+    ),
+    (
+        "outputs/fastq/reads-main/S2_R1.fastq.gz#content",
+        "1f4e646d2069bf636bc381f5a8b0b9b709fd5c393bf6c9e15cba37d1c29259c9",
+    ),
+    (
+        "outputs/fastq/reads-main/S2_R2.fastq.gz",
+        "bac6ffc672ae5f30d1ca3912b9d7cd8dc0941bd6e75b2096a407ae38612a69b8",
+    ),
+    (
+        "outputs/fastq/reads-main/S2_R2.fastq.gz#content",
+        "945980642ea4d49417b524c6e2dcb3028a8c5ceb4a49abc014fe76259ca638c2",
+    ),
+    (
+        "outputs/fastq/reads-main/S3_R1.fastq.gz",
+        "febfd6d7a694661ce96f4b8647594c34fc0f6070ff54b9ea7db222c29261c99f",
+    ),
+    (
+        "outputs/fastq/reads-main/S3_R1.fastq.gz#content",
+        "3d1d96338aa6b50c7d24cdbb12a820336ea68ab46d1df8a3d5715214e993006a",
+    ),
+    (
+        "outputs/fastq/reads-main/S3_R2.fastq.gz",
+        "70974533206f6f91a905567f33e54b5e7550da23594901574564a8749e08bfb6",
+    ),
+    (
+        "outputs/fastq/reads-main/S3_R2.fastq.gz#content",
+        "5bb5842829bec4d781150cabadda9c5eba69ce44e3a9eadbd2f548e51e816338",
+    ),
+    (
+        "outputs/fastq/reads-main/S4_R1.fastq.gz",
+        "bdfc553d6b7bf675e33cc492a2cf9a41245ddb8fb32cd9f6a3b3aef9cd62209b",
+    ),
+    (
+        "outputs/fastq/reads-main/S4_R1.fastq.gz#content",
+        "1d8152747c04cbe7a34d64a77b7ca5bc058ea85c05c6a274c30fa330a914d8b8",
+    ),
+    (
+        "outputs/fastq/reads-main/S4_R2.fastq.gz",
+        "021780cc7ebaa3bdaac7b0892801f34afc712d6aa89b8714bddd3074e33c48c2",
+    ),
+    (
+        "outputs/fastq/reads-main/S4_R2.fastq.gz#content",
+        "ed542a8864e285dbe54b570fa0efca19c9e1d99acd71a83d92cf83a6dbb7dc0c",
+    ),
+    (
+        "outputs/truth.jsonl",
+        "e0bd428e1bceefa578cc8c2c481d9bcbdfa8528f46c770719bacba540e097932",
+    ),
+    (
+        "outputs/truth.vcf",
+        "ae87ca404aa578a0306dac753490a7f4ab6cba60288a84709928e945549cb04b",
+    ),
+    (
+        "population_snvs.metadata.json",
+        "408a28ebcba661a4fc9790a6fd3c18fdd7fd13de6042a87771e42b4510842a7e",
+    ),
+    (
+        "population_snvs.tsv",
+        "7fcce4afec94295fe656b24476f1915a1e2234e19d371d529f1c77d6a4c28851",
+    ),
+    (
+        "resources/references/ref-main.fa",
+        "04cd04f7f550804f32f80d6cae03895278689d34bbbb144d48486eca11a08c0a",
+    ),
+];
+
+/// Huella del árbol publicado entero por cada escenario de la revisión de la
+/// fusión del VCF: SHA-256 de la tabla `ruta\tSHA-256\n` ordenada.
+const REVIEW_FIXTURES: &[(&str, &str)] = &[
+    (
+        "20248",
+        "6486008233c50898e07af4fd2f24376ffb6455d5367767a61ae2ef6c3f77c46c",
+    ),
+    (
+        "40045",
+        "d38070fb298471833e3119038d44679b522dabec38f226943276172de5eb8abc",
+    ),
+    (
+        "impure-tract",
+        "ef9a2fe435f51a30f535f48758b2d212bf4a4e68944d53303285a958d48d5680",
+    ),
+    (
+        "r03",
+        "4e8570ba5e27e0240d8c45d06b4d73f7d2221b27020de7131668f69af0dd5c7b",
+    ),
+    (
+        "rb-over-alt-1831",
+        "9d3e8c09c2e918ebc2e6546330d49f283c1fda23d3e36c5264adad416a0d7377",
+    ),
+    (
+        "v-136",
+        "b9683f646112a97b3e8a29b0080145ec726b71bce3ad0b7737774f03a17af019",
+    ),
+    (
+        "v-163",
+        "e8c14b6d019bf49c2fc656f0ad7204adcb91e4da7ba037a559a5e673a8cec957",
+    ),
+    (
+        "v-175",
+        "768b2186ed733670d1afad3c12424f7195df63da0c4b631b7e0db25962b520d6",
+    ),
+    (
+        "w-atreg-4",
+        "899bbd3dcdc3614894b046d118bedb0bb18e606950ef5928959881c1c1f4da3f",
+    ),
+    (
+        "w-bound-0",
+        "22c7ff52af59b688022115baf37ffd045eb846fa43724e53d82c30a9835ea803",
+    ),
+    (
+        "w-cap-2090",
+        "2501b193aded0026aed289fe8519325ff878380009039931ac14853f8aa76714",
+    ),
+    (
+        "w-flankdel-5",
+        "df21a7c71d3cbd6908052c2d41c6e483c7567dc04ffc8520856371d588c09248",
+    ),
+    (
+        "w-min-a",
+        "45ca4b42b1b36641a0359a155492e081b10ba5e016ff6400a7d8bca6ed9fa91a",
+    ),
+    (
+        "w-plain-cross",
+        "e9aea4127b821ec891fc7bc1c0de02df072a2976fddc87fa4dce5752f82d0b56",
+    ),
+    (
+        "x-11063",
+        "8f1cd5a272c0b370f28d41259535b9d551823b999bb826999f7198db6746e073",
+    ),
+    (
+        "x-12168",
+        "16158332ec8edfc95c0c7ad01366a4f9ac1dd0a439ae4032cd0465504c02b026",
+    ),
+    (
+        "x-1392",
+        "75fba49c06f1a5159a30649882ee7dd9fa733d62cb11d80ad907217929bb0b9e",
+    ),
+    (
+        "x-14771",
+        "d4e579fa98cdd5d23a55d849b020ff4fa1f5a31344540ecd3cafb3fa31545bcb",
+    ),
+    (
+        "x3338",
+        "94f71153f11791de124b6a590ec9618e3228268e4ab71c70495ba64c53e75589",
+    ),
+    (
+        "y-1699",
+        "fc0dee4c43237f67f67e19b4f35d023de18fe0ea0d0c82456d412c2a304b0ef9",
+    ),
+    (
+        "y-2813",
+        "1d52bf254cb98f1a484e9c5b55bf4dc1b1132cd35d830ed9f7f8517f260f9a4f",
+    ),
+];
+
+fn temporary() -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "gps-huella-escala-{}-{}-{}",
+        std::process::id(),
+        NONCE.fetch_add(1, Ordering::Relaxed),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("reloj")
+            .as_nanos()
+    ))
+}
+
+/// Directorio temporal de un escenario: se borra al soltarse.
+struct TemporaryRoot(PathBuf);
+
+impl Drop for TemporaryRoot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Bases pseudoaleatorias reproducibles (xorshift64), escritas aquí y sin
+/// depender del programa.
+fn bases(seed: u64, length: usize) -> Vec<u8> {
+    let mut state = seed;
+    (0..length)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            b"ACGT"[usize::try_from(state >> 62).expect("dos bits")]
+        })
+        .collect()
+}
+
+fn digest(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+/// Un microsatélite plantado: `(secuencia, inicio en base 0, motivo,
+/// unidades, alelos escritos a mano)`. Sin alelos escritos, los genera el
+/// deslizamiento.
+struct Planted {
+    id: &'static str,
+    sequence: &'static str,
+    start: usize,
+    motif: &'static str,
+    units: usize,
+    alleles: &'static [(usize, f64)],
+}
+
+impl Planted {
+    fn end(&self) -> usize {
+        self.start + self.motif.len() * self.units
+    }
+}
+
+/// Quince loci en dos secuencias. `STR-A4`/`STR-A5` y `STR-B3`/`STR-B4` van
+/// pegados: el primero acaba justo donde empieza el segundo.
+const PLANTED: &[Planted] = &[
+    Planted {
+        id: "STR-A1",
+        sequence: "chrA",
+        start: 400,
+        motif: "CA",
+        units: 15,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-A2",
+        sequence: "chrA",
+        start: 900,
+        motif: "GAT",
+        units: 10,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-A3",
+        sequence: "chrA",
+        start: 1500,
+        motif: "AAAG",
+        units: 8,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-A4",
+        sequence: "chrA",
+        start: 2000,
+        motif: "TG",
+        units: 12,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-A5",
+        sequence: "chrA",
+        start: 2024,
+        motif: "AGC",
+        units: 9,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-A6",
+        sequence: "chrA",
+        start: 2600,
+        motif: "A",
+        units: 14,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-A7",
+        sequence: "chrA",
+        start: 3200,
+        motif: "CA",
+        units: 20,
+        alleles: &[(20, 0.4), (18, 0.3), (23, 0.3)],
+    },
+    Planted {
+        id: "STR-A8",
+        sequence: "chrA",
+        start: 3800,
+        motif: "TTC",
+        units: 9,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-A9",
+        sequence: "chrA",
+        start: 4400,
+        motif: "GT",
+        units: 10,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-B1",
+        sequence: "chrB",
+        start: 300,
+        motif: "CA",
+        units: 16,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-B2",
+        sequence: "chrB",
+        start: 800,
+        motif: "ATG",
+        units: 9,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-B3",
+        sequence: "chrB",
+        start: 1400,
+        motif: "GA",
+        units: 12,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-B4",
+        sequence: "chrB",
+        start: 1424,
+        motif: "C",
+        units: 12,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-B5",
+        sequence: "chrB",
+        start: 2200,
+        motif: "AATG",
+        units: 7,
+        alleles: &[],
+    },
+    Planted {
+        id: "STR-B6",
+        sequence: "chrB",
+        start: 2900,
+        motif: "TC",
+        units: 14,
+        alleles: &[(14, 0.5), (11, 0.25), (16, 0.25)],
+    },
+];
+
+/// Las dos secuencias con sus tractos plantados. La base anterior y la
+/// siguiente de cada tracto se eligen distintas de la primera y la última del
+/// motivo, para que el tracto no se prolongue por azar en los flancos.
+fn reference() -> Vec<(&'static str, Vec<u8>)> {
+    let mut sequences = vec![
+        ("chrA", bases(0x2F6B_1C9D_83A5_47E1, 5000)),
+        ("chrB", bases(0x7A3D_5E91_C2B4_6F08, 3500)),
+    ];
+    for planted in PLANTED {
+        let bases = &mut sequences
+            .iter_mut()
+            .find(|(id, _)| *id == planted.sequence)
+            .expect("secuencia del locus")
+            .1;
+        let tract = planted.motif.repeat(planted.units);
+        bases[planted.start..planted.end()].copy_from_slice(tract.as_bytes());
+        let motif = planted.motif.as_bytes();
+        let avoid = |excluded: &[u8]| -> u8 {
+            *b"ACGT"
+                .iter()
+                .find(|base| !excluded.contains(base))
+                .expect("una base libre")
+        };
+        // El flanco izquierdo de un locus pegado es el tracto anterior: no se
+        // toca.
+        if !PLANTED
+            .iter()
+            .any(|other| other.sequence == planted.sequence && other.end() == planted.start)
+        {
+            bases[planted.start - 1] = avoid(&[motif[motif.len() - 1], motif[0]]);
+        }
+        if !PLANTED
+            .iter()
+            .any(|other| other.sequence == planted.sequence && other.start == planted.end())
+        {
+            bases[planted.end()] = avoid(&[motif[0], motif[motif.len() - 1]]);
+        }
+    }
+    sequences
+}
+
+fn fasta_of(sequences: &[(&str, Vec<u8>)]) -> String {
+    let mut text = String::new();
+    for (id, bases) in sequences {
+        text.push('>');
+        text.push_str(id);
+        text.push('\n');
+        for chunk in bases.chunks(70) {
+            text.push_str(std::str::from_utf8(chunk).expect("ASCII"));
+            text.push('\n');
+        }
+    }
+    text
+}
+
+fn loci_toml() -> String {
+    let mut text = String::new();
+    for planted in PLANTED {
+        text.push_str(&format!(
+            "[[reference.repeat_loci]]\nid = \"{}\"\nsequence = \"{}\"\nstart = {}\nend = {}\n\
+             motif = \"{}\"\n\n",
+            planted.id,
+            planted.sequence,
+            planted.start + 1,
+            planted.end(),
+            planted.motif
+        ));
+        if planted.alleles.is_empty() {
+            text.push_str(&format!(
+                "max_units = {}\n\n[reference.repeat_loci.slippage]\nmodel = \"stepwise\"\n\
+                 mean_events = 2.0\nexpansion_bias = 0.5\n\n",
+                planted.units + 10
+            ));
+        } else {
+            for (units, frequency) in planted.alleles {
+                text.push_str(&format!(
+                    "[[reference.repeat_loci.alleles]]\nunits = {units}\nfrequency = {frequency}\n\n"
+                ));
+            }
+        }
+    }
+    text
+}
+
+const INDIVIDUALS: [&str; 4] = ["S1", "S2", "S3", "S4"];
+const UDIS: [(&str, &str); 4] = [
+    ("ACGTACGT", "TGCATGCA"),
+    ("CGTACGTA", "GCATGCAT"),
+    ("GTACGTAC", "CATGCATG"),
+    ("TACGTACG", "ATGCATGC"),
+];
+
+const STUTTER: &str = "[technical_event.stutter]\nenabled = true\n\
+     [[technical_event.stutter.motif_length_rates]]\nmotif_length_bases = 1\nrate = 0.4\n\
+     [[technical_event.stutter.motif_length_rates]]\nmotif_length_bases = 2\nrate = 0.4\n\
+     [[technical_event.stutter.motif_length_rates]]\nmotif_length_bases = 3\nrate = 0.3\n\
+     [[technical_event.stutter.motif_length_rates]]\nmotif_length_bases = 4\nrate = 0.3\n\
+     [[technical_event.stutter.steps]]\nunits = -3\nweight = 0.05\n\
+     [[technical_event.stutter.steps]]\nunits = -2\nweight = 0.15\n\
+     [[technical_event.stutter.steps]]\nunits = -1\nweight = 0.6\n\
+     [[technical_event.stutter.steps]]\nunits = 1\nweight = 0.2\n\n";
+
+const PCR: &str = "library_preparation = \"pcr\"\n\n\
+     [technical_event.pcr]\nduplicate_fraction = 0.5\ncycles = 10\nefficiency = 0.9\n\
+     [technical_event.pcr.stutter]\n\
+     [[technical_event.pcr.stutter.per_cycle_slip]]\nmotif_length_bases = 1\nprobability = 0.05\n\
+     [[technical_event.pcr.stutter.per_cycle_slip]]\nmotif_length_bases = 2\nprobability = 0.05\n\
+     [[technical_event.pcr.stutter.per_cycle_slip]]\nmotif_length_bases = 3\nprobability = 0.03\n\
+     [[technical_event.pcr.stutter.per_cycle_slip]]\nmotif_length_bases = 4\nprobability = 0.03\n\n";
+
+/// Escribe el escenario 1 o 2 y devuelve la ruta de la configuración.
+fn many_loci_scenario(root: &Path, preparation: &str) -> PathBuf {
+    let sequences = reference();
+    fs::write(root.join("reference.fa"), fasta_of(&sequences)).expect("FASTA");
+    // Filas de la matriz lejos de todo tracto; la base de referencia se lee de
+    // la secuencia.
+    let mut matrix = String::from("contig\tposition\tref\talt\tpopulation_id\talt_af\n");
+    for (contig, position) in [("chrA", 150), ("chrA", 2300), ("chrB", 1100)] {
+        let reference = sequences
+            .iter()
+            .find(|(id, _)| *id == contig)
+            .expect("secuencia")
+            .1[position - 1];
+        let alternate = *b"ACGT"
+            .iter()
+            .find(|base| **base != reference)
+            .expect("alternativa");
+        matrix.push_str(&format!(
+            "{contig}\t{position}\t{}\t{}\tP1\t0.5\n",
+            char::from(reference),
+            char::from(alternate)
+        ));
+    }
+    fs::write(root.join("population-snvs.tsv"), matrix).expect("matriz");
+    let declared: String = sequences
+        .iter()
+        .map(|(id, bases)| {
+            format!(
+                "[[reference.sequences]]\nid = \"{id}\"\nclass = \"chromosome\"\nlength = {}\n\n",
+                bases.len()
+            )
+        })
+        .collect();
+    let quoted = INDIVIDUALS
+        .iter()
+        .map(|id| format!("\"{id}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let libraries: String = INDIVIDUALS
+        .iter()
+        .zip(UDIS)
+        .map(|(id, (i7, i5))| {
+            format!(
+                "[[technical_event.libraries]]\nindividual_id = \"{id}\"\ni7 = \"{i7}\"\ni5 = \"{i5}\"\n\n"
+            )
+        })
+        .collect();
+    let config = root.join("general.toml");
+    fs::write(
+        &config,
+        format!(
+            "config_kind = \"general\"\nschema_version = \"4\"\nseed = \"{SEED}\"\n\n\
+             [population_snvs]\nmode = \"supplied\"\ninput_path = \"population-snvs.tsv\"\n\n\
+             [reference]\nkind = \"supplied\"\nid = \"ref-main\"\nfasta = \"reference.fa\"\n\n\
+             {declared}{}\
+             [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 4\nploidy = 2\n\
+             genotype_model = \"hwe\"\nindividual_ids = [{quoted}]\n\n\
+             [vcf_output]\nmode = \"text\"\n\n\
+             [technical_event]\nevent_id = \"reads-main\"\nindividual_ids = [{quoted}]\n\
+             target_coverage_wgs = 12\nchimera_rate = 0.5\n{preparation}{STUTTER}{libraries}",
+            loci_toml()
+        ),
+    )
+    .expect("configuración");
+    config
+}
+
+/// Ejecuta `run` con el binario del proyecto, **desde el directorio del
+/// escenario y con rutas relativas**, y devuelve el directorio publicado.
+fn run_binary(root: &Path, config: &str) -> PathBuf {
+    let output = Command::new(env!("CARGO_BIN_EXE_genome-population-simulator"))
+        .current_dir(root)
+        .arg("run")
+        .arg(config)
+        .arg("--output")
+        .arg("published")
+        .output()
+        .expect("binario del simulador");
+    assert!(
+        output.status.success(),
+        "la ejecución falló en {}\n{}\n{}",
+        root.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    root.join("published")
+}
+
+fn walk(root: &Path, directory: &Path, found: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(directory).expect("directorio publicado") {
+        let path = entry.expect("entrada").path();
+        if path.is_dir() {
+            walk(root, &path, found);
+        } else {
+            found.push(path.strip_prefix(root).expect("relativa").to_path_buf());
+        }
+    }
+}
+
+/// El contenido descomprimido de un fichero BGZF.
+fn decompressed(path: &Path) -> Option<Vec<u8>> {
+    let mut text = Vec::new();
+    bgzf::io::Reader::new(fs::File::open(path).ok()?)
+        .read_to_end(&mut text)
+        .ok()?;
+    Some(text)
+}
+
+/// Huella de **todos** los ficheros publicados: la del fichero y, para los
+/// comprimidos, la de su contenido.
+fn fingerprint(destination: &Path) -> BTreeMap<String, String> {
+    let mut paths = Vec::new();
+    walk(destination, destination, &mut paths);
+    let mut table = BTreeMap::new();
+    for relative in paths {
+        let full = destination.join(&relative);
+        let name = relative.to_string_lossy().into_owned();
+        table.insert(name.clone(), digest(&fs::read(&full).expect("fichero")));
+        if name.ends_with(".gz") {
+            let content =
+                decompressed(&full).unwrap_or_else(|| panic!("{name}: no es un BGZF legible"));
+            table.insert(format!("{name}#content"), digest(&content));
+        }
+    }
+    table
+}
+
+fn render(table: &BTreeMap<String, String>) -> String {
+    table
+        .iter()
+        .map(|(path, sha)| format!("    (\"{path}\", \"{sha}\"),\n"))
+        .collect()
+}
+
+/// El juez semántico del VCF acepta lo publicado.
+fn assert_vcf_judge_accepts(destination: &Path) {
+    validate_published_vcf_semantics(
+        &destination.join("resources/references/ref-main.fa"),
+        &destination.join("outputs/truth.jsonl"),
+        &destination.join("outputs/truth.vcf"),
+    )
+    .unwrap_or_else(|error| panic!("el juez semántico rechaza el VCF publicado: {error:?}"));
+}
+
+fn check_many_loci(name: &str, frozen: &[(&str, &str)], preparation: &str) {
+    let root = temporary();
+    fs::create_dir_all(&root).expect("raíz del escenario");
+    let _cleanup = TemporaryRoot(root.clone());
+    many_loci_scenario(&root, preparation);
+    let destination = run_binary(&root, "general.toml");
+    let observed = fingerprint(&destination);
+    // Control positivo: el escenario publica de verdad el VCF, la verdad y los
+    // FASTQ de las cuatro individuas, y el VCF tiene registros de repetición
+    // de las dos secuencias.
+    for needle in ["outputs/truth.vcf", "outputs/truth.jsonl", "S1_R1", "S4_R2"] {
+        assert!(
+            observed.keys().any(|path| path.contains(needle)),
+            "{name}: el escenario tiene que publicar «{needle}»; publicó\n{}",
+            render(&observed)
+        );
+    }
+    let vcf = fs::read_to_string(destination.join("outputs/truth.vcf")).expect("VCF");
+    for sequence in ["chrA", "chrB"] {
+        let repeats = vcf
+            .lines()
+            .filter(|line| line.starts_with(&format!("{sequence}\t")) && line.contains("RN="))
+            .count();
+        assert!(
+            repeats >= 4,
+            "{name}: el VCF tiene que llevar registros de repetición en {sequence}: {repeats}"
+        );
+    }
+    let manifest = fs::read_to_string(destination.join("events/reads-main/manifest.json"))
+        .expect("manifiesto del evento");
+    assert!(
+        manifest.contains("stutter"),
+        "{name}: el evento técnico tiene que tartamudear"
+    );
+    assert_vcf_judge_accepts(&destination);
+    let expected: BTreeMap<String, String> = frozen
+        .iter()
+        .map(|(path, sha)| ((*path).to_owned(), (*sha).to_owned()))
+        .collect();
+    assert_eq!(
+        observed,
+        expected,
+        "{name}: los bytes publicados han cambiado. La entrega 2 no puede cambiarlos. Tabla \
+         observada:\n{}",
+        render(&observed)
+    );
+}
+
+/// **Muchos loci en dos secuencias, VCF, tartamudeo de base y quimeras: los
+/// bytes son los congelados.**
+#[test]
+fn many_loci_with_base_stutter_and_chimeras_keep_their_frozen_bytes() {
+    check_many_loci("tartamudeo de base", MANY_LOCI_BASE_STUTTER, "");
+}
+
+/// **Lo mismo con PCR y tartamudeo clonal por linaje: los bytes son los
+/// congelados.**
+#[test]
+fn many_loci_with_pcr_clonal_stutter_and_chimeras_keep_their_frozen_bytes() {
+    check_many_loci("PCR con tartamudeo clonal", MANY_LOCI_PCR_CLONAL, PCR);
+}
+
+/// **Cada escenario de la revisión de la fusión del VCF publica los bytes
+/// congelados.**
+#[test]
+fn the_vcf_fusion_review_scenarios_keep_their_frozen_bytes() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vcf-fusion/review");
+    let mut names = fs::read_dir(&fixtures)
+        .expect("escenarios de la revisión")
+        .map(|entry| {
+            entry
+                .expect("entrada")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    let mut observed = BTreeMap::new();
+    let mut tables = String::new();
+    for name in &names {
+        let root = temporary();
+        fs::create_dir_all(&root).expect("raíz del escenario");
+        let _cleanup = TemporaryRoot(root.clone());
+        for file in ["reference.fa", "snvs.tsv", "general.toml"] {
+            fs::copy(fixtures.join(name).join(file), root.join(file))
+                .expect("fichero del escenario");
+        }
+        let destination = run_binary(&root, "general.toml");
+        let table = fingerprint(&destination);
+        assert!(
+            table.contains_key("outputs/truth.vcf"),
+            "{name}: el escenario tiene que publicar el VCF"
+        );
+        let summary: String = table
+            .iter()
+            .map(|(path, sha)| format!("{path}\t{sha}\n"))
+            .collect();
+        tables.push_str(&format!("{name}:\n{}", render(&table)));
+        observed.insert(name.clone(), digest(summary.as_bytes()));
+    }
+    let expected: BTreeMap<String, String> = REVIEW_FIXTURES
+        .iter()
+        .map(|(name, sha)| ((*name).to_owned(), (*sha).to_owned()))
+        .collect();
+    assert_eq!(
+        observed,
+        expected,
+        "los bytes publicados por los escenarios de la revisión han cambiado. La entrega 2 no \
+         puede cambiarlos. Huellas observadas:\n{}\nTablas:\n{tables}",
+        render(&observed)
+    );
+}

@@ -21,7 +21,9 @@ use crate::randomness::{
     poisson_count, uniform_u64_below,
 };
 use crate::reference::{Reference, ReferenceSequence};
-use crate::stutter::{StutterAccumulator, StutterPlan, StutterReport};
+use crate::stutter::{
+    StutterAccumulator, StutterError, StutterPlan, StutterReport, StutterTractIndex,
+};
 use crate::technical_identity::{
     F4TechnicalIdentityDeriver, TechnicalIdentityPlan, TechnicalTemplateIdentity, TemplateOrdinal,
 };
@@ -588,6 +590,11 @@ pub struct WgsPairedEndSampler<'a> {
     /// modo que un muestreador construido sin él se comporta exactamente como
     /// antes de que el tartamudeo existiera.
     stutter_plan: StutterPlan,
+    /// Tractos del plan situados en cada copia de la individua, construidos
+    /// una sola vez al conectar el plan (F6.4.a.7). Guarda el error, si lo
+    /// hubo, para devolverlo en la primera pareja que lo necesite, que es
+    /// cuando se notaba antes.
+    stutter_tracts: Result<StutterTractIndex, StutterError>,
     stutter_accumulator: StutterAccumulator,
     /// Plan de amplificación del evento. Apagado por omisión, y con él apagado
     /// **no se abre ni una sola decisión nueva**: es lo que conserva byte a
@@ -824,6 +831,7 @@ impl<'a> WgsPairedEndSampler<'a> {
             chimera_settings,
             chimera_accumulator: ChimeraAccumulator::default(),
             stutter_plan: StutterPlan::default(),
+            stutter_tracts: Ok(StutterTractIndex::default()),
             stutter_accumulator: StutterAccumulator::default(),
             pcr_plan: PcrPlan::default(),
             pcr_accumulator: PcrAccumulator::default(),
@@ -852,8 +860,22 @@ impl<'a> WgsPairedEndSampler<'a> {
     /// Conecta el plan de tartamudeo del evento al productor PE.
     #[must_use]
     pub fn with_stutter_plan(mut self, plan: StutterPlan) -> Self {
+        // Con el plan apagado no se sitúa nada: ni el tartamudeo de base ni el
+        // linaje consultan el índice.
+        self.stutter_tracts = if plan.is_active() {
+            StutterTractIndex::build(self.individual, &plan)
+        } else {
+            Ok(StutterTractIndex::default())
+        };
         self.stutter_plan = plan;
         self
+    }
+
+    /// El índice de tractos de la individua, o el error que dio construirlo.
+    fn stutter_tracts(&self) -> Result<&StutterTractIndex, WgsSamplingError> {
+        self.stutter_tracts
+            .as_ref()
+            .map_err(|error| WgsSamplingError::Stutter(error.clone()))
     }
 
     /// Conecta el plan de amplificación del evento al productor PE.
@@ -1258,7 +1280,7 @@ impl<'a> WgsPairedEndSampler<'a> {
         let length =
             u64::try_from(molecule.sequence.len()).map_err(|_| WgsSamplingError::LengthOverflow)?;
         let placements = crate::stutter::place_tracts(
-            self.individual,
+            self.stutter_tracts()?,
             &self.stutter_plan,
             &molecule.copy_id,
             molecule.start,
@@ -1366,7 +1388,7 @@ impl<'a> WgsPairedEndSampler<'a> {
         let stuttered = crate::stutter::transform_paired_end(
             self.identities.root_seed(),
             event_id,
-            self.individual,
+            self.stutter_tracts()?,
             &self.stutter_plan,
             lineage.as_ref(),
             chimera_origin.as_ref(),

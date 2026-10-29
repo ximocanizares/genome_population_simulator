@@ -6,7 +6,7 @@
 //! piezas vigentes y devuelve una entrada por copia y alelo alternativo.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::reference::{Reference, ReferenceSequence};
 use crate::truth_schema::{
@@ -422,15 +422,11 @@ pub(crate) fn project_view_from_validated_truth<'truth>(
             .iter()
             .filter(|path| path.sequence_id == sequence_id)
             .collect::<Vec<_>>();
-        let realized_tracts = sequence_paths
-            .iter()
-            .flat_map(|path| path.replaced_tracts())
-            .map(|(start, end, _)| ReferenceSpan { start, end })
-            .collect::<Vec<_>>();
+        let realized = RealizedTracts::new(&sequence_paths);
         let mut alleles = Vec::new();
         for path in &sequence_paths {
             let (path_alleles, unchanged) =
-                normalize_path_components(path, sequence, &components, &realized_tracts)?;
+                normalize_path_components(path, sequence, &components, &realized)?;
             alleles.extend(path_alleles);
             reference_windows.extend(unchanged.into_iter().map(|span| CopyReferenceWindow {
                 copy: path.identity,
@@ -457,10 +453,7 @@ pub(crate) fn project_view_from_validated_truth<'truth>(
             })
             .collect::<BTreeMap<_, _>>();
         projected.extend(fuse_overlapping_alleles(
-            alleles,
-            sequence,
-            &sequence_paths,
-            &loci,
+            alleles, sequence, &realized, &loci,
         )?);
     }
 
@@ -522,6 +515,24 @@ enum PathPiece<'truth> {
         /// publica como secuencias repetidas del alelo.
         blocks: &'truth [TruthRepeatBlock],
     },
+}
+
+impl PathPiece<'_> {
+    /// Primera base de referencia de la pieza; el punto, en una inserción.
+    const fn reference_start(&self) -> u64 {
+        match self {
+            Self::Source { start, .. } | Self::Replaced { start, .. } => *start,
+            Self::Inserted { anchor, .. } => *anchor,
+        }
+    }
+
+    /// Fin de la pieza en la referencia; el punto, en una inserción.
+    const fn reference_end(&self) -> u64 {
+        match self {
+            Self::Source { end, .. } | Self::Replaced { end, .. } => *end,
+            Self::Inserted { anchor, .. } => *anchor,
+        }
+    }
 }
 
 impl<'truth> CopyPath<'truth> {
@@ -646,6 +657,25 @@ impl<'truth> CopyPath<'truth> {
         changes
     }
 
+    /// Las piezas que **pueden** tocar la ventana `[from, end]`: todas las que
+    /// las búsquedas de abajo aceptarían y quizá alguna más, nunca una menos.
+    ///
+    /// Las piezas de una copia van en el orden de la referencia —`from_truth`
+    /// exige que cada fuente empiece donde acabó la anterior o después, y una
+    /// inserción va en el fin de la fuente anterior—, así que sus inicios y
+    /// sus fines (el punto, en una inserción) no decrecen. Basta con dos
+    /// búsquedas binarias en vez de recorrer todas las piezas en cada ventana,
+    /// que con miles de loci era copias × ventanas × piezas (F6.4.a.8b).
+    fn pieces_near(&self, from: u64, end: u64) -> &[PathPiece<'truth>] {
+        let first = self
+            .pieces
+            .partition_point(|piece| piece.reference_end() < from);
+        let last = self
+            .pieces
+            .partition_point(|piece| piece.reference_start() <= end);
+        self.pieces.get(first..last).unwrap_or_default()
+    }
+
     fn materialize_window(
         &self,
         sequence: &ReferenceSequence,
@@ -672,7 +702,7 @@ impl<'truth> CopyPath<'truth> {
         insertions_from: u64,
     ) -> Result<Vec<u8>, VcfProjectionError> {
         let mut output = Vec::new();
-        for piece in &self.pieces {
+        for piece in self.pieces_near(start.min(insertions_from), end) {
             match piece {
                 PathPiece::Source {
                     start: piece_start,
@@ -736,7 +766,7 @@ impl<'truth> CopyPath<'truth> {
     /// que usa [`Self::materialize_window`], que además rechaza una ventana que
     /// partiera un tracto por la mitad: aquí no puede colarse media anotación.
     fn repeat_blocks_in(&self, start: u64, end: u64) -> Vec<Cow<'truth, TruthRepeatBlock>> {
-        self.pieces
+        self.pieces_near(start, end)
             .iter()
             .filter_map(|piece| match piece {
                 PathPiece::Replaced {
@@ -755,12 +785,14 @@ impl<'truth> CopyPath<'truth> {
     /// Inicio del tracto realizado de esta copia que contiene la base
     /// `position`, si lo hay.
     fn replaced_piece_start_containing(&self, position: u64) -> Option<u64> {
-        self.pieces.iter().find_map(|piece| match piece {
-            PathPiece::Replaced { start, end, .. } if *start <= position && position < *end => {
-                Some(*start)
-            }
-            _ => None,
-        })
+        self.pieces_near(position, position)
+            .iter()
+            .find_map(|piece| match piece {
+                PathPiece::Replaced { start, end, .. } if *start <= position && position < *end => {
+                    Some(*start)
+                }
+                _ => None,
+            })
     }
 
     /// Tractos realizados de esta copia: intervalo de referencia y bloques.
@@ -774,15 +806,126 @@ impl<'truth> CopyPath<'truth> {
     }
 
     fn direct_insertion_at(&self, anchor: u64) -> Option<&'truth str> {
-        let mut inserted = self.pieces.iter().filter_map(|piece| match piece {
-            PathPiece::Inserted {
-                anchor: piece_anchor,
-                bases,
-            } if *piece_anchor == anchor => Some(*bases),
-            _ => None,
-        });
+        let mut inserted =
+            self.pieces_near(anchor, anchor)
+                .iter()
+                .filter_map(|piece| match piece {
+                    PathPiece::Inserted {
+                        anchor: piece_anchor,
+                        bases,
+                    } if *piece_anchor == anchor => Some(*bases),
+                    _ => None,
+                });
         let bases = inserted.next()?;
         inserted.next().is_none().then_some(bases)
+    }
+}
+
+/// Los tractos que realizan las copias de una secuencia, ordenados por inicio,
+/// para consultarlos por intervalo (F6.4.a.8b).
+///
+/// Antes, cada registro con tracto, cada componente de cada copia y cada
+/// portadora recorrían **todos los tractos de todas las copias** de la
+/// secuencia: registros × copias × loci. Aquí se recogen una vez por
+/// secuencia y cada consulta mira solo los que pueden tocarla.
+struct RealizedTracts<'truth> {
+    /// Ordenados por `(inicio, fin, orden)`; `orden` es la posición del
+    /// tracto al recorrer las copias y sus piezas como antes, de modo que los
+    /// del mismo intervalo salen en el orden de las copias.
+    tracts: Vec<RealizedTract<'truth>>,
+    /// `reach[i]` es el mayor fin de `tracts[..=i]`.
+    reach: Vec<u64>,
+    /// La primera copia con cada identidad, por su posición en la lista.
+    paths: BTreeMap<&'truth CopyIdentity, usize>,
+    /// Los bloques del **primer** tracto de cada copia con cada intervalo.
+    blocks: BTreeMap<(usize, u64, u64), &'truth [TruthRepeatBlock]>,
+}
+
+struct RealizedTract<'truth> {
+    start: u64,
+    end: u64,
+    order: usize,
+    blocks: &'truth [TruthRepeatBlock],
+}
+
+impl<'truth> RealizedTracts<'truth> {
+    fn new(paths: &[&CopyPath<'truth>]) -> Self {
+        let mut tracts = Vec::new();
+        let mut blocks = BTreeMap::new();
+        let mut by_identity = BTreeMap::new();
+        for (path_index, path) in paths.iter().enumerate() {
+            by_identity.entry(path.identity).or_insert(path_index);
+            for (start, end, declared) in path.replaced_tracts() {
+                blocks.entry((path_index, start, end)).or_insert(declared);
+                tracts.push(RealizedTract {
+                    start,
+                    end,
+                    order: tracts.len(),
+                    blocks: declared,
+                });
+            }
+        }
+        tracts.sort_by_key(|tract| (tract.start, tract.end, tract.order));
+        let mut furthest = 0_u64;
+        let reach = tracts
+            .iter()
+            .map(|tract| {
+                furthest = furthest.max(tract.end);
+                furthest
+            })
+            .collect();
+        Self {
+            tracts,
+            reach,
+            paths: by_identity,
+            blocks,
+        }
+    }
+
+    /// Los tractos que empiezan en `[from, to]`, en su orden.
+    fn starting_in(&self, from: u64, to: u64) -> impl Iterator<Item = &RealizedTract<'truth>> {
+        let first = self.tracts.partition_point(|tract| tract.start < from);
+        let last = self.tracts.partition_point(|tract| tract.start <= to);
+        self.tracts.get(first..last).unwrap_or_default().iter()
+    }
+
+    /// Los tractos que **pueden** pisar `[from, to)`: todos los que lo pisan y
+    /// quizá alguno más, nunca uno menos; quien llama aplica la condición
+    /// exacta. El límite inferior usa el fin **acumulado**, de modo que no se
+    /// pierde un tracto que empieza antes de `from` y acaba dentro.
+    fn overlapping(&self, from: u64, to: u64) -> impl Iterator<Item = &RealizedTract<'truth>> {
+        let first = self.reach.partition_point(|reach| *reach <= from);
+        let last = self.tracts.partition_point(|tract| tract.start < to);
+        self.tracts.get(first..last).unwrap_or_default().iter()
+    }
+
+    /// Los tractos que **pueden** contener la base `position` y acabar
+    /// después de `after`: todos los que empiezan en `position` o antes y
+    /// cuyo fin acumulado pasa de `after`. Quien llama aplica la condición
+    /// exacta.
+    fn containing(
+        &self,
+        position: u64,
+        after: u64,
+    ) -> impl Iterator<Item = &RealizedTract<'truth>> {
+        let last = self.tracts.partition_point(|tract| tract.start <= position);
+        self.tracts[..last]
+            .iter()
+            .zip(&self.reach[..last])
+            .rev()
+            .take_while(move |(_, reach)| **reach > after)
+            .map(|(tract, _)| tract)
+    }
+
+    /// Posición de la primera copia con esa identidad.
+    fn path_of(&self, copy: &CopyIdentity) -> Option<usize> {
+        self.paths.get(copy).copied()
+    }
+
+    /// Los bloques del primer tracto de la copia `path` con exactamente ese
+    /// intervalo.
+    fn blocks_of(&self, path: usize, start: u64, end: u64) -> Option<&'truth [TruthRepeatBlock]> {
+        self.blocks.get(&(path, start, end)).copied()
     }
 }
 
@@ -836,7 +979,7 @@ fn normalize_path_components<'truth>(
     path: &CopyPath<'truth>,
     sequence: &ReferenceSequence,
     initial: &[ReferenceSpan],
-    realized_tracts: &[ReferenceSpan],
+    realized: &RealizedTracts<'_>,
 ) -> Result<(Vec<ProjectedAllele<'truth>>, Vec<ReferenceSpan>), VcfProjectionError> {
     let mut components = initial.to_vec();
     loop {
@@ -847,7 +990,7 @@ fn normalize_path_components<'truth>(
                 let free = normalize_path_window(path, sequence, span, 0)?;
                 match free
                     .as_ref()
-                    .and_then(|allele| left_alignment_floor(realized_tracts, span, allele.position))
+                    .and_then(|allele| left_alignment_floor(realized, span, allele.position))
                 {
                     Some(floor) => normalize_path_window(path, sequence, span, floor),
                     None => Ok(free),
@@ -941,9 +1084,14 @@ fn normalization_traversal_closures(
             start: span.start.min(allele.position),
             end: span.end.max(normalized_end),
         };
-        let contained = components
+        // Los componentes están ordenados y no se solapan: los que caben en
+        // el tramo atravesado empiezan en `[traversed.start, traversed.end]`,
+        // y basta con mirar esos en vez de todos (F6.4.a.8b).
+        let first = components.partition_point(|component| component.start < traversed.start);
+        let contained = components[first..]
             .iter()
             .copied()
+            .take_while(|component| component.start <= traversed.end)
             .filter(|component| span_is_within(*component, traversed))
             .collect::<Vec<_>>();
         if contained.len() > 1 {
@@ -1132,12 +1280,12 @@ impl DisjointComponents {
 /// la copia que realiza el tracto se anotaba con más bases de repetición de las
 /// que su `ALT` lleva (segunda revisión del 2 de octubre de 2026).
 fn left_alignment_floor(
-    realized_tracts: &[ReferenceSpan],
+    realized: &RealizedTracts<'_>,
     span: ReferenceSpan,
     position: u64,
 ) -> Option<u64> {
-    realized_tracts
-        .iter()
+    realized
+        .containing(position, position + 1)
         .filter(|tract| {
             tract.end <= span.start && tract.start <= position && position + 1 < tract.end
         })
@@ -1387,7 +1535,7 @@ impl BuiltGroup<'_> {
 fn fuse_overlapping_alleles<'truth>(
     alleles: Vec<ProjectedAllele<'truth>>,
     sequence: &ReferenceSequence,
-    paths: &[&CopyPath<'truth>],
+    realized: &RealizedTracts<'truth>,
     loci: &BTreeMap<(u64, u64), &'truth str>,
 ) -> Result<Vec<ProjectedAllele<'truth>>, VcfProjectionError> {
     if alleles.is_empty() {
@@ -1417,7 +1565,7 @@ fn fuse_overlapping_alleles<'truth>(
     loop {
         let built = groups
             .iter()
-            .map(|group| build_fusion_group(group, &alleles, &intervals, sequence, paths, loci))
+            .map(|group| build_fusion_group(group, &alleles, &intervals, sequence, realized, loci))
             .collect::<Result<Vec<_>, _>>()?;
         // **El punto fijo no se ha visto actuar, y se cree inalcanzable**,
         // dicho sin adornos (revisión del 2 de octubre de 2026, mutante R02):
@@ -1490,7 +1638,7 @@ fn build_fusion_group<'truth>(
     alleles: &[ProjectedAllele<'truth>],
     intervals: &[ReferenceSpan],
     sequence: &ReferenceSequence,
-    paths: &[&CopyPath<'truth>],
+    realized: &RealizedTracts<'truth>,
     loci: &BTreeMap<(u64, u64), &'truth str>,
 ) -> Result<BuiltGroup<'truth>, VcfProjectionError> {
     let first = &alleles[group[0]];
@@ -1529,19 +1677,14 @@ fn build_fusion_group<'truth>(
     // `ALT` lleva el tracto entero de la copia. Un alelo que no cruzó ningún
     // tracto no ensancha nada.
     if contains_tract {
-        let realized = paths
-            .iter()
-            .flat_map(|path| path.replaced_tracts())
-            .map(|(start, end, _)| (start, end))
-            .collect::<BTreeSet<_>>();
         let inside = window;
         for index in group {
             let allele = &alleles[*index];
-            let crossed = realized.iter().any(|(start, end)| {
-                inside.start <= *start
-                    && *end <= inside.end
-                    && allele.position < *start
-                    && *end < allele.source_end
+            let crossed = realized.starting_in(inside.start, inside.end).any(|tract| {
+                inside.start <= tract.start
+                    && tract.end <= inside.end
+                    && allele.position < tract.start
+                    && tract.end < allele.source_end
             });
             if crossed {
                 window.end = window.end.max(allele.source_end);
@@ -1632,14 +1775,14 @@ fn build_fusion_group<'truth>(
             .ok_or(VcfProjectionError::CoordinateOverflow)?,
     };
     let tracts = if contains_tract {
-        tracts_in(paths, window, first.sequence_id)?
+        tracts_in(realized, window, first.sequence_id)?
     } else {
         Vec::new()
     };
     let carriers = spliced.iter().map(|(copy, _, _)| *copy).collect::<Vec<_>>();
     let annotations = if contains_tract {
         annotate_tract_alleles(
-            paths,
+            realized,
             &carriers,
             &record[1..],
             &TractRecord {
@@ -1741,24 +1884,35 @@ struct FusedTract<'truth> {
 }
 
 fn tracts_in<'truth>(
-    paths: &[&CopyPath<'truth>],
+    realized: &RealizedTracts<'truth>,
     window: ReferenceSpan,
     sequence_id: &str,
 ) -> Result<Vec<FusedTract<'truth>>, VcfProjectionError> {
     let mut tracts = BTreeMap::<(u64, u64), Vec<&'truth [TruthRepeatBlock]>>::new();
-    for path in paths {
-        for (start, end, blocks) in path.replaced_tracts() {
-            if start < window.end && window.start < end {
-                if start < window.start || window.end < end {
-                    return Err(VcfProjectionError::TractOutsideFusedRecord {
-                        sequence_id: sequence_id.to_owned(),
-                        start,
-                        end,
-                    });
-                }
-                tracts.entry((start, end)).or_default().push(blocks);
-            }
+    // El rechazo nombra el primer tracto que se sale **en el orden de las
+    // copias y sus piezas**, el de siempre, aunque el índice los dé por inicio.
+    let mut outside: Option<&RealizedTract<'truth>> = None;
+    for tract in realized.overlapping(window.start, window.end) {
+        if !(tract.start < window.end && window.start < tract.end) {
+            continue;
         }
+        if tract.start < window.start || window.end < tract.end {
+            if outside.is_none_or(|first| tract.order < first.order) {
+                outside = Some(tract);
+            }
+            continue;
+        }
+        tracts
+            .entry((tract.start, tract.end))
+            .or_default()
+            .push(tract.blocks);
+    }
+    if let Some(tract) = outside {
+        return Err(VcfProjectionError::TractOutsideFusedRecord {
+            sequence_id: sequence_id.to_owned(),
+            start: tract.start,
+            end: tract.end,
+        });
     }
     Ok(tracts
         .into_iter()
@@ -1790,21 +1944,17 @@ fn tracts_in<'truth>(
 /// motivo: con un locus compuesto se rechaza con un diagnóstico que nombra el
 /// locus.
 fn annotate_tract_alleles<'truth>(
-    paths: &[&CopyPath<'truth>],
+    realized: &RealizedTracts<'truth>,
     carriers: &[&'truth CopyIdentity],
     alternates: &[Vec<u8>],
     record: &TractRecord<'_, 'truth>,
 ) -> Result<Vec<Vec<Cow<'truth, TruthRepeatBlock>>>, VcfProjectionError> {
     let mut annotations = Vec::with_capacity(carriers.len());
     for copy in carriers {
-        let path = paths.iter().find(|path| path.identity == *copy);
+        let path = realized.path_of(copy);
         let mut blocks = Vec::new();
         for tract in record.tracts {
-            let declared = path.and_then(|path| {
-                path.replaced_tracts()
-                    .find(|(start, end, _)| *start == tract.start && *end == tract.end)
-                    .map(|(_, _, blocks)| blocks)
-            });
+            let declared = path.and_then(|path| realized.blocks_of(path, tract.start, tract.end));
             match declared {
                 Some(declared) => blocks.extend(declared.iter().map(Cow::Borrowed)),
                 None => blocks.extend(reference_tract_blocks(tract, record)?),
@@ -3126,5 +3276,495 @@ mod tests {
                 "chr1\t1\t.\tCA\tC\t.\t.\t.",
             ]
         );
+    }
+
+    /// **F6.4.a.8b. Los índices de la proyección no pierden el tracto que
+    /// empieza antes de la ventana y acaba dentro, ni la pieza larga que la
+    /// contiene.**
+    ///
+    /// La copia `S1/0` realiza un tracto largo, `[100, 400)`, y otro corto,
+    /// `[450, 460)`; la `S1/1` realiza solo el corto y lleva una inserción en
+    /// 600. La ventana `[300, 455)` la pisa el tracto largo, que empieza
+    /// **antes**: un índice que buscara el primer candidato por su inicio lo
+    /// perdería y solo vería los dos cortos. Lo mismo con las piezas de una
+    /// copia: la ventana `[300, 305]` cae dentro de la pieza sustituida
+    /// `[100, 400)`, que empieza mucho antes. Las consultas devuelven un
+    /// superconjunto y quien llama aplica la condición exacta; aquí se exige
+    /// el conjunto exacto después de aplicarla, y el orden de las copias
+    /// dentro de un mismo intervalo.
+    #[test]
+    fn realized_tracts_and_piece_windows_keep_what_starts_before_the_window() {
+        let first = CopyIdentity {
+            reference_id: "REF_main".into(),
+            individual_id: "S1".into(),
+            sequence_id: "chr1".into(),
+            copy_index: 0,
+        };
+        let second = CopyIdentity {
+            copy_index: 1,
+            ..first.clone()
+        };
+        let long = vec![TruthRepeatBlock {
+            motif: "CA".into(),
+            bases: 300,
+        }];
+        let short_first = vec![TruthRepeatBlock {
+            motif: "GT".into(),
+            bases: 10,
+        }];
+        let short_second = vec![TruthRepeatBlock {
+            motif: "GT".into(),
+            bases: 12,
+        }];
+        let long_bases = "CA".repeat(150);
+        let source = |start: u64, end: u64| PathPiece::Source {
+            start,
+            end,
+            snps: &[],
+        };
+        let path_first = CopyPath {
+            identity: &first,
+            sequence_id: "chr1",
+            pieces: vec![
+                source(0, 100),
+                PathPiece::Replaced {
+                    start: 100,
+                    end: 400,
+                    bases: &long_bases,
+                    blocks: &long,
+                },
+                source(400, 450),
+                PathPiece::Replaced {
+                    start: 450,
+                    end: 460,
+                    bases: "GTGTGTGTGT",
+                    blocks: &short_first,
+                },
+                source(460, 1000),
+            ],
+        };
+        let path_second = CopyPath {
+            identity: &second,
+            sequence_id: "chr1",
+            pieces: vec![
+                source(0, 450),
+                PathPiece::Replaced {
+                    start: 450,
+                    end: 460,
+                    bases: "GTGTGTGTGTGT",
+                    blocks: &short_second,
+                },
+                source(460, 600),
+                PathPiece::Inserted {
+                    anchor: 600,
+                    bases: "TTT",
+                },
+                source(600, 1000),
+            ],
+        };
+        let realized = RealizedTracts::new(&[&path_first, &path_second]);
+        let spans = |tracts: Vec<&RealizedTract<'_>>| {
+            tracts
+                .into_iter()
+                .map(|tract| (tract.start, tract.end, tract.blocks[0].bases))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            spans(
+                realized
+                    .overlapping(300, 455)
+                    .filter(|tract| tract.start < 455 && 300 < tract.end)
+                    .collect()
+            ),
+            vec![(100, 400, 300), (450, 460, 10), (450, 460, 12)]
+        );
+        assert_eq!(
+            spans(
+                realized
+                    .containing(300, 301)
+                    .filter(|tract| tract.start <= 300 && 301 < tract.end)
+                    .collect()
+            ),
+            vec![(100, 400, 300)]
+        );
+        assert_eq!(
+            spans(realized.starting_in(440, 460).collect()),
+            vec![(450, 460, 10), (450, 460, 12)]
+        );
+        assert_eq!(realized.path_of(&second), Some(1));
+        assert_eq!(realized.blocks_of(1, 450, 460), Some(&short_second[..]));
+        assert_eq!(realized.blocks_of(1, 100, 400), None);
+
+        assert!(
+            path_first
+                .pieces_near(300, 305)
+                .iter()
+                .any(|piece| matches!(piece, PathPiece::Replaced { start: 100, .. })),
+            "la pieza sustituida que contiene la ventana"
+        );
+        assert_eq!(path_first.replaced_piece_start_containing(399), Some(100));
+        assert_eq!(path_first.replaced_piece_start_containing(400), None);
+        assert_eq!(path_second.direct_insertion_at(600), Some("TTT"));
+        assert_eq!(path_second.direct_insertion_at(599), None);
+        assert_eq!(path_first.repeat_blocks_in(300, 455).len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Los índices de tractos y de piezas contra el recorrido completo
+    //
+    // La entrega 2 sustituyó el recorrido de todos los tractos por índices
+    // (ordenar, fin máximo acumulado, búsqueda binaria). Estas pruebas dejan
+    // al recorrido completo como **oráculo independiente del índice**: se
+    // reescribe aquí con filtros lineales y se compara con lo que devuelve
+    // cada consulta sobre entradas aleatorias de semilla fija.
+    // -----------------------------------------------------------------------
+
+    /// Generador xorshift de semilla fija: las pruebas son deterministas.
+    struct XorShift(u64);
+
+    impl XorShift {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        fn below(&mut self, bound: u64) -> u64 {
+            self.next() % bound
+        }
+    }
+
+    fn property_identity(index: u8) -> CopyIdentity {
+        CopyIdentity {
+            reference_id: "REF_main".into(),
+            individual_id: format!("S{}", index / 2),
+            sequence_id: "chr1".into(),
+            copy_index: index % 2,
+        }
+    }
+
+    /// Piezas aleatorias de una copia: tractos reemplazados (alguno largo,
+    /// para que el fin acumulado difiera del fin propio), tramos fuente e
+    /// inserciones, con huecos de 0 a 2 bases.
+    fn random_pieces<'a>(rng: &mut XorShift, blocks: &'a [TruthRepeatBlock]) -> Vec<PathPiece<'a>> {
+        let mut pieces = Vec::new();
+        let mut position = rng.below(5);
+        for _ in 0..rng.below(6) {
+            match rng.below(4) {
+                0 | 1 => {
+                    let long = rng.below(4) == 0;
+                    let length = 1 + rng.below(if long { 60 } else { 6 });
+                    pieces.push(PathPiece::Replaced {
+                        start: position,
+                        end: position + length,
+                        bases: "CA",
+                        blocks,
+                    });
+                    position += length;
+                }
+                2 => {
+                    let length = 1 + rng.below(5);
+                    pieces.push(PathPiece::Source {
+                        start: position,
+                        end: position + length,
+                        snps: &[],
+                    });
+                    position += length;
+                }
+                _ => pieces.push(PathPiece::Inserted {
+                    anchor: position,
+                    bases: "T",
+                }),
+            }
+            position += rng.below(3);
+        }
+        pieces
+    }
+
+    fn property_blocks() -> [Vec<TruthRepeatBlock>; 2] {
+        [
+            vec![TruthRepeatBlock {
+                motif: "CA".into(),
+                bases: 2,
+            }],
+            vec![TruthRepeatBlock {
+                motif: "GT".into(),
+                bases: 4,
+            }],
+        ]
+    }
+
+    #[test]
+    fn realized_tract_queries_match_a_full_scan_on_random_inputs() {
+        // Oráculo: el recorrido completo de `replaced_tracts`, sin índice.
+        let blocks = property_blocks();
+        let identities = (0..8).map(property_identity).collect::<Vec<_>>();
+        let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
+        for _round in 0..1500 {
+            let paths = (0..1 + rng.below(5) as usize)
+                .map(|index| CopyPath {
+                    // Identidades repetidas a propósito: gana la primera.
+                    identity: &identities[rng.below(4) as usize],
+                    sequence_id: "chr1",
+                    pieces: random_pieces(&mut rng, &blocks[index % 2]),
+                })
+                .collect::<Vec<_>>();
+            let refs = paths.iter().collect::<Vec<_>>();
+            let realized = RealizedTracts::new(&refs);
+            let all = refs
+                .iter()
+                .flat_map(|path| path.replaced_tracts())
+                .map(|(start, end, _)| (start, end))
+                .collect::<Vec<_>>();
+            for _query in 0..20 {
+                // Un tercio de las consultas arranca justo en el inicio de un
+                // tracto: el borde que un `<` en vez de `<=` perdería.
+                let from = if !all.is_empty() && rng.below(3) == 0 {
+                    all[rng.below(all.len() as u64) as usize].0
+                } else {
+                    rng.below(80)
+                };
+                let to = from + rng.below(30);
+
+                let mut got = realized
+                    .overlapping(from, to)
+                    .filter(|tract| tract.start < to && from < tract.end)
+                    .map(|tract| (tract.start, tract.end, tract.order))
+                    .collect::<Vec<_>>();
+                let mut want = refs
+                    .iter()
+                    .flat_map(|path| path.replaced_tracts())
+                    .enumerate()
+                    .filter(|(_, (start, end, _))| *start < to && from < *end)
+                    .map(|(order, (start, end, _))| (start, end, order))
+                    .collect::<Vec<_>>();
+                got.sort_unstable();
+                want.sort_unstable();
+                assert_eq!(got, want, "overlapping({from}, {to})");
+
+                let got = realized
+                    .containing(from, from + 1)
+                    .filter(|tract| tract.start <= from && from + 1 < tract.end)
+                    .count();
+                let want = all
+                    .iter()
+                    .filter(|(start, end)| *start <= from && from + 1 < *end)
+                    .count();
+                assert_eq!(got, want, "containing({from}, {})", from + 1);
+
+                let got = realized.starting_in(from, to).count();
+                let want = all
+                    .iter()
+                    .filter(|(start, _)| from <= *start && *start <= to)
+                    .count();
+                assert_eq!(got, want, "starting_in({from}, {to})");
+
+                let span = ReferenceSpan {
+                    start: to,
+                    end: to + 3,
+                };
+                let want = all
+                    .iter()
+                    .filter(|(start, end)| *end <= span.start && *start <= from && from + 1 < *end)
+                    .map(|(_, end)| end - 1)
+                    .max();
+                assert_eq!(
+                    left_alignment_floor(&realized, span, from),
+                    want,
+                    "left_alignment_floor({from}, span.start = {to})"
+                );
+
+                // `tracts_in` contra el recorrido completo de antes del índice.
+                let window = ReferenceSpan {
+                    start: from,
+                    end: to,
+                };
+                let mut expected = BTreeMap::<(u64, u64), Vec<*const TruthRepeatBlock>>::new();
+                let mut expected_error = None;
+                'scan: for path in &refs {
+                    for (start, end, declared) in path.replaced_tracts() {
+                        if start < window.end && window.start < end {
+                            if start < window.start || window.end < end {
+                                expected_error = Some((start, end));
+                                break 'scan;
+                            }
+                            expected
+                                .entry((start, end))
+                                .or_default()
+                                .push(declared.as_ptr());
+                        }
+                    }
+                }
+                match (tracts_in(&realized, window, "chr1"), expected_error) {
+                    (
+                        Err(VcfProjectionError::TractOutsideFusedRecord { start, end, .. }),
+                        Some(e),
+                    ) => {
+                        assert_eq!((start, end), e, "tracts_in({from}, {to}) error");
+                    }
+                    (Ok(fused), None) => {
+                        let fused = fused
+                            .iter()
+                            .map(|tract| {
+                                (
+                                    (tract.start, tract.end),
+                                    tract
+                                        .declared
+                                        .iter()
+                                        .map(|d| d.as_ptr())
+                                        .collect::<Vec<_>>(),
+                                )
+                            })
+                            .collect::<BTreeMap<_, _>>();
+                        assert_eq!(fused, expected, "tracts_in({from}, {to})");
+                    }
+                    (got, want) => panic!(
+                        "tracts_in({from}, {to}) diverges: ok = {} vs error = {want:?}",
+                        got.is_ok()
+                    ),
+                }
+
+                // `path_of` y `blocks_of` contra la búsqueda lineal.
+                let copy = &identities[rng.below(5) as usize];
+                let linear = refs.iter().position(|path| path.identity == copy);
+                assert_eq!(realized.path_of(copy), linear, "path_of");
+                if let Some(index) = linear {
+                    for &(start, end) in &all {
+                        let want = refs[index]
+                            .replaced_tracts()
+                            .find(|(s, e, _)| *s == start && *e == end)
+                            .map(|(_, _, declared)| declared.as_ptr());
+                        let got = realized
+                            .blocks_of(index, start, end)
+                            .map(<[TruthRepeatBlock]>::as_ptr);
+                        assert_eq!(got, want, "blocks_of({index}, {start}, {end})");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn path_piece_queries_match_a_full_scan_on_random_inputs() {
+        // Oráculo: el recorrido de todas las piezas con el predicado exacto
+        // de cada consulta; `pieces_near` solo puede devolver de más.
+        let blocks = property_blocks();
+        let identity = property_identity(0);
+        let mut rng = XorShift(0xD1B5_4A32_D192_ED03);
+        for _round in 0..1500 {
+            let which = rng.below(2) as usize;
+            let path = CopyPath {
+                identity: &identity,
+                sequence_id: "chr1",
+                pieces: random_pieces(&mut rng, &blocks[which]),
+            };
+            for _query in 0..10 {
+                let from = rng.below(80);
+                let end = from + rng.below(30);
+                let insertions_from = from.saturating_sub(rng.below(3));
+                let near = path.pieces_near(from.min(insertions_from), end);
+                let near = near
+                    .iter()
+                    .map(|piece| piece as *const _)
+                    .collect::<Vec<_>>();
+                for piece in &path.pieces {
+                    let accepted = match piece {
+                        PathPiece::Source {
+                            start, end: stop, ..
+                        }
+                        | PathPiece::Replaced {
+                            start, end: stop, ..
+                        } => *start < end && from < *stop,
+                        PathPiece::Inserted { anchor, .. } => {
+                            insertions_from <= *anchor && *anchor <= end
+                        }
+                    };
+                    assert!(
+                        !accepted || near.contains(&(piece as *const _)),
+                        "pieces_near({from}, {end}) lost {piece:?}"
+                    );
+                }
+
+                let containing = path.pieces.iter().find_map(|piece| match piece {
+                    PathPiece::Replaced { start, end, .. } if *start <= from && from < *end => {
+                        Some(*start)
+                    }
+                    _ => None,
+                });
+                assert_eq!(
+                    path.replaced_piece_start_containing(from),
+                    containing,
+                    "replaced_piece_start_containing({from})"
+                );
+
+                let mut inserted = path.pieces.iter().filter_map(|piece| match piece {
+                    PathPiece::Inserted { anchor, bases } if *anchor == from => Some(*bases),
+                    _ => None,
+                });
+                let direct = inserted
+                    .next()
+                    .and_then(|bases| inserted.next().is_none().then_some(bases));
+                assert_eq!(
+                    path.direct_insertion_at(from),
+                    direct,
+                    "direct_insertion_at({from})"
+                );
+
+                let repeat_blocks = path
+                    .pieces
+                    .iter()
+                    .filter_map(|piece| match piece {
+                        PathPiece::Replaced {
+                            start,
+                            end: stop,
+                            blocks,
+                            ..
+                        } if *start < end && from < *stop => Some(*blocks),
+                        _ => None,
+                    })
+                    .flatten()
+                    .count();
+                assert_eq!(
+                    path.repeat_blocks_in(from, end).len(),
+                    repeat_blocks,
+                    "repeat_blocks_in({from}, {end})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn containing_keeps_a_tract_that_starts_exactly_at_the_anchor_base() {
+        // Un tracto [10, 20) que empieza **en** `position`, la base de
+        // anclaje: `containing` debe devolverlo, y con `<` en lugar de `<=`
+        // en su búsqueda binaria desaparecería. Los tractos [0, 5) y [2, 9)
+        // van antes y su fin acumulado no pasa de `after`.
+        let blocks = property_blocks();
+        let identity = property_identity(0);
+        let piece = |start, end| PathPiece::Replaced {
+            start,
+            end,
+            bases: "CA",
+            blocks: &blocks[0],
+        };
+        let path = CopyPath {
+            identity: &identity,
+            sequence_id: "chr1",
+            pieces: vec![piece(0, 5), piece(2, 9), piece(10, 20)],
+        };
+        let realized = RealizedTracts::new(&[&path]);
+        let found = realized
+            .containing(10, 11)
+            .filter(|tract| tract.start <= 10 && 11 < tract.end)
+            .map(|tract| (tract.start, tract.end))
+            .collect::<Vec<_>>();
+        assert_eq!(found, vec![(10, 20)]);
+        // Un paso a la izquierda, el tracto ya no cuenta como contenedor.
+        let found = realized
+            .containing(9, 10)
+            .filter(|tract| tract.start <= 9 && 10 < tract.end)
+            .count();
+        assert_eq!(found, 0);
     }
 }

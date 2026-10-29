@@ -69,12 +69,42 @@ impl ExpectedConfigKind {
 pub struct AdmittedToml {
     path: PathBuf,
     bytes: Arc<[u8]>,
+    /// Posición de cada salto de línea, en orden, para situar un valor sin
+    /// recontarlos desde el principio (F6.4.a.8c).
+    newlines: Arc<[usize]>,
     kind: ConfigKind,
 }
 
 impl AdmittedToml {
     pub(crate) fn new(path: PathBuf, bytes: Arc<[u8]>, kind: ConfigKind) -> Self {
-        Self { path, bytes, kind }
+        let newlines = bytes
+            .iter()
+            .enumerate()
+            .filter(|(_, byte)| **byte == b'\n')
+            .map(|(index, _)| index)
+            .collect();
+        Self {
+            path,
+            bytes,
+            newlines,
+            kind,
+        }
+    }
+
+    /// Lo mismo que [`SourceLocation::from_span`] sobre los bytes admitidos,
+    /// pero la línea sale de una búsqueda binaria entre los saltos de línea
+    /// guardados.
+    ///
+    /// El lector sitúa así cada valor que lee. Contando los saltos desde el
+    /// principio del fichero en cada valor, leer un documento con miles de
+    /// loci era cuadrático: valores × bytes (12,5 s con 8 000 loci, apartado
+    /// 11.5 del plan de detección de microsatélites).
+    #[must_use]
+    pub(crate) fn location(&self, span: Range<usize>) -> SourceLocation {
+        let mut location =
+            SourceLocation::from_offset_with_newlines(&self.bytes, &self.newlines, span.start);
+        location.byte_end = span.end;
+        location
     }
 
     #[must_use]
@@ -124,6 +154,28 @@ impl SourceLocation {
                 .filter(|byte| **byte == b'\n')
                 .count()
                 + 1,
+            column: String::from_utf8_lossy(&bytes[line_start..safe_offset])
+                .chars()
+                .count()
+                + 1,
+        }
+    }
+}
+
+impl SourceLocation {
+    /// Como [`Self::from_offset`], con `newlines` las posiciones de todos los
+    /// saltos de línea de `bytes`, en orden. Da exactamente el mismo
+    /// resultado: la línea es el número de saltos **anteriores** al
+    /// desplazamiento más uno, y la columna cuenta caracteres desde el último
+    /// de ellos.
+    fn from_offset_with_newlines(bytes: &[u8], newlines: &[usize], offset: usize) -> Self {
+        let safe_offset = offset.min(bytes.len());
+        let before = newlines.partition_point(|newline| *newline < safe_offset);
+        let line_start = before.checked_sub(1).map_or(0, |last| newlines[last] + 1);
+        Self {
+            byte_start: safe_offset,
+            byte_end: safe_offset,
+            line: before + 1,
             column: String::from_utf8_lossy(&bytes[line_start..safe_offset])
                 .chars()
                 .count()
@@ -815,4 +867,47 @@ pub struct DeclaredF5Scenario {
     pub target: DeclaredF5Target,
     pub subpopulations: Vec<DeclaredF5Subpopulation>,
     pub sampling_overrides: Vec<DeclaredF5SamplingOverride>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use super::{AdmittedToml, ConfigKind, SourceLocation};
+
+    /// **F6.4.a.8c. La línea y la columna de un valor salen iguales que
+    /// recontando desde el principio, en todos los desplazamientos.**
+    ///
+    /// El documento tiene una primera línea sin salto delante, líneas
+    /// terminadas en `CRLF` (que el lector TOML admite), caracteres de varios
+    /// bytes, una línea vacía, y un desplazamiento **más allá del final**, que
+    /// se recorta. Se comparan todos los desplazamientos, también los que
+    /// caen justo **sobre** un salto de línea: ahí es donde un índice que
+    /// contara el salto propio (`<=` en vez de `<`) daría una línea de más.
+    #[test]
+    fn the_indexed_location_matches_counting_from_the_start_at_every_offset() {
+        let text = "a = \"ñandú\"\r\nb = 1\r\n\r\n[c]\nd = \"€\" # fin\n\ne = 2";
+        let bytes = text.as_bytes();
+        let admitted = AdmittedToml::new(
+            PathBuf::from("general.toml"),
+            Arc::from(bytes.to_vec()),
+            ConfigKind::General,
+        );
+        let mut checked_newlines = 0;
+        for offset in 0..=bytes.len() + 3 {
+            for end in [offset, offset + 2] {
+                assert_eq!(
+                    admitted.location(offset..end),
+                    SourceLocation::from_span(bytes, offset..end),
+                    "desplazamiento {offset}"
+                );
+            }
+            checked_newlines += usize::from(bytes.get(offset) == Some(&b'\n'));
+        }
+        assert_eq!(
+            checked_newlines, 6,
+            "control: el documento tiene seis saltos"
+        );
+    }
 }

@@ -723,39 +723,18 @@ fn expected_records(
             .collect::<Vec<_>>();
         // Los tractos que alguna copia realiza, con sus bloques, en el orden
         // de la secuencia. Son los únicos que tienen registro de repetición.
-        let realized = sequence_paths
-            .iter()
-            .flat_map(|path| path.pieces.iter())
-            .filter_map(|piece| match piece {
-                OraclePiece::Replaced {
-                    start, end, blocks, ..
-                } => Some((
-                    OracleSpan {
-                        start: *start,
-                        end: *end,
-                    },
-                    blocks,
-                )),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let tract_spans = realized.iter().map(|(span, _)| *span).collect::<Vec<_>>();
+        let realized = OracleTracts::new(&sequence_paths);
         let mut sequence_alleles = Vec::new();
         for path in &sequence_paths {
             let (path_alleles, path_unchanged) =
-                normalize_oracle_components(path, sequence_bases, &components, &tract_spans)?;
+                normalize_oracle_components(path, sequence_bases, &components, &realized)?;
             sequence_alleles.extend(path_alleles);
             unchanged
                 .entry(path.identity.clone())
                 .or_default()
                 .extend(path_unchanged);
         }
-        alleles.extend(oracle_fuse(
-            sequence_alleles,
-            sequence_bases,
-            &sequence_paths,
-            &realized,
-        )?);
+        alleles.extend(oracle_fuse(sequence_alleles, sequence_bases, &realized)?);
     }
     every_case_has_an_alternate_or_an_unchanged_copy(truth, &alleles, &unchanged, &copy_changes)?;
     let mut by_record = BTreeMap::<(String, u64), Vec<OracleAllele>>::new();
@@ -1213,7 +1192,7 @@ fn normalize_oracle_components(
     path: &OraclePath,
     reference: &[u8],
     initial: &[OracleSpan],
-    tracts: &[OracleSpan],
+    tracts: &OracleTracts<'_>,
 ) -> Result<(Vec<OracleAllele>, Vec<OracleSpan>), VcfSemanticValidationError> {
     let mut components = initial.to_vec();
     loop {
@@ -1228,7 +1207,7 @@ fn normalize_oracle_components(
                 let free = oracle_normalize_window(path, reference, span, 0)?;
                 let mut floor = 0_u64;
                 if let Some(allele) = &free {
-                    for tract in tracts {
+                    for (tract, _) in tracts.ending_after(allele.position, allele.position + 1) {
                         if tract.end <= span.start
                             && tract.start <= allele.position
                             && allele.position + 1 < tract.end
@@ -1314,6 +1293,101 @@ fn normalize_oracle_components(
     }
 }
 
+/// Los tractos que realizan las copias de una secuencia, **ordenados por
+/// intervalo**, para que cada componente y cada borrador miren solo los que
+/// pueden tocarlos (F6.4.a.8b). Antes, cada uno recorría todos los tractos de
+/// todas las copias: borradores × copias × loci. Escrito aquí por su cuenta,
+/// sin el índice del productor.
+struct OracleTracts<'a> {
+    /// `(intervalo, bloques)` de cada tracto realizado, en orden estable de
+    /// intervalo: los del mismo intervalo conservan el orden de las copias.
+    spans: Vec<(OracleSpan, &'a Vec<TruthRepeatBlock>)>,
+    /// `reach[i]` es el mayor fin de `spans[..=i]`.
+    reach: Vec<u64>,
+    /// La primera copia con cada identidad, por su posición en la lista.
+    paths: BTreeMap<&'a CopyIdentity, usize>,
+    /// Los bloques del primer tracto de cada copia con cada intervalo.
+    own: BTreeMap<(usize, OracleSpan), &'a Vec<TruthRepeatBlock>>,
+}
+
+impl<'a> OracleTracts<'a> {
+    fn new(paths: &[&'a OraclePath]) -> Self {
+        let mut spans = Vec::new();
+        let mut own = BTreeMap::new();
+        let mut by_identity = BTreeMap::new();
+        for (index, path) in paths.iter().enumerate() {
+            by_identity.entry(&path.identity).or_insert(index);
+            for piece in &path.pieces {
+                if let OraclePiece::Replaced {
+                    start, end, blocks, ..
+                } = piece
+                {
+                    let span = OracleSpan {
+                        start: *start,
+                        end: *end,
+                    };
+                    own.entry((index, span)).or_insert(blocks);
+                    spans.push((span, blocks));
+                }
+            }
+        }
+        Self::indexed(spans, by_identity, own)
+    }
+
+    /// Ordena los tractos y calcula el fin acumulado.
+    fn indexed(
+        mut spans: Vec<(OracleSpan, &'a Vec<TruthRepeatBlock>)>,
+        paths: BTreeMap<&'a CopyIdentity, usize>,
+        own: BTreeMap<(usize, OracleSpan), &'a Vec<TruthRepeatBlock>>,
+    ) -> Self {
+        spans.sort_by_key(|(span, _)| *span);
+        let mut furthest = 0;
+        let reach = spans
+            .iter()
+            .map(|(span, _)| {
+                furthest = span.end.max(furthest);
+                furthest
+            })
+            .collect();
+        Self {
+            spans,
+            reach,
+            paths,
+            own,
+        }
+    }
+
+    /// Los que empiezan en `[from, to]`.
+    fn starting_in(&self, from: u64, to: u64) -> &[(OracleSpan, &'a Vec<TruthRepeatBlock>)] {
+        let first = self.spans.partition_point(|(span, _)| span.start < from);
+        let last = self.spans.partition_point(|(span, _)| span.start <= to);
+        self.spans.get(first..last).unwrap_or_default()
+    }
+
+    /// Los que empiezan antes de `to` y no están entre los que, todos, acaban
+    /// en `from` o antes: un superconjunto de los que pisan `[from, to)`.
+    fn reaching(&self, from: u64, to: u64) -> &[(OracleSpan, &'a Vec<TruthRepeatBlock>)] {
+        let first = self.reach.partition_point(|reach| *reach <= from);
+        let last = self.spans.partition_point(|(span, _)| span.start < to);
+        self.spans.get(first..last).unwrap_or_default()
+    }
+
+    /// Los que empiezan en `position` o antes y no están entre los que,
+    /// todos, acaban en `after` o antes: un superconjunto de los que contienen
+    /// `position` y acaban después de `after`.
+    fn ending_after(
+        &self,
+        position: u64,
+        after: u64,
+    ) -> &[(OracleSpan, &'a Vec<TruthRepeatBlock>)] {
+        let first = self.reach.partition_point(|reach| *reach <= after);
+        let last = self
+            .spans
+            .partition_point(|(span, _)| span.start <= position);
+        self.spans.get(first..last).unwrap_or_default()
+    }
+}
+
 /// Intervalo `[POS, POS+len(REF))` de un alelo del oráculo, ancla incluida.
 fn oracle_vcf_span(allele: &OracleAllele) -> OracleSpan {
     OracleSpan {
@@ -1336,8 +1410,7 @@ fn oracle_vcf_span(allele: &OracleAllele) -> OracleSpan {
 fn oracle_fuse(
     alleles: Vec<OracleAllele>,
     reference: &[u8],
-    paths: &[&OraclePath],
-    realized: &[(OracleSpan, &Vec<TruthRepeatBlock>)],
+    realized: &OracleTracts<'_>,
 ) -> Result<Vec<OracleAllele>, VcfSemanticValidationError> {
     // Borradores iniciales: los alelos cuyos intervalos se encadenan.
     let mut sorted = alleles;
@@ -1360,7 +1433,7 @@ fn oracle_fuse(
     loop {
         let mut built = Vec::with_capacity(drafts.len());
         for draft in &drafts {
-            built.push(oracle_build_draft(draft, reference, paths, realized)?);
+            built.push(oracle_build_draft(draft, reference, realized)?);
         }
         // Los registros construidos que se pisan forman componentes; si todos
         // son de un solo borrador, es el punto fijo.
@@ -1409,8 +1482,7 @@ fn oracle_fuse(
 fn oracle_build_draft(
     draft: &[OracleAllele],
     reference: &[u8],
-    paths: &[&OraclePath],
-    realized: &[(OracleSpan, &Vec<TruthRepeatBlock>)],
+    realized: &OracleTracts<'_>,
 ) -> Result<(Option<OracleSpan>, Vec<OracleAllele>), VcfSemanticValidationError> {
     let position = draft[0].position;
     let has_tract = draft.iter().any(|allele| !allele.repeat_blocks.is_empty());
@@ -1446,12 +1518,15 @@ fn oracle_build_draft(
     if has_tract {
         let inside_end = end;
         for allele in draft {
-            let crossed = realized.iter().any(|(span, _)| {
-                start <= span.start
-                    && span.end <= inside_end
-                    && allele.position < span.start
-                    && span.end < allele.source.end
-            });
+            let crossed = realized
+                .starting_in(start, inside_end)
+                .iter()
+                .any(|(span, _)| {
+                    start <= span.start
+                        && span.end <= inside_end
+                        && allele.position < span.start
+                        && span.end < allele.source.end
+                });
             if crossed {
                 end = end.max(allele.source.end);
             }
@@ -1537,6 +1612,7 @@ fn oracle_build_draft(
     };
     let tracts = if has_tract {
         realized
+            .reaching(start, end)
             .iter()
             .filter(|(span, _)| span.start < end && start < span.end)
             .collect::<Vec<_>>()
@@ -1563,17 +1639,10 @@ fn oracle_build_draft(
     let alternates = alleles[1..].to_vec();
     let mut annotations = Vec::with_capacity(carriers.len());
     for (copy, _, _) in &carriers {
-        let path = paths.iter().find(|path| path.identity == *copy);
+        let path = realized.paths.get(copy).copied();
         let mut blocks = Vec::new();
         for tract in &distinct_tracts {
-            let own = path.and_then(|path| {
-                path.pieces.iter().find_map(|piece| match piece {
-                    OraclePiece::Replaced {
-                        start, end, blocks, ..
-                    } if *start == tract.start && *end == tract.end => Some(blocks),
-                    _ => None,
-                })
-            });
+            let own = path.and_then(|path| realized.own.get(&(path, *tract)).copied());
             if let Some(own) = own {
                 blocks.extend(own.iter().cloned());
                 continue;
@@ -2423,7 +2492,7 @@ fn vcf_error<T>(line: u64, detail: impl Into<String>) -> Result<T, VcfSemanticVa
 #[cfg(test)]
 mod tests {
     use super::{
-        ExpectedRecord, OracleAllele, OraclePath, OraclePiece, OracleSpan,
+        ExpectedRecord, OracleAllele, OraclePath, OraclePiece, OracleSpan, OracleTracts,
         VcfSemanticValidationError, expected_gt, expected_records, merge_oracle_spans,
         oracle_build_draft, oracle_normalize_window, oracle_path, oracular_sequence,
         validate_oracle_phases, validate_reference_allele, validate_tandem_repeat_info,
@@ -2551,13 +2620,16 @@ mod tests {
     /// Se llama directamente al constructor con la única entrada que cada
     /// guarda puede rechazar, y se exige su motivo. El control fija que dos
     /// alelos de copias distintas sin nada de eso se funden sin error.
+    fn no_tracts() -> OracleTracts<'static> {
+        OracleTracts::indexed(Vec::new(), BTreeMap::new(), BTreeMap::new())
+    }
+
     #[test]
     fn the_fused_record_builder_refuses_what_its_own_reconstruction_never_produces() {
         let control = oracle_build_draft(
             &[draft_allele(0, 1, "CG", "C"), draft_allele(1, 2, "G", "T")],
             b"ACGTACGT",
-            &[],
-            &[],
+            &no_tracts(),
         )
         .expect("control: dos copias distintas se funden");
         assert_eq!(control.0, Some(OracleSpan { start: 1, end: 3 }));
@@ -2566,8 +2638,7 @@ mod tests {
         let overlapping = oracle_build_draft(
             &[draft_allele(0, 1, "CG", "C"), draft_allele(0, 2, "G", "T")],
             b"ACGTACGT",
-            &[],
-            &[],
+            &no_tracts(),
         )
         .expect_err("una copia no puede llevar dos alelos que se pisan");
         assert_eq!(detail(&overlapping), "dos alelos de una copia se pisan");
@@ -2580,8 +2651,7 @@ mod tests {
                 draft_allele(1, 1, "CAC", "C"),
             ],
             b"ACACGTGT",
-            &[],
-            &[],
+            &no_tracts(),
         )
         .expect_err("no hay base anterior a la primera");
         assert_eq!(detail(&unanchored), "registro fundido sin ancla izquierda");
@@ -2595,8 +2665,11 @@ mod tests {
         let cut = oracle_build_draft(
             &[with_tract.clone(), draft_allele(1, 2, "G", "T")],
             b"ACGTACGT",
-            &[],
-            &[(OracleSpan { start: 2, end: 6 }, &block)],
+            &OracleTracts::indexed(
+                vec![(OracleSpan { start: 2, end: 6 }, &block)],
+                BTreeMap::new(),
+                BTreeMap::new(),
+            ),
         )
         .expect_err("el registro no puede partir un tracto");
         assert_eq!(detail(&cut), "el registro fundido parte un tracto");
@@ -3448,5 +3521,196 @@ mod tests {
                 "«{header}» se rechazó por otra razón: {detail}"
             );
         }
+    }
+
+    /// **F6.4.a.8b. El índice de tractos del juez no pierde el que empieza
+    /// antes de la ventana y acaba dentro.**
+    ///
+    /// Un tracto largo `[100, 400)` y dos cortos `[450, 460)` de dos copias.
+    /// La ventana `[300, 455)` la pisa el largo, que empieza **antes**; un
+    /// índice que buscara por inicio lo perdería. Igual para el límite de la
+    /// alineación: la base 300 está dentro del largo, que acaba después de la
+    /// 301. Se exige el conjunto exacto tras aplicar la condición de siempre,
+    /// y que los del mismo intervalo conserven el orden de las copias.
+    #[test]
+    fn the_oracle_tract_index_keeps_a_tract_that_starts_before_the_window() {
+        let long = vec![TruthRepeatBlock {
+            motif: "CA".to_owned(),
+            bases: 300,
+        }];
+        let short_first = vec![TruthRepeatBlock {
+            motif: "GT".to_owned(),
+            bases: 10,
+        }];
+        let short_second = vec![TruthRepeatBlock {
+            motif: "GT".to_owned(),
+            bases: 12,
+        }];
+        let span = |start: u64, end: u64| OracleSpan { start, end };
+        let tracts = OracleTracts::indexed(
+            vec![
+                (span(450, 460), &short_first),
+                (span(100, 400), &long),
+                (span(450, 460), &short_second),
+            ],
+            BTreeMap::new(),
+            BTreeMap::new(),
+        );
+        let found = |slice: &[(OracleSpan, &Vec<TruthRepeatBlock>)],
+                     keep: &dyn Fn(OracleSpan) -> bool| {
+            slice
+                .iter()
+                .filter(|(span, _)| keep(*span))
+                .map(|(span, blocks)| (span.start, span.end, blocks[0].bases))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            found(tracts.reaching(300, 455), &|span| span.start < 455
+                && 300 < span.end),
+            vec![(100, 400, 300), (450, 460, 10), (450, 460, 12)]
+        );
+        assert_eq!(
+            found(tracts.ending_after(300, 301), &|span| span.start <= 300
+                && 301 < span.end),
+            vec![(100, 400, 300)]
+        );
+        assert_eq!(
+            found(tracts.starting_in(440, 460), &|_| true),
+            vec![(450, 460, 10), (450, 460, 12)]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // El índice de tractos del juez contra el recorrido completo
+    //
+    // El juez ya no recorre todos los tractos: repite el algoritmo del
+    // productor (ordenar, fin máximo acumulado, búsqueda binaria), y con ello
+    // pierde independencia. Estas pruebas se la devuelven: el oráculo es el
+    // **recorrido completo**, un filtro lineal sin índice.
+    // -----------------------------------------------------------------------
+
+    /// Generador xorshift de semilla fija: las pruebas son deterministas.
+    struct XorShift(u64);
+
+    impl XorShift {
+        fn below(&mut self, bound: u64) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0 % bound
+        }
+    }
+
+    #[test]
+    fn oracle_tracts_queries_match_a_full_scan_on_random_inputs() {
+        let block = vec![TruthRepeatBlock {
+            motif: "CA".into(),
+            bases: 2,
+        }];
+        let mut rng = XorShift(0x1234_5678_9ABC_DEF1);
+        for _round in 0..2500 {
+            let spans = (0..rng.below(12))
+                .map(|_| {
+                    let start = rng.below(80);
+                    // Alguno largo, para que el fin acumulado difiera del propio.
+                    let long = rng.below(4) == 0;
+                    let length = 1 + rng.below(if long { 60 } else { 8 });
+                    (
+                        OracleSpan {
+                            start,
+                            end: start + length,
+                        },
+                        &block,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let all = spans.iter().map(|(span, _)| *span).collect::<Vec<_>>();
+            let tracts = OracleTracts::indexed(spans, BTreeMap::new(), BTreeMap::new());
+            for _query in 0..20 {
+                // Un tercio de las consultas arranca justo en el inicio de un
+                // tracto: el borde que un `<` en vez de `<=` perdería.
+                let from = if !all.is_empty() && rng.below(3) == 0 {
+                    all[rng.below(all.len() as u64) as usize].start
+                } else {
+                    rng.below(100)
+                };
+                let to = from + rng.below(30);
+
+                let mut got = tracts
+                    .reaching(from, to)
+                    .iter()
+                    .map(|(span, _)| *span)
+                    .filter(|span| span.start < to && from < span.end)
+                    .collect::<Vec<_>>();
+                let mut want = all
+                    .iter()
+                    .copied()
+                    .filter(|span| span.start < to && from < span.end)
+                    .collect::<Vec<_>>();
+                got.sort_unstable();
+                want.sort_unstable();
+                assert_eq!(got, want, "reaching({from}, {to})");
+
+                let mut got = tracts
+                    .ending_after(from, from + 1)
+                    .iter()
+                    .map(|(span, _)| *span)
+                    .filter(|span| span.start <= from && from + 1 < span.end)
+                    .collect::<Vec<_>>();
+                let mut want = all
+                    .iter()
+                    .copied()
+                    .filter(|span| span.start <= from && from + 1 < span.end)
+                    .collect::<Vec<_>>();
+                got.sort_unstable();
+                want.sort_unstable();
+                assert_eq!(got, want, "ending_after({from}, {})", from + 1);
+
+                let mut got = tracts
+                    .starting_in(from, to)
+                    .iter()
+                    .map(|(span, _)| *span)
+                    .collect::<Vec<_>>();
+                let mut want = all
+                    .iter()
+                    .copied()
+                    .filter(|span| from <= span.start && span.start <= to)
+                    .collect::<Vec<_>>();
+                got.sort_unstable();
+                want.sort_unstable();
+                assert_eq!(got, want, "starting_in({from}, {to})");
+            }
+        }
+    }
+
+    #[test]
+    fn ending_after_keeps_a_tract_that_starts_exactly_at_the_anchor_base() {
+        // Un tracto [10, 20) que empieza **en** `position`, la base de
+        // anclaje: `ending_after` debe devolverlo, y con `<` en lugar de `<=`
+        // en su búsqueda binaria desaparecería. Los tractos [0, 5) y [2, 9)
+        // van antes y su fin acumulado no pasa de `after`.
+        let block = vec![TruthRepeatBlock {
+            motif: "CA".into(),
+            bases: 2,
+        }];
+        let spans = [(0, 5), (2, 9), (10, 20)]
+            .into_iter()
+            .map(|(start, end)| (OracleSpan { start, end }, &block))
+            .collect::<Vec<_>>();
+        let tracts = OracleTracts::indexed(spans, BTreeMap::new(), BTreeMap::new());
+        let found = tracts
+            .ending_after(10, 11)
+            .iter()
+            .map(|(span, _)| *span)
+            .filter(|span| span.start <= 10 && 11 < span.end)
+            .collect::<Vec<_>>();
+        assert_eq!(found, vec![OracleSpan { start: 10, end: 20 }]);
+        // Un paso a la izquierda, el tracto ya no cuenta como contenedor.
+        let found = tracts
+            .ending_after(9, 10)
+            .iter()
+            .filter(|(span, _)| span.start <= 9 && 10 < span.end)
+            .count();
+        assert_eq!(found, 0);
     }
 }

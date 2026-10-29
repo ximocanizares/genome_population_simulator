@@ -2765,5 +2765,5 @@ fn wrong_type(
 }
 
 fn location(admitted: &AdmittedToml, span: std::ops::Range<usize>) -> SourceLocation {
-    SourceLocation::from_span(admitted.bytes(), span)
+    admitted.location(span)
 }

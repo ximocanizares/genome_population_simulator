@@ -902,40 +902,151 @@ verificación sobre copia»), con SHA antes y después.
 > (DP-SSR-13); y qué costes cuadráticos se arreglan (DP-SSR-17). Las entregas
 > 2 a 6 se reescriben con lo decidido. No continuar sin esa decisión escrita.
 
-### Entrega 2 — escala (se dimensiona en la pausa)
+### Entrega 2 — escala
 
-Sus pasos dependen de lo que localice F6.4.a.5. Hoy se conocen dos tramos por
-lectura del código y uno por medición:
+Reescrita el 29/10/2026 con la decisión de la pausa (apartado 11.7,
+DP-SSR-17): **se arreglan los cuatro costes cuadráticos** del apartado 11.5 —el
+VCF y su oráculo, la validación física final, el tartamudeo y la lectura del
+TOML— antes de conectar la detección, más la comprobación de solapes, que es
+barata. El punto 5 de 11.5 (los recorridos localizados solo por lectura, sin
+peso medido) **no** se toca. Cada arreglo es de **rendimiento**: no puede
+cambiar ni un byte de lo publicado.
 
-- ☐ **F6.4.a.6.** Comprobación de solapes de loci en orden lineal: ordenar por
-  secuencia e inicio y comparar vecinos, en vez de cada locus contra todos
-  (`src/application.rs:4919-4931`).
-  - Depende de: pausa de la entrega 1.
+**Condición de entrada de todos los pasos: una huella con microsatélites.**
+La de F6.4.a.2 solo cubre escenarios **sin** microsatélites, así que no ve
+nada de lo que esta entrega toca. Antes de cambiar `src/` se congela
+`tests/repeat_scale_frozen_identity.rs`, con los literales obtenidos con el
+binario del commit `deecb79` compilado aparte: (1) quince loci en dos
+secuencias, dos parejas pegadas, alelos que varían entre individuos, VCF,
+tartamudeo de base y quimeras entre secuencias (DTC-102); (2) lo mismo con PCR
+y tartamudeo clonal; (3) los veintiún escenarios de la revisión de la fusión
+del VCF (`tests/fixtures/vcf-fusion/review`). El juez semántico del VCF tiene
+que aceptar lo publicado en (1) y (2). **Debe fallar contra:** un byte de más
+en un registro publicado (se comprueba que la mutación mutó).
+
+Los números de paso siguen a F6.4.a.5 y, para no chocar con la entrega 3, el
+del VCF y los que la medición añadió llevan sufijo.
+
+- ☐ **F6.4.a.6.** Comprobación de solapes de loci sin comparar cada locus con
+  todos los anteriores.
+  - Depende de: la huella de entrada.
   - Procede de: DP-SSR-17; sección 2.3.
-  - Cambia: `src/application.rs`.
-  - Se comprueba con: el **mismo diagnóstico** para el mismo par solapado
-    (el primero en orden de declaración) que hoy, probado con tres loci donde
-    el tercero solapa al primero y no al segundo; la huella de F6.4.a.2
-    intacta; tiempo de configuración lineal medido con 2 000 y 8 000 loci.
-    **Debe fallar contra:** comparar solo vecinos sin ordenar.
-- ☐ **F6.4.a.7.** Índice de loci por secuencia para el tartamudeo
-  (`src/stutter.rs:1467`), si la pausa lo decide.
-  - Depende de: F6.4.a.6.
-  - Procede de: DP-SSR-17.
-  - Cambia: `src/stutter.rs`, y el clonal si recorre igual.
-  - Se comprueba con: la huella intacta (cubre tartamudeo de base y clonal); un
-    escenario con loci en dos secuencias y una molécula quimérica entre ellas
-    (DTC-102). **Debe fallar contra:** un índice que pierda el locus que
-    empieza antes del tramo y acaba dentro.
-- ☐ **F6.4.a.8.** Los tramos cuadráticos de la publicación que localice la
-  medición, uno por paso.
-  - Depende de: F6.4.a.6.
-  - Procede de: F6.4.a.5.
-  - Se comprueba con: huella intacta y tiempo medido lineal.
+  - Cambia: `src/application.rs` (`effective_repeat_loci`): los intervalos
+    admitidos, por secuencia y por inicio, en un mapa ordenado; el nuevo se
+    compara solo con el último que empieza antes que él y con los que empiezan
+    dentro, y se nombra el **primero en orden de declaración** de los que
+    pisa.
+  - Se comprueba con: `tests/repeat_scale_regressions.rs`: tres loci donde el
+    tercero solapa al primero y no al segundo dan el mismo diagnóstico de hoy
+    (nombra el primero), y uno que pisa a dos nombra el declarado antes, no el
+    primero por posición; la huella intacta.
+  - **Debe fallar contra:** comparar solo con el vecino declarado
+    inmediatamente antes, sin ordenar.
+- ☐ **F6.4.a.7.** Índice de tractos por copia para el tartamudeo, de base y
+  clonal.
+  - Depende de: la huella de entrada.
+  - Procede de: DP-SSR-17; apartado 11.5, punto 4.
+  - Cambia: `src/stutter.rs` (`StutterTractIndex`: las piezas de cada copia se
+    recorren una vez por individua y los tractos quedan ordenados por inicio
+    con su fin acumulado; `place_tracts` y `transform_paired_end` reciben el
+    índice en vez de la individua) y `src/wgs_sampling.rs` (el muestreador lo
+    construye al conectar el plan; el linaje clonal usa el mismo).
+  - Se comprueba con: la prueba unitaria
+    `the_tract_index_keeps_a_tract_that_starts_before_the_segment_and_ends_inside`;
+    la huella intacta, con quimeras entre dos secuencias (DTC-102) y
+    tartamudeo de base y clonal.
+  - **Debe fallar contra:** un índice que busque el primer tracto por su
+    inicio y pierda el que empieza antes del tramo y acaba dentro.
+- ☐ **F6.4.a.8a.** VCF: asignar los casos a sus registros y repartir las
+  bases de tracto por locus sin recorrer todos los registros ni todos los
+  loci.
+  - Depende de: la huella de entrada.
+  - Procede de: apartado 11.5, punto 1, **corregido por la medición**: el
+    coste de la etapa del VCF no estaba en la proyección sino en el
+    agrupador (apartado 11.9).
+  - Cambia: `src/vcf_grouping.rs` (`finish_records`: por copia, los tramos
+    fuente de sus `ALT` ordenados por inicio con su fin acumulado) y
+    `src/vcf_publication.rs` (`tract_bases_by_locus`: búsqueda por rango en el
+    mapa de loci, conservando el primero en su orden).
+  - Se comprueba con: la prueba unitaria
+    `carrier_sources_keep_a_long_source_span_that_starts_before_the_locus`; la
+    huella intacta.
+  - **Debe fallar contra:** buscar el primer tramo candidato por su inicio, que
+    pierde el tramo largo que empieza antes del locus.
+- ☐ **F6.4.a.8b.** Proyección del VCF y su oráculo semántico: los tractos
+  realizados de una secuencia, recogidos una vez.
+  - Depende de: la huella de entrada.
+  - Procede de: apartado 11.5, punto 1 (`src/vcf_projection.rs:1532, 1743,
+    1800`; `src/vcf_semantic_validation.rs:726, 1449, 1566`).
+  - Cambia: `src/vcf_projection.rs` (`RealizedTracts`, que sustituye a los
+    recorridos de todos los tractos de todas las copias en el registro
+    fundido, en `tracts_in`, en la anotación y en el límite de alineación;
+    `CopyPath::pieces_near`, que acota con dos búsquedas binarias las piezas
+    que mira cada ventana; y `normalization_traversal_closures`, que mira
+    solo los componentes que empiezan dentro del tramo atravesado) y
+    `src/vcf_semantic_validation.rs`
+    (`OracleTracts`, escrito aparte, sin el índice del productor).
+  - Se comprueba con: las pruebas unitarias
+    `realized_tracts_and_piece_windows_keep_what_starts_before_the_window` y
+    `the_oracle_tract_index_keeps_a_tract_that_starts_before_the_window`; la
+    huella intacta (los veintiún escenarios de la revisión de la fusión
+    ejercitan cada rama: tracto cruzado, anotación por posición, derivada,
+    límite de alineación); el juez acepta lo publicado.
+  - **Debe fallar contra:** un índice que pierda el tracto que empieza antes de
+    la ventana y acaba dentro, en el productor y en el oráculo.
+- ☐ **F6.4.a.8c.** Lectura del TOML: la línea de cada valor por búsqueda
+  binaria entre los saltos de línea, guardados una vez.
+  - Depende de: la huella de entrada.
+  - Procede de: apartado 11.5, punto 3.
+  - Cambia: `src/configuration.rs` (`AdmittedToml` guarda las posiciones de
+    los saltos; `AdmittedToml::location`) y `src/adapters.rs` (la función que
+    sitúa cada valor la usa). Los diagnósticos de la cabecera, que se emiten
+    una sola vez, siguen con `SourceLocation::from_span`.
+  - Se comprueba con: la prueba unitaria
+    `the_indexed_location_matches_counting_from_the_start_at_every_offset`
+    (todos los desplazamientos de un documento con `CRLF`, caracteres de
+    varios bytes y desplazamientos más allá del final) y
+    `a_type_error_is_located_at_the_same_line_and_column_after_a_large_document`
+    (al final de un documento de 4 000 líneas, en la primera línea y con
+    `CRLF`).
+  - **Debe fallar contra:** contar el salto de línea que cae justo en el
+    desplazamiento (`<=` en vez de `<`).
+- ☐ **F6.4.a.8d.** Validación física final: el locus de cada caso y de cada
+  registro, por su intervalo.
+  - Depende de: la huella de entrada.
+  - Procede de: apartado 11.5, punto 2 (`src/results.rs:714` y `:4595`). Las
+    comparaciones de árboles JSON enteros (`:4205`, `:4243`) no se tocan: la
+    medición no muestra que dominen (apartado 11.9) y el catálogo aparte de la
+    entrega 4 dejará de hacerlos crecer con los loci detectados.
+  - Cambia: `src/results.rs` (`truth_repeat_tally`: los loci por intervalo y
+    las copias por secuencia en mapas; `recount_vcf_tract_bases`: búsqueda
+    por rango en el conjunto de loci, conservando el primero en su orden).
+  - Se comprueba con: la huella intacta; con la mutación de abajo la
+    ejecución misma falla, porque el juez no encuentra el locus de un
+    registro.
+  - **Debe fallar contra:** un rango que empiece después de la posición del
+    registro y pierda el locus que empieza en su primera base.
+- ☐ **F6.4.a.8e.** Manifiesto: los sorteos de alelos agrupados por locus una
+  vez.
+  - Depende de: la huella de entrada.
+  - Procede de: la medición de esta entrega (apartado 11.9): la etapa
+    «configuración efectiva y manifiesto», que 11.5 midió como «algo más que
+    lineal», es cuadrática por `repeat_loci_manifest_json`, que recorría todos
+    los sorteos por cada locus. Entra por la regla de la versión anterior de
+    esta entrega: «los tramos cuadráticos de la publicación que localice la
+    medición, uno por paso».
+  - Cambia: `src/results.rs` (`repeat_loci_manifest_json`).
+  - Se comprueba con: la huella intacta (publica `drawn_copies` y
+    `realized_copies` de cada alelo).
+  - **Debe fallar contra:** perder el primer sorteo de cada locus al agrupar.
 
-> **Revisión de la entrega 2:** publicar el número de loci decidido en la
-> pausa cabe en el tiempo y la memoria aceptados, con los bytes de lo
-> existente intactos.
+> **Revisión de la entrega 2:** cada etapa arreglada crece en línea recta al
+> doblar los loci, con la huella intacta (apartado 11.9).
+>
+> **Estado, 29/10/2026:** los siete pasos están implementados, con las
+> puertas en verde y cada «debe fallar contra» comprobado mutando una copia
+> aparte (apartado 11.9.3). Falta la revisión adversarial; por eso siguen sin
+> marcar.
 
 ### Entrega 3 — detección en el producto
 
@@ -1560,3 +1671,282 @@ acepta esa pérdida.** Esos 32 solo alcanzaban el suelo contando dos veces una
 base ambigua, el núcleo original tampoco los encontraba, y recuperarlos
 exigiría contar la base compartida para el suelo pero no para las
 coordenadas, una regla más compleja que no compensa.
+
+### 11.9. Entrega 2: los costes cuadráticos arreglados, y lo que queda (29/10/2026)
+
+Medido el 29/10/2026 por el implementador de la entrega 2. Mismos comandos
+que el apartado 11.1 (`prepare_publication` y `measure_publication`), mismo
+FASTA y misma máquina, con el binario de pruebas optimizado (`--release`)
+copiado fuera de `target/`.
+
+**Una salvedad sobre «antes».** Los documentos se prepararon de nuevo con el
+detector de hoy (50 284 candidatos, apartado 11.8), y no con el de 11.4
+(50 189): con el mismo número de loci, los loci elegidos difieren un poco. Por
+eso «antes» no se toma de 11.4: se midió otra vez, **sobre los mismos
+documentos**, con el binario de `deecb79` sin cambios (SHA-256 `5bc796da…`,
+el mismo de 11.8).
+
+#### 11.9.1. Dónde estaba de verdad cada coste
+
+La medición de 11.5 localizaba las etapas por la hora de los ficheros y las
+funciones **por lectura**. Para esta entrega se midió el tiempo propio de cada
+función sospechosa en una copia instrumentada aparte (cronómetros
+acumulados por función; no hay `perf` en la máquina), con 4 000 y 8 000 loci
+y 10 individuos. Lo que encontró, y que corrige 11.5:
+
+Segundos de pared acumulados por función, copia instrumentada de `deecb79`
+(una pasada; la máquina tenía otros trabajos en marcha, así que las cifras
+absolutas salen infladas y solo vale la proporción entre 4 000 y 8 000):
+
+| Función (fichero) | 4 000 | 8 000 | Crecimiento |
+|---|---:|---:|---|
+| **Etapa del VCF entera** (`publish_truth_vcf_within`) | 30,3 | 218,4 | ×7,2 |
+| — asignar cada caso de la verdad a sus registros (`finish_records`, `src/vcf_grouping.rs`) | **27,5** | **212,7** | ×7,7 |
+| — la proyección entera (`project_view_from_validated_truth`, `src/vcf_projection.rs`) | 0,82 | 2,88 | ×3,5 |
+| —— de ella, los tractos de todas las copias por registro fundido (`:1532`) | 0,48 | 2,00 | ×4,2 |
+| —— el límite de alineación (`left_alignment_floor`) | 0,10 | 0,31 | ×3,2 |
+| — repartir las bases de tracto por locus (`tract_bases_by_locus`, `src/vcf_publication.rs`) | 0,08 | 0,42 | ×5,1 |
+| **Validación física final** (`validate_published_resources`, dos llamadas) | 27,6 | 82,0 | ×3,0 |
+| — releer y resolver el TOML copiado (`validate_effective_targets_against_configuration`) | 7,6 | 30,4 | ×4,0 |
+| — el recuento de la verdad por locus (`truth_repeat_tally`, `src/results.rs:4595`) | 1,3 | 9,0 | ×6,8 |
+| — rehacer las individuas iniciales (`validate_physical_initial_population_statistics`) | 3,8 | 9,6 | ×2,5 |
+| — el recuento de bases del VCF (`recount_vcf_tract_bases`, `src/results.rs:714`) | 0,10 | 0,48 | ×5,0 |
+| **Lectura del TOML** (`parse_declared_config`) | 3,1 | 14,8 | ×4,8 |
+
+Y con tartamudeo, 2 000 loci: situar los tractos en cada molécula
+(`place_tracts_in_segments`) sumaba 44,5 s de los 147 s de la ejecución.
+
+Lo que esto corrige de 11.5:
+
+1. **El coste de la etapa del VCF no estaba en la proyección** que 11.5
+   señalaba por lectura (`src/vcf_projection.rs:1532, 1743, 1800`), sino en el
+   agrupador: por cada portadora de cada caso de la verdad, `finish_records`
+   recorría **todos los registros** del VCF (casos × registros). La proyección
+   también era cuadrática, pero pesaba 2,9 s de 218 con 8 000 loci. Se
+   arreglaron las dos (F6.4.a.8a y F6.4.a.8b). Es la misma etapa y la misma
+   forma de coste que la decisión de la pausa manda arreglar; solo estaba en
+   otra función.
+2. **La mayor parte de la validación física cuadrática era la lectura del
+   TOML**, que el juez repite sobre la copia publicada: arreglar
+   `SourceLocation` (F6.4.a.8c) la arregla también ahí. Los dos recorridos de
+   `src/results.rs` que 11.5 nombraba también lo eran (F6.4.a.8d). Las
+   comparaciones de árboles JSON (`:4205`, `:4243`) no aparecen como coste
+   propio: van dentro de `validate_published_repeat_loci`, que creció ×2,1
+   de 4 000 a 8 000 loci tras los arreglos; no se tocaron.
+3. **La etapa «configuración efectiva y manifiesto»**, que 11.5 midió como
+   «algo más que lineal» (0,8 → 2,3 → 11,3 s), es cuadrática:
+   `repeat_loci_manifest_json` recorría todos los sorteos de alelos por cada
+   locus. Se arregló (F6.4.a.8e).
+4. **Rehacer las individuas iniciales crece ×2,5 al doblar loci**, en el
+   preflight y en la validación. Es el punto 5 de 11.5 (`apply_repeat_alleles`
+   y `with_current_repeat_allele`), que la decisión de la pausa deja fuera:
+   **no se tocó** (apartado 11.9.6).
+
+
+#### 11.9.2. Qué cambió en cada paso
+
+El detalle está en cada paso de la entrega 2 (sección 6). En todos la idea
+es la misma y sencilla: ordenar una vez por inicio, guardar el fin máximo
+acumulado y buscar con dos búsquedas binarias, o agrupar en un mapa, en vez de
+recorrer la lista entera por cada consulta. El fin **acumulado** es lo que
+impide perder el tramo que empieza antes de la ventana y acaba dentro, que es
+la forma del defecto que cada prueba de regresión caza. Ninguna estructura
+genérica nueva: cada módulo tiene su índice de veinte o treinta líneas, y el
+del juez del VCF está escrito aparte del del productor.
+
+| Paso | Ficheros | Qué recorría antes | Qué consulta ahora |
+|---|---|---|---|
+| F6.4.a.6 | `src/application.rs` | cada locus contra todos los anteriores | el último que empieza antes y los que empiezan dentro |
+| F6.4.a.7 | `src/stutter.rs`, `src/wgs_sampling.rs` | por tramo de molécula, todos los loci y las piezas de la copia hasta cada uno | los tractos de la copia, situados una vez por individua |
+| F6.4.a.8a | `src/vcf_grouping.rs`, `src/vcf_publication.rs` | por portadora, todos los registros; por registro, todos los loci | por copia, sus tramos fuente; los loci por rango |
+| F6.4.a.8b | `src/vcf_projection.rs`, `src/vcf_semantic_validation.rs` | por registro, componente o portadora, todos los tractos de todas las copias; por ventana, todas las piezas de la copia; por alelo, todos los componentes | los tractos de la secuencia por intervalo; las piezas de la ventana; los componentes del tramo atravesado |
+| F6.4.a.8c | `src/configuration.rs`, `src/adapters.rs` | por valor, los saltos de línea desde el principio | los saltos guardados, por búsqueda binaria |
+| F6.4.a.8d | `src/results.rs` | por caso y por registro, todos los loci; por locus, todos los registros | los loci por intervalo; las copias por secuencia |
+| F6.4.a.8e | `src/results.rs` | por locus, todos los sorteos | los sorteos agrupados por locus |
+
+
+#### 11.9.3. Huella y mutaciones
+
+**La huella** (`tests/repeat_scale_frozen_identity.rs`, tres pruebas, unos
+20 s en depuración) se obtuvo con el binario de `deecb79` compilado en un árbol
+extraído con `git archive`, con su propio directorio de compilación; dos
+ejecuciones dieron los mismos literales. Con todos los arreglos sigue intacta,
+igual que las dos huellas anteriores (`tests/repeat_detection_frozen_identity.rs`
+y `tests/pcr_frozen_identity.rs`).
+
+**Mutaciones**, todas sobre una copia extraída con `git archive` más los
+ficheros cambiados, con su propio `CARGO_TARGET_DIR`, la copia de seguridad
+fuera de git y el SHA-256 del fichero antes, mutado y restaurado (doce
+primeras cifras). Las tres pruebas de la huella se abrevian «huella: revisión»
+(`the_vcf_fusion_review_scenarios_keep_their_frozen_bytes`), «huella: base» y
+«huella: clonal».
+
+| Mutación | Paso | Fichero | SHA antes / mutado / restaurado | Lo que muere |
+|---|---|---|---|---|
+| Un salto de línea de más al final de los JSON publicados | huella | `src/results.rs` | `7ca2a1aacf06` / `26b15d12d5f7` / `7ca2a1aacf06` | las tres pruebas de la huella |
+| Comparar solo con el locus declarado justo antes | F6.4.a.6 | `src/application.rs` | `5e291aed2a10` / `5d9e1aaa131c` / `5e291aed2a10` | las dos pruebas de solapes |
+| Índice del tartamudeo que busca el primer tracto por su inicio | F6.4.a.7 | `src/stutter.rs` | `8b1e0ae07559` / `35e7d0f87c93` / `8b1e0ae07559` | la prueba unitaria; huella: base y clonal |
+| Índice de los tramos fuente que busca por inicio | F6.4.a.8a | `src/vcf_grouping.rs` | `1eb55c90ccde` / `736967596f34` / `1eb55c90ccde` | la prueba unitaria; huella: revisión |
+| Reparto de bases por locus que empieza el rango después de la posición | F6.4.a.8a | `src/vcf_publication.rs` | `b02223885d1c` / `893561e38e01` / `b02223885d1c` | las tres de la huella (la ejecución falla) |
+| Tractos realizados de la proyección buscados por inicio | F6.4.a.8b | `src/vcf_projection.rs` | `ddc8b3cefa33` / `5cf500f29625` / `ddc8b3cefa33` | **solo** la prueba unitaria |
+| Piezas de una ventana buscadas por inicio | F6.4.a.8b | `src/vcf_projection.rs` | `ddc8b3cefa33` / `8c2c1f36a04d` / `ddc8b3cefa33` | la prueba unitaria; las tres de la huella |
+| Componentes atravesados: se salta el que empieza en el inicio del tramo | F6.4.a.8b | `src/vcf_projection.rs` | `a0bf2d57baf3` / `91de2dae05ba` / `a0bf2d57baf3` | huella: revisión; dos de `tests/vcf_overlap_fusion.rs` |
+| Tractos del juez semántico buscados por inicio | F6.4.a.8b | `src/vcf_semantic_validation.rs` | `ec9c84948442` / `8f63db48957e` / `ec9c84948442` | **solo** la prueba unitaria |
+| La línea cuenta el salto que cae en el desplazamiento (`<=`) | F6.4.a.8c | `src/configuration.rs` | `ab627416eca2` / `8085c754a11f` / `ab627416eca2` | **solo** la prueba unitaria |
+| Recuento de bases del VCF que empieza el rango después de la posición | F6.4.a.8d | `src/results.rs` | `7ca2a1aacf06` / `9c1c6597e9cb` / `7ca2a1aacf06` | las tres de la huella (la ejecución falla) |
+| El manifiesto pierde el primer sorteo | F6.4.a.8e | `src/results.rs` | `7ca2a1aacf06` / `f12fa86df4a6` / `7ca2a1aacf06` | las tres de la huella |
+
+Lo que esto dice, sin adornos: tres arreglos —el índice de tractos de la
+proyección, el del juez semántico y la posición de los errores del TOML—
+**solo** los protege su prueba unitaria. En los dos primeros la huella no
+puede verlo con los escenarios de hoy: ninguno tiene un tracto realizado que
+empiece antes de un registro fundido y lo pise (`tracts_in` lo rechazaría como
+invariante rota), y un juez que pierde un tracto es más permisivo, no más
+estricto, con un VCF correcto. La posición de un error del TOML no se publica
+en ningún fichero. La mutación de los componentes atravesados se
+verificó aparte, después de las demás, porque esa función se indexó al final.
+
+
+#### 11.9.4. Tiempos antes y después
+
+Segundos de pared por etapa, como en 11.4 y 11.5. «Antes» es el binario de
+`deecb79` (una pasada); «después», el de este árbol (`rustc 1.97.1`, binario de
+pruebas optimizado de SHA-256 `8ce0291e…`), **dos pasadas** separadas por una
+barra. «Preflight» es el de la biblioteca; «preflight interno» es el que
+`execute` repite por dentro más la copia de entradas y referencia. La lectura
+del TOML es `admit_toml_header` más `parse_declared_config`. La memoria
+máxima de las dos pasadas difiere en menos de 1 MiB. Los bytes publicados no
+se compararon entre pasadas (cada directorio se borró al medirlo, para no
+llenar el disco): que no cambian lo vigila la huella. La máquina no tenía
+nada más en marcha (comprobado con `ps` al lanzar); la campaña entera corrió
+en segundo plano y se esperó a que terminara.
+
+| Loci | Indiv. | Tart. | Binario | Lectura TOML | Preflight | Preflight interno | Verdad | VCF | Evento | Efectiva y manifiesto | Validación final | Total | Memoria máx. (MiB) |
+|---:|---:|:---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2 000 | 10 | no | antes | 0,80 | 1,2 | 1,5 | 7,1 | 6,5 | — | 0,8 | 13,1 | 31,0 | 525 |
+| 2 000 | 10 | no | después | 0,01 / 0,01 | 1,5 / 1,2 | 1,4 / 1,6 | 6,9 / 7,3 | 1,2 / 1,4 | — | 0,4 / 0,4 | 9,2 / 9,3 | 20,7 / 21,1 | 526 |
+| 4 000 | 10 | no | antes | 3,09 | 1,9 | 2,3 | 12,8 | 27,5 | — | 2,7 | 26,0 | 76,3 | 946 |
+| 4 000 | 10 | no | después | 0,03 / 0,03 | 1,9 / 1,9 | 2,1 / 2,2 | 10,9 / 11,9 | 1,7 / 2,0 | — | 0,9 / 1,0 | 18,4 / 16,8 | 35,9 / 35,8 | 946 |
+| 8 000 | 10 | no | antes | 13,49 | 4,7 | 5,7 | 23,2 | 207,3 | — | 13,6 | 68,1 | 336,3 | 1 805 |
+| 8 000 | 10 | no | después | 0,06 / 0,07 | 4,7 / 4,5 | 4,8 / 4,7 | 21,0 / 22,1 | 2,5 / 2,6 | — | 1,7 / 1,9 | 35,3 / 34,4 | 70,0 / 70,3 | 1 801 |
+| 16 000 | 10 | no | después | 0,15 / 0,14 | 17,6 / 15,6 | 16,6 / 16,8 | 48,8 / 48,1 | 4,2 / 4,3 | — | 4,2 / 4,2 | 84,4 / 86,5 | 175,9 / 175,6 | 3 512 |
+| 50 284 | 10 | no | después | 0,61 | 201,4 | 205,6 | 290,1 | 21,7 | — | 44,5 | 673,3 | 1437,2 | 10 801 |
+| 2 000 | 10 | sí | antes | 0,93 | 1,3 | 2,3 | 7,2 | 6,9 | 139,9 | 1,1 | 15,5 | 175,2 | 525 |
+| 2 000 | 10 | sí | después | 0,02 / 0,02 | 1,3 / 1,3 | 1,6 / 1,6 | 6,2 / 6,7 | 1,4 / 1,5 | 74,7 / 82,0 | 0,4 / 0,5 | 8,5 / 8,0 | 94,1 / 101,6 | 526 |
+| 4 000 | 10 | sí | antes | 4,84 | 2,7 | 3,1 | 17,0 | 38,8 | 345,7 | 3,4 | 26,3 | 441,9 | 946 |
+| 4 000 | 10 | sí | después | 0,03 / 0,04 | 1,9 / 2,0 | 2,2 / 2,4 | 10,6 / 12,0 | 1,7 / 2,8 | 79,7 / 82,1 | 0,9 / 0,9 | 15,8 / 14,9 | 112,7 / 117,1 | 947 |
+| 8 000 | 10 | sí | después | 0,06 / 0,06 | 4,8 / 4,6 | 4,9 / 4,9 | 22,4 / 22,6 | 2,7 / 2,6 | 93,4 / 93,7 | 1,8 / 2,9 | 30,5 / 33,3 | 160,4 / 164,5 | 1 806 |
+| 1 000 | 100 | no | después | 0,01 / 0,01 | 7,0 / 7,4 | 9,8 / 7,7 | 44,9 / 42,9 | 14,8 / 14,6 | — | 0,6 / 0,5 | 54,2 / 52,5 | 131,3 / 125,7 | 808 |
+| 2 000 | 100 | no | después | 0,02 / 0,02 | 9,7 / 9,3 | 11,4 / 10,0 | 69,7 / 73,2 | 18,0 / 19,7 | — | 1,1 / 1,2 | 71,7 / 72,8 | 181,5 / 186,2 | 1 468 |
+| 4 000 | 100 | no | después | 0,04 / 0,03 | 16,4 / 16,5 | 18,3 / 17,9 | 123,7 / 134,4 | 29,0 / 30,5 | — | 2,1 / 1,9 | 122,6 / 130,7 | 312,0 / 332,0 | 2 818 |
+
+La ejecución de 50 284 loci —**el catálogo entero del tomate reducido**— se
+hizo una vez: 24 min y 10 801 MiB (11,1 GB). Con el código de antes no se
+intentó; 11.4 la estimaba en 2 a 3 horas.
+
+Con 100 individuos «antes» no se repitió (4 000 loci tardaban 18 min): las
+cifras de 11.4, con un juego de loci algo distinto, eran 147, 282 y 1 081–1 165 s
+para 1 000, 2 000 y 4 000 loci; ahora, 128, 184 y 322 s.
+
+**Crecimiento de cada etapa arreglada al doblar los loci** (después, media de
+las dos pasadas, 10 individuos sin tartamudeo, de 2 000 a 4 000, a 8 000 y a
+16 000; y de 16 000 a 50 284, que es ×3,14):
+
+| Etapa | ×2 | ×2 | ×2 | ×3,14 | Lineal |
+|---|---:|---:|---:|---:|---|
+| Lectura del TOML | ×3,0 | ×2,2 | ×2,2 | ×4,2 | sí (céntimas de segundo) |
+| Resolución (solapes) | ×2,0 | ×2,0 | ×2,4 | ×6,5 | sí hasta 16 000; 0,06 s con 50 284 |
+| VCF | ×1,4 | ×1,4 | ×1,7 | ×5,1 | sí hasta 16 000; algo más con 50 284 |
+| Evento con tartamudeo (10 individuos, 0,1×) | ×1,03 | ×1,16 | — | — | no depende de los loci |
+| Efectiva y manifiesto | ×2,4 | ×1,9 | ×2,3 | ×10,6 | sí hasta 16 000; **no** con 50 284 |
+| Validación final | ×1,9 | ×2,0 | ×2,5 | ×7,9 | **no**: dentro va el punto 5 (11.9.6) |
+| Verdad | ×1,6 | ×1,9 | ×2,2 | ×6,0 | **no** a partir de 16 000 |
+| Preflight | ×1,4 | ×2,4 | ×3,6 | ×12,1 | **no**: es el punto 5 (11.9.6) |
+
+Lo que esta tabla dice, sin adornos:
+
+- **Las cuatro etapas que la pausa mandó arreglar lo están** hasta 16 000 loci:
+  la lectura del TOML pasa de 13,5 s a 0,06 s con 8 000 loci; el VCF, de
+  207 s a 2,5 s; el evento con tartamudeo deja de depender de los loci (de
+  346 s a 81 s con 4 000); la validación final, de 68 s a 35 s, y lo que en
+  ella queda superlineal es lo que la pausa dejó fuera.
+- **Con el catálogo entero aparecen tres crecimientos más que lineales que no
+  estaban en 11.5**: la verdad (×6,0 para ×3,14 loci), la etapa de la
+  efectiva y el manifiesto (×10,6) y, en menor medida, el VCF (×5,1). De la
+  verdad, la lectura del código apunta al punto 5 de 11.5
+  (`src/truth_projection.rs:1177`, que busca el alelo de cada caso
+  recorriendo las piezas de la copia), pero **no se midió por función**. De
+  la efectiva y el manifiesto no sé la causa: hasta 16 000 loci crece en
+  línea recta, el arreglo de los sorteos (F6.4.a.8e) está y la etapa escribe
+  y relee 480 MB de JSON; puede ser memoria (11 GB residentes) u otro
+  recorrido. Pesan 290 s y 44 s de 1 437.
+- **Lo que domina el catálogo entero es el punto 5**: rehacer las individuas
+  iniciales se hace en el preflight, en el preflight interno y en el juez de
+  las estadísticas de la población inicial. Medido por función en una copia
+  instrumentada con 8 000 y 16 000 loci, `preflight_initial_individuals`
+  pasa de 12,8 a 58,9 s (dos llamadas, ×4,6) y el juez de 12,5 a 39,7 s
+  (×3,2); el resto de la validación final, de 35 a 62 s (×1,8). Con 50 284
+  loci el preflight solo ya son 201 s, y sumando las tres veces es del orden
+  de 800 s de los 1 437.
+
+
+#### 11.9.5. Extrapolación al catálogo del tomate reducido
+
+Con los arreglos de esta entrega, y sin tocar el punto 5:
+
+| Catálogo de 50 284 loci | Antes (11.4, extrapolado) | Ahora |
+|---|---|---|
+| 10 individuos, sin tartamudeo | 2 a 3 horas; unos 11 GB | **medido: 1 437 s (24 min), 10 801 MiB** |
+| 10 individuos, con evento técnico a 0,1× | — | unos 1 530 s: lo anterior más los 80–95 s del evento, que no dependen de los loci (extrapolado) |
+| 100 individuos, sin tartamudeo | unos dos días; unos 34 GB | **unas 3,6 a 3,8 horas** y unos **33 800 MiB** (extrapolado) |
+
+Cómo se extrapola, para que se pueda rehacer:
+
+- **Tiempo con 100 individuos**, dos cuentas que coinciden: (a) un ajuste
+  `a + b·n + c·n²` por mínimos cuadrados a la media de las dos pasadas con
+  1 000, 2 000 y 4 000 loci da 13 743 s; (b) la razón entre 100 y 10
+  individuos con 4 000 loci (322 / 35,9 = 9,0) aplicada a los 1 437 s
+  medidos da 12 907 s. El término cuadrático es el punto 5, que crece además
+  con los individuos. El mismo ajuste con 10 individuos (2 000 a 16 000
+  loci) predecía 1 138 s y se midieron 1 437: **la extrapolación se queda
+  corta**, porque con el catálogo entero aparecen los crecimientos del
+  apartado anterior; la de 100 individuos puede quedarse corta igual.
+- **Memoria**: en línea recta, como en 11.5 (0,213 MiB por locus con 10
+  individuos, entre 2 000 y 16 000; 0,670 con 100, entre 1 000 y 4 000). La
+  de 10 individuos predecía 10 824 MiB y se midieron 10 801. **Con 100
+  individuos no cabe en esta máquina** (27 GB): eso no lo arregla esta
+  entrega, sino el catálogo aparte de la entrega 4 y, si hace falta, bajar
+  la memoria por locus (DP-SSR-18 en 11.7).
+
+
+#### 11.9.6. Lo que queda sin arreglar
+
+1. **Rehacer las individuas iniciales** (punto 5 de 11.5:
+   `apply_repeat_alleles` busca el tramo intacto recorriendo las piezas de la
+   copia y `with_current_repeat_allele` copia la lista entera de piezas por
+   cada locus). Se hace tres veces por ejecución —preflight, preflight interno
+   y juez de las estadísticas de la población inicial— y crece ×3 a ×4,6 al
+   doblar loci. La decisión de la pausa lo deja fuera y **no se tocó**; con
+   el catálogo entero es del orden de 800 s de los 1 437 medidos: lo que más
+   pesa de lo que no es lineal.
+2. **En el juez semántico del VCF**, que solo corre en las pruebas, quedan
+   dos recorridos cuadráticos por copia: al normalizar, cada alelo se compara
+   con **todos** los componentes de la secuencia para decidir qué funde
+   (`normalize_oracle_components`), y cada ventana recorre todas las piezas
+   de la copia (`OraclePath::window_from`). Se arregló lo que 11.5 nombraba
+   (`:726`, `:1449`, `:1566`) y el límite de alineación; estos dos no, porque
+   el juez no corre en la ejecución del usuario y la condición de fundido mira
+   la posición del alelo de **otro** componente, que la alineación puede
+   llevar lejos de su componente: acotarlo por rango exige una regla nueva
+   que el juez no tiene, no un índice. Con las pruebas de hoy no pesa.
+3. **`copy_is_reference_at`** (`src/vcf_grouping.rs`) recorre todas las
+   ventanas iguales a la referencia por cada caso **sin** `ALT`. Es cuadrático
+   en teoría, pero en las mediciones no se llamó ni una vez.
+4. **La memoria** sigue creciendo en línea recta, 0,21 MiB por locus con
+   10 individuos: los árboles JSON de la configuración efectiva y del
+   manifiesto (apartado 11.5). No era objeto de esta entrega; el catálogo
+   aparte de la entrega 4 la baja.
+5. **El evento técnico** cuesta unos 80 a 95 s con 10 individuos a 0,1× y no
+   depende del número de loci: es el muestreo de las lecturas del genoma
+   entero.
+

@@ -311,6 +311,7 @@ fn finish_records(
     // emitidos por F2.5.2 después de componer sus cambios. Nunca se infiere
     // renormalizando un `TruthAllele` aislado: eso perdería los casos de los
     // cambios que forman un ALT compuesto.
+    let sources = CarrierSources::new(&carriers_by_record);
     for genotype in truth.records.iter().filter_map(|record| match record {
         TruthRecord::Genotype(genotype) => Some(genotype),
         TruthRecord::HaplotypeCopy(_) => None,
@@ -321,10 +322,9 @@ fn finish_records(
             .filter(|carrier| carrier.allele_index != 0)
         {
             let mut mapped = false;
-            for (record_index, carriers) in carriers_by_record.iter().enumerate() {
-                let Some(projected) = carriers.get(&carrier.copy) else {
-                    continue;
-                };
+            for (record_index, projected) in
+                sources.touching(&carrier.copy, genotype.locus.start, genotype.locus.end)
+            {
                 if records[record_index].sequence_id == genotype.locus.sequence_id
                     && source_span_contains_locus(
                         projected,
@@ -597,6 +597,83 @@ fn repeat_sequences(blocks: &[crate::truth_schema::TruthRepeatBlock]) -> Vec<Vcf
             bases: block.bases,
         })
         .collect()
+}
+
+/// Los tramos fuente de los `ALT` de cada copia, para encontrar los registros
+/// de un caso sin recorrerlos todos (F6.4.a.8a).
+///
+/// Antes, cada portadora de cada caso miraba todos los registros del VCF:
+/// casos × registros, que con miles de microsatélites era la mayor parte de lo
+/// que tardaba en escribirse el VCF (183 de 191 s con 8 000 loci, medido el
+/// 29/10/2026).
+struct CarrierSources {
+    by_copy: BTreeMap<CopyIdentity, CopySources>,
+}
+
+/// Los `ALT` de una copia como `(registro, portadora)`, ordenados por el
+/// inicio de su tramo fuente y por registro, y el fin máximo acumulado de cada
+/// prefijo.
+type CopySources = (Vec<(usize, ProjectedCarrier)>, Vec<u64>);
+
+impl CarrierSources {
+    fn new(carriers_by_record: &[BTreeMap<CopyIdentity, ProjectedCarrier>]) -> Self {
+        let mut by_copy = BTreeMap::<CopyIdentity, CopySources>::new();
+        for (record_index, carriers) in carriers_by_record.iter().enumerate() {
+            for (copy, projected) in carriers {
+                by_copy
+                    .entry(copy.clone())
+                    .or_default()
+                    .0
+                    .push((record_index, *projected));
+            }
+        }
+        for (spans, reach) in by_copy.values_mut() {
+            spans.sort_by_key(|(record_index, projected)| (projected.source_start, *record_index));
+            let mut furthest = 0_u64;
+            *reach = spans
+                .iter()
+                .map(|(_, projected)| {
+                    furthest = furthest.max(projected.source_end);
+                    furthest
+                })
+                .collect();
+        }
+        Self { by_copy }
+    }
+
+    /// Los registros en que `copy` lleva un `ALT` cuyo tramo fuente **puede**
+    /// tocar el locus `[start, end)`: todos los que
+    /// [`source_span_contains_locus`] aceptaría y quizá alguno más, nunca uno
+    /// menos. Quien llama aplica la condición exacta.
+    ///
+    /// Un tramo que toca el locus empieza como mucho en su última base (en su
+    /// punto, si el locus está vacío) y acaba como poco en su inicio. Lo
+    /// primero acota por arriba con una búsqueda binaria sobre los inicios; lo
+    /// segundo se mira con el fin **acumulado** hacia atrás, de modo que no se
+    /// pierde un tramo largo que empieza mucho antes.
+    fn touching<'a>(
+        &'a self,
+        copy: &CopyIdentity,
+        start: u64,
+        end: u64,
+    ) -> impl Iterator<Item = (usize, &'a ProjectedCarrier)> + 'a {
+        let last_start = if start == end {
+            start
+        } else {
+            end.saturating_sub(1)
+        };
+        let (spans, reach): (&[(usize, ProjectedCarrier)], &[u64]) =
+            self.by_copy.get(copy).map_or((&[], &[]), |(spans, reach)| {
+                (spans.as_slice(), reach.as_slice())
+            });
+        let upper = spans.partition_point(|(_, projected)| projected.source_start <= last_start);
+        spans[..upper]
+            .iter()
+            .zip(&reach[..upper])
+            .rev()
+            .take_while(move |(_, furthest)| **furthest >= start)
+            .map(|((record_index, projected), _)| (*record_index, projected))
+    }
 }
 
 fn source_span_contains_locus(projected: &ProjectedCarrier, start: u64, end: u64) -> bool {
@@ -1622,5 +1699,53 @@ mod tests {
             error,
             VcfGroupingError::DuplicateCopyAtLocus { .. }
         ));
+    }
+
+    /// **F6.4.a.8a. El índice de los tramos fuente no pierde el que empieza
+    /// mucho antes del locus y lo contiene.**
+    ///
+    /// La copia lleva tres `ALT`: el del registro 0 con un tramo fuente largo,
+    /// `[100, 500)`; el del 1, corto y dentro de él, `[200, 210)`; y el del 2,
+    /// `[600, 610)`. Un locus en `[300, 310)` solo lo toca el tramo largo, que
+    /// empieza **antes** y acaba después: un índice que buscara el primer
+    /// candidato por su inicio lo perdería. El tramo corto va en medio a
+    /// propósito, para que el registro 1 no lo encuentre «de paso». Los
+    /// demás casos fijan los bordes con la condición exacta de siempre: un
+    /// locus vacío en el fin del tramo largo lo toca (intervalo cerrado), uno
+    /// que empieza en ese fin no, y una copia sin `ALT` no encuentra nada.
+    #[test]
+    fn carrier_sources_keep_a_long_source_span_that_starts_before_the_locus() {
+        let copy = identity("S1", 0);
+        let carrier = |start: u64, end: u64| {
+            BTreeMap::from([(
+                copy.clone(),
+                ProjectedCarrier {
+                    alt_index: 0,
+                    source_start: start,
+                    source_end: end,
+                },
+            )])
+        };
+        let records = vec![carrier(100, 500), carrier(200, 210), carrier(600, 610)];
+        let sources = CarrierSources::new(&records);
+        let found = |start: u64, end: u64| {
+            let mut found = sources
+                .touching(&copy, start, end)
+                .filter(|(_, projected)| source_span_contains_locus(projected, start, end))
+                .map(|(record, _)| record)
+                .collect::<Vec<_>>();
+            found.sort_unstable();
+            found
+        };
+        assert_eq!(found(300, 310), vec![0]);
+        assert_eq!(found(205, 206), vec![0, 1]);
+        assert_eq!(found(500, 500), vec![0]);
+        assert_eq!(found(500, 505), Vec::<usize>::new());
+        assert_eq!(found(605, 700), vec![2]);
+        assert_eq!(
+            sources.touching(&identity("S2", 0), 0, 1000).count(),
+            0,
+            "una copia sin ALT no encuentra nada"
+        );
     }
 }

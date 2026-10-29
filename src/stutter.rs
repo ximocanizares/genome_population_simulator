@@ -1012,6 +1012,10 @@ pub enum StutterError {
 /// la molécula entera: más allá del punto de corte leía bases del segundo
 /// origen, que podían tartamudear sin ser un tracto, y un tracto del segundo
 /// origen no se evaluaba nunca (DT-060).
+///
+/// `tracts` es el índice de la individua de la pareja para este mismo plan
+/// ([`StutterTractIndex::build`]): sitúa los tractos sin recorrer todos los
+/// loci por cada molécula.
 #[expect(
     clippy::too_many_arguments,
     reason = "el origen de la quimera es el octavo hecho de la pareja; agruparlo con la pareja movería la lista sin acortarla"
@@ -1019,7 +1023,7 @@ pub enum StutterError {
 pub fn transform_paired_end(
     root: RootSeed,
     event_id: &EventId,
-    individual: &Individual,
+    tracts: &StutterTractIndex,
     plan: &StutterPlan,
     lineage: Option<&crate::clonal_stutter::LineageNetSteps>,
     chimera: Option<&crate::chimera::ChimeraOrigin>,
@@ -1054,7 +1058,7 @@ pub fn transform_paired_end(
     // porque un paso desplaza todo lo que queda a su derecha.
     let placements = match chimera {
         None => place_tracts(
-            individual,
+            tracts,
             plan,
             &copy_id,
             pair.fragment().start(),
@@ -1064,7 +1068,7 @@ pub fn transform_paired_end(
             let breakpoint = origin.breakpoint().get();
             let second = origin.second();
             place_tracts_in_segments(
-                individual,
+                tracts,
                 plan,
                 &[
                     MoleculeSegment {
@@ -1411,6 +1415,158 @@ impl<'a> PlacedTract<'a> {
     }
 }
 
+/// Dónde cae cada tracto declarado en cada copia de una individua, en
+/// coordenadas **vigentes** de la copia (F6.4.a.7).
+///
+/// Antes, cada tramo de cada molécula recorría todos los loci de su secuencia
+/// y, para cada uno, las piezas de la copia hasta el suyo: moléculas × loci².
+/// El índice recorre las piezas de cada copia **una sola vez** por individua y
+/// guarda los tractos ordenados por inicio; cada tramo de molécula consulta
+/// después solo los que pueden tocarlo.
+///
+/// La regla de situar es la de siempre: un locus cae en la **primera** pieza,
+/// en el orden de la copia, que sea su alelo aplicado o una pieza de fuente que
+/// contenga entero su intervalo; si ninguna lo es, la copia no lo lleva.
+#[derive(Clone, Debug, Default)]
+pub struct StutterTractIndex {
+    copies: BTreeMap<crate::haplotype::HaplotypeCopyId, CopyTracts>,
+}
+
+/// Los tractos de una copia, ordenados por inicio, con el fin máximo
+/// acumulado: `reach[i]` es el mayor fin de `tracts[..=i]`.
+#[derive(Clone, Debug, Default)]
+struct CopyTracts {
+    tracts: Vec<IndexedTract>,
+    reach: Vec<u64>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct IndexedTract {
+    start: u64,
+    end: u64,
+    /// Posición del locus en [`StutterPlan::loci`].
+    locus: usize,
+}
+
+impl StutterTractIndex {
+    /// Sitúa los tractos del plan en todas las copias de la individua.
+    ///
+    /// # Errors
+    ///
+    /// `LengthOverflow` si la longitud acumulada de una copia no cabe en
+    /// `u64`. Antes solo se notaba al situar un tracto posterior al
+    /// desbordamiento; ahora, al construir el índice. Con longitudes de genoma
+    /// no puede ocurrir.
+    pub fn build(individual: &Individual, plan: &StutterPlan) -> Result<Self, StutterError> {
+        // Por secuencia, los loci del plan ordenados por inicio, y su posición
+        // por identificador para reconocer un alelo aplicado. Con
+        // identificadores repetidos (la configuración no los admite) gana el
+        // primero, como en el recorrido de antes.
+        let mut by_sequence = BTreeMap::<&SequenceId, Vec<usize>>::new();
+        let mut by_id = BTreeMap::<(&SequenceId, &RepeatLocusId), usize>::new();
+        for (position, locus) in plan.loci().iter().enumerate() {
+            by_sequence
+                .entry(locus.sequence_id())
+                .or_default()
+                .push(position);
+            by_id
+                .entry((locus.sequence_id(), locus.id()))
+                .or_insert(position);
+        }
+        for positions in by_sequence.values_mut() {
+            positions
+                .sort_by_key(|position| (plan.loci()[*position].interval().start(), *position));
+        }
+        let mut copies = BTreeMap::new();
+        for genotype in individual.sequences() {
+            for copy in genotype.copies() {
+                if copies.contains_key(copy.id()) {
+                    continue;
+                }
+                let sequence_id = copy.id().sequence_id();
+                let tracts = match by_sequence.get(sequence_id) {
+                    Some(positions) => copy_tracts(copy, plan, sequence_id, positions, &by_id)?,
+                    None => Vec::new(),
+                };
+                let mut reach = Vec::with_capacity(tracts.len());
+                let mut furthest = 0_u64;
+                for tract in &tracts {
+                    furthest = furthest.max(tract.end);
+                    reach.push(furthest);
+                }
+                copies.insert(copy.id().clone(), CopyTracts { tracts, reach });
+            }
+        }
+        Ok(Self { copies })
+    }
+}
+
+/// Recorre las piezas de una copia una vez y sitúa cada locus de su secuencia
+/// en la primera pieza que lo lleva.
+fn copy_tracts(
+    copy: &HaplotypeCopy,
+    plan: &StutterPlan,
+    sequence_id: &SequenceId,
+    positions: &[usize],
+    by_id: &BTreeMap<(&SequenceId, &RepeatLocusId), usize>,
+) -> Result<Vec<IndexedTract>, StutterError> {
+    let loci = plan.loci();
+    let mut placed = BTreeMap::<usize, TractPlacement>::new();
+    let mut offset = 0_u64;
+    for piece in copy.segments().current_modifications() {
+        match piece {
+            CurrentIndelPiece::RepeatAllele(allele) => {
+                if let Some(position) = by_id.get(&(sequence_id, allele.locus_id())) {
+                    let end = offset
+                        .checked_add(allele.tract().length())
+                        .ok_or(StutterError::LengthOverflow)?;
+                    placed
+                        .entry(*position)
+                        .or_insert(TractPlacement { start: offset, end });
+                }
+            }
+            CurrentIndelPiece::Source(source) if source.source().sequence_id() == sequence_id => {
+                let source_start = source.source().start();
+                let source_end = source.source().end();
+                let first = positions
+                    .partition_point(|position| loci[*position].interval().start() < source_start);
+                for position in &positions[first..] {
+                    let interval = loci[*position].interval();
+                    if interval.start() > source_end {
+                        break;
+                    }
+                    if interval.end() > source_end {
+                        continue;
+                    }
+                    let start = offset
+                        .checked_add(interval.start() - source_start)
+                        .ok_or(StutterError::LengthOverflow)?;
+                    let end = start
+                        .checked_add(interval.len())
+                        .ok_or(StutterError::LengthOverflow)?;
+                    placed
+                        .entry(*position)
+                        .or_insert(TractPlacement { start, end });
+                }
+            }
+            _ => {}
+        }
+        offset = offset
+            .checked_add(piece_length(piece)?)
+            .ok_or(StutterError::LengthOverflow)?;
+    }
+    let mut tracts = placed
+        .into_iter()
+        .map(|(locus, placement)| IndexedTract {
+            start: placement.start,
+            end: placement.end,
+            locus,
+        })
+        .collect::<Vec<_>>();
+    tracts.sort_by_key(|tract| (tract.start, tract.locus));
+    Ok(tracts)
+}
+
 /// Sitúa en una molécula los tractos declarados que contiene, en orden
 /// canónico.
 ///
@@ -1418,15 +1574,17 @@ impl<'a> PlacedTract<'a> {
 /// tienen que ver **los mismos tractos en el mismo orden**: si el linaje
 /// ordenara de otra manera, el paso neto y la decisión de base caerían sobre
 /// tractos distintos en cuanto hubiera dos.
+///
+/// `tracts` es el índice de la individua de la molécula para este mismo plan.
 pub fn place_tracts<'a>(
-    individual: &Individual,
+    tracts: &StutterTractIndex,
     plan: &'a StutterPlan,
     copy_id: &crate::haplotype::HaplotypeCopyId,
     fragment_start: u64,
     fragment_length: u64,
 ) -> Result<Vec<PlacedTract<'a>>, StutterError> {
     place_tracts_in_segments(
-        individual,
+        tracts,
         plan,
         &[MoleculeSegment {
             copy_id,
@@ -1448,28 +1606,34 @@ struct MoleculeSegment<'b> {
 /// Sitúa los tractos de cada tramo con su propia copia y los ordena en el
 /// orden canónico de la molécula entera.
 fn place_tracts_in_segments<'a>(
-    individual: &Individual,
+    tracts: &StutterTractIndex,
     plan: &'a StutterPlan,
     segments: &[MoleculeSegment<'_>],
 ) -> Result<Vec<PlacedTract<'a>>, StutterError> {
     let mut placements = Vec::new();
     for (index, segment) in segments.iter().enumerate() {
         let copy_id = segment.copy_id;
-        let Some(copy) = individual
-            .copies_for(copy_id.sequence_id())
-            .and_then(|copies| copies.iter().find(|candidate| *candidate.id() == *copy_id))
-        else {
+        let Some(copy) = tracts.copies.get(copy_id) else {
             return Err(StutterError::CopyNotFound {
                 sequence_id: copy_id.sequence_id().as_str().to_owned(),
                 copy_index: copy_id.copy_index(),
             });
         };
-        for locus in plan.loci() {
-            if locus.sequence_id() != copy_id.sequence_id() {
-                continue;
-            }
-            let Some(placement) = locate_tract_in_copy(copy, locus)? else {
-                continue;
+        // Solo pueden tocar el tramo los tractos que empiezan antes de su
+        // final y cuyo fin acumulado pasa de su inicio. El segundo límite usa
+        // el fin **acumulado** y no el inicio: un tracto que empieza antes del
+        // tramo y acaba dentro también lo toca.
+        let segment_end = segment.copy_start.saturating_add(segment.length);
+        let first = copy
+            .reach
+            .partition_point(|reach| *reach <= segment.copy_start);
+        let last = copy
+            .tracts
+            .partition_point(|tract| tract.start < segment_end);
+        for tract in copy.tracts.get(first..last).unwrap_or_default() {
+            let placement = TractPlacement {
+                start: tract.start,
+                end: tract.end,
             };
             let Some((start, end)) =
                 clip_to_molecule(placement, segment.copy_start, segment.length)
@@ -1477,7 +1641,7 @@ fn place_tracts_in_segments<'a>(
                 continue;
             };
             placements.push(PlacedTract {
-                locus,
+                locus: &plan.loci()[tract.locus],
                 start: start + segment.molecule_start,
                 end: end + segment.molecule_start,
                 from_first_segment: index == 0,
@@ -1509,55 +1673,6 @@ fn clip_to_molecule(
         return None;
     }
     Some((start - fragment_start, end - fragment_start))
-}
-
-/// Traduce el intervalo de referencia del locus a coordenadas **vigentes** de
-/// la copia, recorriendo sus piezas.
-///
-/// Hay dos casos y los dos son normales:
-///
-/// - la copia lleva un alelo de repetición aplicado, y entonces la pieza es
-///   suya y su longitud es la del tracto realizado;
-/// - el alelo sorteado coincidía byte a byte con el de la referencia, así que
-///   no se aplicó nada y el tracto vive dentro de una pieza de fuente. **Este
-///   segundo caso es justo el de la prueba de congelación acotada**, de modo
-///   que ignorarlo dejaría sin tartamudear precisamente el escenario que el
-///   plan usa para comprobar que el tartamudeo ocurre.
-fn locate_tract_in_copy(
-    copy: &HaplotypeCopy,
-    locus: &StutterLocus,
-) -> Result<Option<TractPlacement>, StutterError> {
-    let interval = locus.interval();
-    let mut offset = 0_u64;
-    for piece in copy.segments().current_modifications() {
-        match piece {
-            CurrentIndelPiece::RepeatAllele(allele) if allele.locus_id() == locus.id() => {
-                let length = allele.tract().length();
-                let end = offset
-                    .checked_add(length)
-                    .ok_or(StutterError::LengthOverflow)?;
-                return Ok(Some(TractPlacement { start: offset, end }));
-            }
-            CurrentIndelPiece::Source(source)
-                if source.source().sequence_id() == interval.sequence_id()
-                    && source.source().start() <= interval.start()
-                    && interval.end() <= source.source().end() =>
-            {
-                let start = offset
-                    .checked_add(interval.start() - source.source().start())
-                    .ok_or(StutterError::LengthOverflow)?;
-                let end = start
-                    .checked_add(interval.len())
-                    .ok_or(StutterError::LengthOverflow)?;
-                return Ok(Some(TractPlacement { start, end }));
-            }
-            _ => {}
-        }
-        offset = offset
-            .checked_add(piece_length(piece)?)
-            .ok_or(StutterError::LengthOverflow)?;
-    }
-    Ok(None)
 }
 
 fn piece_length(piece: &CurrentIndelPiece) -> Result<u64, StutterError> {
@@ -1786,6 +1901,99 @@ mod tests {
         // Molécula de 155 pb con motivo de 4 pb: quitar una la deja en 151 y
         // cabe; quitar dos la dejaría en 147, por debajo de la lectura de 150.
         assert_eq!(viable_steps(10, 4, 155, 150), vec![-1, 1]);
+    }
+
+    fn indexed_locus(id: &str, start: u64, end: u64) -> super::StutterLocus {
+        super::StutterLocus::new(
+            crate::identity::RepeatLocusId::parse(id, "test").expect("locus"),
+            crate::coordinates::GenomicInterval::new(
+                crate::identity::ReferenceId::parse("ref-main", "test").expect("referencia"),
+                crate::identity::SequenceId::parse("chr1", "test").expect("secuencia"),
+                start,
+                end,
+                1000,
+            )
+            .expect("intervalo"),
+            motifs("CA"),
+        )
+    }
+
+    /// **F6.4.a.7. El índice de tractos no pierde el que empieza antes del
+    /// tramo de la molécula y acaba dentro.**
+    ///
+    /// Tres loci en una individua diploide intacta: `STR-A` en `[100, 130)`,
+    /// `STR-B` en `[400, 460)` y `STR-C` en `[470, 480)`. El tramo `[420, 520)`
+    /// empieza **dentro** de `STR-B`: el tracto empieza antes del tramo y acaba
+    /// dentro, y tiene que salir recortado a `[0, 40)` de la molécula. Un
+    /// índice que buscara el primer tracto por su **inicio** (el primero que
+    /// empieza en 420 o después) lo perdería y solo vería `STR-C`; lo que lo
+    /// impide es buscar por el fin acumulado. `STR-A` va primero y es más corto
+    /// que la distancia, de modo que el fin acumulado no puede «tapar» el
+    /// error por casualidad. Los otros dos tramos fijan los bordes: uno que
+    /// acaba justo donde empieza un tracto no lo ve, y uno de una sola base
+    /// dentro del último par de `STR-A` sí. Y una copia que la individua no
+    /// tiene se rechaza como antes.
+    #[test]
+    fn the_tract_index_keeps_a_tract_that_starts_before_the_segment_and_ends_inside() {
+        use crate::haplotype::{Individual, Ploidy};
+        use crate::reference::{
+            DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
+        };
+        let reference = Reference::new(
+            crate::identity::ReferenceId::parse("ref-main", "test").expect("referencia"),
+            ReferenceOrigin::Generated,
+            vec![
+                ReferenceSequence::new(
+                    crate::identity::SequenceId::parse("chr1", "test").expect("secuencia"),
+                    FastaHeader::parse(b"chr1").expect("cabecera"),
+                    SequenceClass::Chromosome,
+                    &DnaSequence::try_from_bytes("ACGT".repeat(250).as_bytes()).expect("ADN"),
+                )
+                .expect("secuencia de referencia"),
+            ],
+        )
+        .expect("referencia");
+        let individual = Individual::from_reference(
+            crate::identity::IndividualId::parse("I1", "test").expect("individua"),
+            &reference,
+            Ploidy::new(2).expect("ploidía"),
+        );
+        let plan = super::StutterPlan::new(
+            settings(0.0),
+            vec![
+                indexed_locus("STR-A", 100, 130),
+                indexed_locus("STR-B", 400, 460),
+                indexed_locus("STR-C", 470, 480),
+            ],
+        );
+        let index = super::StutterTractIndex::build(&individual, &plan).expect("índice");
+        let copy = individual.sequences()[0].copies()[1].id().clone();
+        let windows = |start: u64, length: u64| {
+            super::place_tracts(&index, &plan, &copy, start, length)
+                .expect("tractos")
+                .iter()
+                .map(|placed| (placed.locus().id().as_str().to_owned(), placed.window()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            windows(420, 100),
+            vec![
+                ("STR-B".to_owned(), (0, 40)),
+                ("STR-C".to_owned(), (50, 60))
+            ]
+        );
+        assert_eq!(windows(0, 100), Vec::new());
+        assert_eq!(windows(129, 1), vec![("STR-A".to_owned(), (0, 1))]);
+        let foreign = Individual::from_reference(
+            crate::identity::IndividualId::parse("I2", "test").expect("individua"),
+            &reference,
+            Ploidy::new(1).expect("ploidía"),
+        );
+        let stranger = foreign.sequences()[0].copies()[0].id().clone();
+        assert!(matches!(
+            super::place_tracts(&index, &plan, &stranger, 0, 100),
+            Err(super::StutterError::CopyNotFound { .. })
+        ));
     }
 
     /// **F4.8.6 (b). Cuándo se abre la etapa `stutter`, y cuándo no.**

@@ -4793,6 +4793,36 @@ fn locus_interval_in_frame(
     ))
 }
 
+/// Intervalos `[inicio, fin)` de los loci ya admitidos, por secuencia y por
+/// inicio, con la posición de cada uno en el orden de declaración.
+type OccupiedLoci =
+    std::collections::BTreeMap<SequenceId, std::collections::BTreeMap<u64, (u64, usize)>>;
+
+/// El locus admitido **antes**, en orden de declaración, de entre los que se
+/// solapan con `interval`; `None` si ninguno lo hace.
+///
+/// Los intervalos admitidos no se solapan entre sí —el primero que lo hiciera
+/// se habría rechazado—, de modo que, ordenados por inicio, también lo están
+/// por fin. Por eso los que pisan `interval` son, como mucho, el último que
+/// empieza antes que él (si acaba después de su inicio) y todos los que
+/// empiezan dentro. Es el mismo conjunto que comparar con todos, sin
+/// recorrerlos: con miles de loci, aquella comparación era cuadrática.
+fn earliest_overlapping_locus(
+    occupied: &OccupiedLoci,
+    interval: &GenomicInterval,
+) -> Option<usize> {
+    let starts = occupied.get(interval.sequence_id())?;
+    let before = starts
+        .range(..interval.start())
+        .next_back()
+        .filter(|(_, (end, _))| *end > interval.start())
+        .map(|(_, (_, index))| *index);
+    let inside = starts
+        .range(interval.start()..interval.end())
+        .map(|(_, (_, index))| *index);
+    before.into_iter().chain(inside).min()
+}
+
 /// Resuelve los loci de repetición declarados.
 ///
 /// # El tope se comprueba **antes** de materializar nada
@@ -4841,6 +4871,10 @@ fn effective_repeat_loci(
     let frame_sequences = insertion.map_or(sequences, EffectiveTractInsertion::sequences);
     let mut resolved: Vec<EffectiveRepeatLocus> =
         Vec::with_capacity(general.reference().repeat_loci.len());
+    // Los intervalos ya admitidos, por secuencia y por inicio, con su orden de
+    // declaración: la comprobación de solapes mira solo los vecinos del
+    // intervalo nuevo en vez de recorrer todos los anteriores (F6.4.a.6).
+    let mut occupied = OccupiedLoci::new();
     for locus in &general.reference().repeat_loci {
         // El identificador del locus es **tipado**: lo declara el usuario y se
         // valida con la misma sintaxis que el resto de identificadores
@@ -4917,19 +4951,26 @@ fn effective_repeat_loci(
             )
         })?;
         // Dos loci que se solapan describirían el mismo tracto dos veces y
-        // producirían dos alelos sobre las mismas bases.
-        if let Some(previous) = resolved.iter().find(|other| {
-            other.declaration().interval().sequence_id() == interval.sequence_id()
-                && other.declaration().interval().start() < interval.end()
-                && interval.start() < other.declaration().interval().end()
-        }) {
+        // producirían dos alelos sobre las mismas bases. El diagnóstico nombra
+        // el **primero en orden de declaración** de los anteriores que se
+        // solapan, como cuando se comparaba con todos uno a uno.
+        if let Some(previous) = earliest_overlapping_locus(&occupied, &interval) {
             return Err(repeat_error(
                 general,
                 "reference.repeat_loci.start,reference.repeat_loci.end",
                 locus.id.value(),
-                format!("su intervalo se solapa con el del locus {}", previous.id()),
+                format!(
+                    "su intervalo se solapa con el del locus {}",
+                    resolved[previous].id()
+                ),
             ));
         }
+        // Cada vuelta del bucle publica exactamente un locus en `resolved` o
+        // termina con un error, así que su posición es `resolved.len()`.
+        occupied
+            .entry(interval.sequence_id().clone())
+            .or_default()
+            .insert(interval.start(), (interval.end(), resolved.len()));
         // La guarda de intervalo contra motivo vive en el tipo del dominio, no
         // reescrita aquí: una sola representación del mismo concepto.
         let declaration =
