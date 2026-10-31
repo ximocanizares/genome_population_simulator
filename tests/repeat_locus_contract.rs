@@ -17,6 +17,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use genome_population_simulator::application::{EffectiveConfig, load_and_validate_config};
 use genome_population_simulator::execution::execute_validated_config;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -64,7 +67,7 @@ frequency = 0.4
 
 fn write_config(body: &str) -> PathBuf {
     let path = temporary("toml");
-    fs::write(&path, body).expect("documento general");
+    fs::write(&path, detection_section::with_detection_section(body)).expect("documento general");
     path
 }
 
@@ -443,7 +446,9 @@ frequency = 0.2
 /// siendo válido en las dos medidas y lo único que cambia es su tamaño.
 #[test]
 fn a_legitimate_document_of_65536_bytes_is_admitted_and_65537_is_rejected() {
-    let base = header("4") + MINIMAL_LOCUS;
+    // La sección de microsatélites va **antes** del relleno: añadida después
+    // por `write_config`, el documento pasaría del tamaño medido.
+    let base = detection_section::with_detection_section(&(header("4") + MINIMAL_LOCUS));
     let pad = |target: usize| {
         let mut body = base.clone();
         body.push_str("\n# ");
@@ -500,6 +505,8 @@ fn the_general_v4_authoring_schema_accepts_the_declared_document() {
             "id": "ref-main",
             "composition": {"A": 0.25, "C": 0.25, "G": 0.25, "T": 0.25},
             "sequences": [{"id": "chr1", "class": "chromosome", "length": 1000}],
+            // La sección de microsatélites: sin ella, repeat_loci no se admite.
+            "repeat_detection": {"slippage": {"model": "stepwise", "mean_events": 1.0}},
             "repeat_loci": [{
                 "id": "STR-1",
                 "sequence": "chr1",
@@ -822,6 +829,8 @@ fn the_authoring_schema_rejects_what_the_reader_rejects() {
                 "id": "ref-main",
                 "composition": {"A": 0.25, "C": 0.25, "G": 0.25, "T": 0.25},
                 "sequences": [{"id": "chr1", "class": "chromosome", "length": 1000}],
+                // La sección de microsatélites: sin ella, repeat_loci no se admite.
+                "repeat_detection": {"slippage": {"model": "stepwise", "mean_events": 1.0}},
                 "repeat_loci": [{
                     "id": "STR-1",
                     "sequence": "chr1",
@@ -908,6 +917,8 @@ fn the_authoring_schema_closes_the_two_motif_forms() {
                 "id": "ref-main",
                 "composition": {"A": 0.25, "C": 0.25, "G": 0.25, "T": 0.25},
                 "sequences": [{"id": "chr1", "class": "chromosome", "length": 1000}],
+                // La sección de microsatélites: sin ella, repeat_loci no se admite.
+                "repeat_detection": {"slippage": {"model": "stepwise", "mean_events": 1.0}},
                 "repeat_loci": [value]
             }
         })
@@ -1447,6 +1458,8 @@ fn the_authoring_schema_closes_what_it_can_of_the_multi_motif_frontier() {
                 "id": "ref-main",
                 "composition": {"A": 0.25, "C": 0.25, "G": 0.25, "T": 0.25},
                 "sequences": [{"id": "chr1", "class": "chromosome", "length": 1000}],
+                // La sección de microsatélites: sin ella, repeat_loci no se admite.
+                "repeat_detection": {"slippage": {"model": "stepwise", "mean_events": 1.0}},
                 "repeat_loci": [{
                     "id": "STR-1", "sequence": "chr1", "start": 101, "end": 160,
                     "motifs": ["CAG", "CA"], "reference_units": [10, 15], "alleles": [allele]
@@ -1525,6 +1538,8 @@ fn the_schemas_carry_reference_units_where_they_mean_something() {
             "kind": kind,
             "id": "ref-main",
             "sequences": [{"id": "chr1", "class": "chromosome", "length": 1000}],
+            // La sección de microsatélites: sin ella, repeat_loci no se admite.
+            "repeat_detection": {"slippage": {"model": "stepwise", "mean_events": 1.0}},
             "repeat_loci": [locus]
         });
         if kind == "simulated" {
@@ -1831,7 +1846,7 @@ fn published_effective_config(body: &str) -> serde_json::Value {
     let root = temporary("run");
     fs::create_dir_all(&root).expect("directorio de trabajo");
     let config = root.join("general.toml");
-    fs::write(&config, body).expect("documento general");
+    fs::write(&config, detection_section::with_detection_section(body)).expect("documento general");
     let effective = load_and_validate_config(&config).expect("configuración válida");
     let destination = root.join("published");
     execute_validated_config(&effective, &destination).expect("publicación");

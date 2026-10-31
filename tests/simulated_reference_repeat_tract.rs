@@ -42,6 +42,9 @@ use genome_population_simulator::results::validate_published_resources;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -132,7 +135,7 @@ fn publish(document: &str) -> PathBuf {
     let root = temporary("run");
     fs::create_dir_all(&root).expect("directorio");
     let config = root.join("general.toml");
-    fs::write(&config, document).expect("configuración");
+    fs::write(&config, detection_section::with_detection_section(document)).expect("configuración");
     let effective = load_and_validate_config(&config).expect("configuración válida");
     let destination = root.join("published");
     execute_validated_config(&effective, &destination).expect("publicación");
@@ -599,7 +602,7 @@ fn rejection(document: &str) -> (String, String) {
     fs::create_dir_all(&root).expect("directorio");
     fs::write(root.join("reference.fa"), supplied_fasta()).expect("FASTA");
     let config = root.join("general.toml");
-    fs::write(&config, document).expect("configuración");
+    fs::write(&config, detection_section::with_detection_section(document)).expect("configuración");
     let error = load_and_validate_config(&config).expect_err("la configuración se rechaza");
     (
         error.context().get("fields").cloned().unwrap_or_default(),
@@ -697,7 +700,11 @@ fn reference_units_with_a_supplied_reference_are_rejected() {
     let root = temporary("supplied");
     fs::create_dir_all(&root).expect("directorio");
     fs::write(root.join("reference.fa"), supplied_fasta()).expect("FASTA");
-    fs::write(root.join("general.toml"), &without).expect("configuración");
+    fs::write(
+        root.join("general.toml"),
+        detection_section::with_detection_section(&without),
+    )
+    .expect("configuración");
     load_and_validate_config(&root.join("general.toml"))
         .expect("sin el campo, el compuesto sobre referencia suministrada se admite");
 
@@ -781,7 +788,7 @@ fn write(document: &str) -> PathBuf {
     let root = temporary("valid");
     fs::create_dir_all(&root).expect("directorio");
     let path = root.join("general.toml");
-    fs::write(&path, document).expect("configuración");
+    fs::write(&path, detection_section::with_detection_section(document)).expect("configuración");
     path
 }
 
@@ -868,8 +875,11 @@ fn every_corruption_of_a_published_tract_is_rejected_by_its_own_branch() {
     let original: Value =
         serde_json::from_slice(&fs::read(&effective_path).expect("configuración efectiva"))
             .expect("JSON");
-    assert_eq!(original["repeat_loci"][0]["id"], "STR-2");
-    assert_eq!(original["repeat_loci"][1]["id"], "STR-C");
+    // El catálogo va **por secuencia y por inicio** desde la entrega 3 del
+    // plan de detección (DTC-103), no en el orden del TOML: `STR-C`, en `chr1`,
+    // va antes que `STR-2`, en `chr2`, aunque se declare después.
+    assert_eq!(original["repeat_loci"][0]["id"], "STR-C");
+    assert_eq!(original["repeat_loci"][1]["id"], "STR-2");
     let judge = |document: &Value| {
         validate_published_resources(
             &destination,
@@ -887,7 +897,7 @@ fn every_corruption_of_a_published_tract_is_rejected_by_its_own_branch() {
         (
             "sin secuencia",
             |document| {
-                document["repeat_loci"][1]
+                document["repeat_loci"][0]
                     .as_object_mut()
                     .expect("locus")
                     .remove("sequence_id");
@@ -896,35 +906,35 @@ fn every_corruption_of_a_published_tract_is_rejected_by_its_own_branch() {
         ),
         (
             "inicio cero",
-            |document| document["repeat_loci"][1]["start"] = serde_json::json!(0),
+            |document| document["repeat_loci"][0]["start"] = serde_json::json!(0),
             "el inicio no es una coordenada de base uno",
         ),
         (
             "final antes del inicio",
-            |document| document["repeat_loci"][1]["end"] = serde_json::json!(100),
+            |document| document["repeat_loci"][0]["end"] = serde_json::json!(100),
             "el final no es posterior al inicio",
         ),
         (
             "motivos vacíos",
-            |document| document["repeat_loci"][1]["motifs"] = serde_json::json!([]),
+            |document| document["repeat_loci"][0]["motifs"] = serde_json::json!([]),
             "los motivos no son una lista de textos no vacíos",
         ),
         (
             "unidades que no son enteros",
             |document| {
-                document["repeat_loci"][1]["reference_units"] = serde_json::json!(["4", "9"]);
+                document["repeat_loci"][0]["reference_units"] = serde_json::json!(["4", "9"]);
             },
             "reference_units no es una lista de enteros",
         ),
         (
             "unidades en un locus simple",
-            |document| document["repeat_loci"][0]["reference_units"] = serde_json::json!([15]),
+            |document| document["repeat_loci"][1]["reference_units"] = serde_json::json!([15]),
             "locus STR-2 en la referencia simulada: un locus de un solo motivo publica reference_units",
         ),
         (
             "compuesto sin unidades",
             |document| {
-                document["repeat_loci"][1]
+                document["repeat_loci"][0]
                     .as_object_mut()
                     .expect("locus")
                     .remove("reference_units");
@@ -933,27 +943,27 @@ fn every_corruption_of_a_published_tract_is_rejected_by_its_own_branch() {
         ),
         (
             "un valor para dos bloques",
-            |document| document["repeat_loci"][1]["reference_units"] = serde_json::json!([4]),
+            |document| document["repeat_loci"][0]["reference_units"] = serde_json::json!([4]),
             "reference_units no tiene un valor por motivo",
         ),
         (
             "bloque que se sale del tramo",
             |document| {
-                document["repeat_loci"][1]["reference_units"] = serde_json::json!([4, 20]);
+                document["repeat_loci"][0]["reference_units"] = serde_json::json!([4, 20]);
             },
             "un bloque de reference_units está vacío o se sale del tramo",
         ),
         (
             "bloque vacío",
             |document| {
-                document["repeat_loci"][1]["reference_units"] = serde_json::json!([0, 15]);
+                document["repeat_loci"][0]["reference_units"] = serde_json::json!([0, 15]);
             },
             "un bloque de reference_units está vacío o se sale del tramo",
         ),
         (
             "bloques que no cubren el tramo",
             |document| {
-                document["repeat_loci"][1]["reference_units"] = serde_json::json!([4, 5]);
+                document["repeat_loci"][0]["reference_units"] = serde_json::json!([4, 5]);
             },
             "los bloques de reference_units no cubren el tramo entero",
         ),
@@ -969,28 +979,28 @@ fn every_corruption_of_a_published_tract_is_rejected_by_its_own_branch() {
         (
             "último bloque de u64::MAX unidades",
             |document| {
-                document["repeat_loci"][1]["reference_units"] = serde_json::json!([4, u64::MAX]);
+                document["repeat_loci"][0]["reference_units"] = serde_json::json!([4, u64::MAX]);
             },
             "un bloque de reference_units está vacío o se sale del tramo",
         ),
         (
             "último bloque de diez millones de unidades",
             |document| {
-                document["repeat_loci"][1]["reference_units"] = serde_json::json!([4, 10_000_000]);
+                document["repeat_loci"][0]["reference_units"] = serde_json::json!([4, 10_000_000]);
             },
             "un bloque de reference_units está vacío o se sale del tramo",
         ),
         (
             "último bloque cuyo producto da la vuelta a u64",
             |document| {
-                document["repeat_loci"][1]["reference_units"] =
+                document["repeat_loci"][0]["reference_units"] =
                     serde_json::json!([4, (1_u64 << 63) + 9]);
             },
             "un bloque de reference_units está vacío o se sale del tramo",
         ),
         (
             "final de veinte millones de bases",
-            |document| document["repeat_loci"][0]["end"] = serde_json::json!(20_000_000),
+            |document| document["repeat_loci"][1]["end"] = serde_json::json!(20_000_000),
             "el tramo no cabe en la secuencia de la referencia publicada",
         ),
     ];
@@ -1053,9 +1063,9 @@ fn a_tract_end_must_fit_in_its_own_sequence_and_not_in_another_one() {
         )
     };
     judge(&original).expect("el documento intacto se acepta");
-    assert_eq!(original["repeat_loci"][1]["sequence_id"], "chr1");
+    assert_eq!(original["repeat_loci"][0]["sequence_id"], "chr1");
     let mut corrupt = original.clone();
-    corrupt["repeat_loci"][1]["end"] = serde_json::json!(1500);
+    corrupt["repeat_loci"][0]["end"] = serde_json::json!(1500);
     let error = judge(&corrupt).expect_err("un final fuera de su secuencia");
     let detail = error.context().get("detail").cloned().unwrap_or_default();
     assert!(
@@ -1126,7 +1136,11 @@ frequency = 1.0
     let root = temporary("impure");
     fs::create_dir_all(&root).expect("directorio");
     let config = root.join("general.toml");
-    fs::write(&config, scenario(&locus(108), 2)).expect("configuración");
+    fs::write(
+        &config,
+        detection_section::with_detection_section(&scenario(&locus(108), 2)),
+    )
+    .expect("configuración");
     let effective =
         load_and_validate_config(&config).expect("la configuración se admite al leerla");
     let error = execute_validated_config(&effective, &root.join("published"))

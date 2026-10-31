@@ -55,6 +55,9 @@ use rand_chacha::rand_core::{Rng, SeedableRng};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 const SEED_HEX: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 /// Contexto de derivación del proyecto, escrito aquí a mano.
 const DERIVATION_CONTEXT: &str = "genome_population_simulator/v1/subseed";
@@ -1055,7 +1058,7 @@ fn run_scenario(
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED_HEX}"
@@ -1125,7 +1128,7 @@ i5 = "TGCATGCA"
                     "[[technical_event.stutter.steps]]\nunits = {units}\nweight = {weight}\n\n"
                 ))
                 .collect::<String>(),
-        ),
+        )),
     )
     .expect("configuración");
     let destination = root.join("published");

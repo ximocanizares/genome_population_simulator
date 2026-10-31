@@ -41,6 +41,9 @@ use genome_population_simulator::vcf_semantic_validation::{
 };
 use serde_json::Value;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 const SEED: &str = "5555555555555555555555555555555555555555555555555555555555555555";
@@ -184,7 +187,7 @@ fn write_scenario(root: &Path, bases: &[u8], loci: &str, events: &[Event], vcf: 
         ));
     }
     let path = root.join("general.toml");
-    fs::write(&path, config).expect("configuration");
+    fs::write(&path, detection_section::with_detection_section(&config)).expect("configuration");
     path
 }
 
@@ -1467,15 +1470,39 @@ fn a_deletion_that_crosses_a_tract_extends_the_record_to_its_original_end() {
 /// entero quedaba anclada en su última base. Desde el 2 de octubre de 2026 el
 /// límite solo actúa si la alineación acabaría dentro del tracto, y la salida
 /// de `61b9177`, publicada por ese binario sobre los mismos ficheros, vuelve.
+///
+/// **Salvo la línea del identificador de ejecución**, desde la entrega 3 del
+/// plan de detección: el TOML del escenario lleva ahora la sección de
+/// microsatélites, y el identificador se deriva de sus bytes. Esa línea se
+/// compara sin su valor; todas las demás, byte a byte.
 #[test]
 fn where_the_previous_algorithm_was_exact_its_vcf_comes_back() {
+    let without_execution_id = |bytes: Vec<u8>| -> String {
+        let text = String::from_utf8(bytes).expect("VCF de texto");
+        assert_eq!(
+            text.lines()
+                .filter(|line| line.starts_with("##gps_execution_id="))
+                .count(),
+            1,
+            "el VCF lleva una sola línea de identificador de ejecución"
+        );
+        text.split_inclusive('\n')
+            .map(|line| {
+                if line.starts_with("##gps_execution_id=") {
+                    "##gps_execution_id=\n"
+                } else {
+                    line
+                }
+            })
+            .collect()
+    };
     for name in ["x-1392", "x-12168", "x-14771"] {
         let published = publish_fixture(name);
         let expected =
             fs::read(review_fixture(name).join("truth-61b9177.vcf")).expect("VCF de 61b9177");
         assert_eq!(
-            fs::read(published.vcf_path()).expect("VCF"),
-            expected,
+            without_execution_id(fs::read(published.vcf_path()).expect("VCF")),
+            without_execution_id(expected),
             "{name}"
         );
         assert_published_vcf_is_exact(&published);

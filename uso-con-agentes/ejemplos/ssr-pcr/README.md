@@ -22,3 +22,9 @@ Valores que deben salir:
 Sirve para comparar con `ssr-sin-pcr`, que tiene la misma semilla y la misma
 verdad. Para ver tartamudeo heredado por familias haría falta un homopolímero,
 menos ciclos o más cobertura.
+
+Desde el 30/10/2026 el TOML lleva la sección `[reference.repeat_detection]`,
+obligatoria para declarar un microsatélite: el simulador detecta los de la
+referencia y el declarado coincide con el único que hay. Los resultados son los
+de antes (comprobado comparando con el binario anterior: mismos FASTQ y misma
+verdad salvo el identificador de ejecución).

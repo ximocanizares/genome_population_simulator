@@ -603,7 +603,7 @@ motif = "CA"
         );
         let admitted = admit_toml_header(
             Path::new("repeat-genotype-draw-unit.toml"),
-            source.into_bytes(),
+            crate::test_detection_section::with_detection_section(&source).into_bytes(),
             ExpectedConfigKind::General,
         )
         .expect("header");

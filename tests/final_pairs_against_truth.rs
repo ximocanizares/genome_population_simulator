@@ -24,6 +24,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use final_pairs_oracle::{OracleTally, check_final_pairs_against_truth};
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 const SEED: &str = "6a1f0c3e9b2d47586e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5";
@@ -100,13 +103,13 @@ impl Scenario {
         let config = root.join("general.toml");
         fs::write(
             &config,
-            format!(
+            detection_section::with_detection_section(&format!(
                 "config_kind = \"general\"\nschema_version = \"4\"\nseed = \"{SEED}\"\n\n\
                  [population_snvs]\nmode = \"supplied\"\ninput_path = \"population-snvs.tsv\"\n\n\
                  [reference]\nkind = \"supplied\"\nid = \"ref-main\"\nfasta = \"reference.fa\"\n\n\
                  {declared}{}\n{}",
                 self.body, self.event
-            ),
+            )),
         )
         .expect("configuración");
         let destination = root.join("published");

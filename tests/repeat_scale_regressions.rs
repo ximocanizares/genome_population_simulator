@@ -15,6 +15,9 @@ use genome_population_simulator::application::build_effective_config;
 use genome_population_simulator::configuration::ExpectedConfigKind;
 use genome_population_simulator::diagnostics::Diagnostic;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 const SEED: &str = "5e2a9c7b1d3f4068a2c4e6f8091b3d5f7a9c1e3f5072b4d6f8a0c2e4f6a8b0c2";
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -98,7 +101,13 @@ fn document_with_loci(root: &Path, loci: &[(&str, usize, usize)]) -> (PathBuf, S
         "[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nploidy = 2\n\
          genotype_model = \"hwe\"\nindividual_ids = [\"S1\"]\n",
     );
-    (root.join("general.toml"), text)
+    // Con la sección de microsatélites, sin la cual un locus declarado no
+    // existe (REQ-CONF-142): el solape se juzga al resolver la configuración,
+    // antes de detectar nada.
+    (
+        root.join("general.toml"),
+        detection_section::with_detection_section(&text),
+    )
 }
 
 fn overlap_detail(diagnostic: &Diagnostic) -> String {
@@ -300,7 +309,7 @@ fn preflight_with_small_variants(
         ));
     }
     let path = root.0.join("general.toml");
-    fs::write(&path, text).expect("documento");
+    fs::write(&path, detection_section::with_detection_section(&text)).expect("documento");
     let effective = load_and_validate_config(&path)?;
     preflight_validated_config_with_authorizations(&effective, ExecutionAuthorizations::default())
 }

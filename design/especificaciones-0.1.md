@@ -1013,8 +1013,8 @@ su asignación por fase está en la matriz de trazabilidad.
   Igual que la sustitución directa, el campo solo tiene efecto con loci de
   repetición declarados.
 - **REQ-CONF-142.** La detección de microsatélites se configura en una **sección
-  propia** del documento general, cuyo nombre provisional es
-  `[reference.repeat_detection]` y cuya **presencia activa la detección**
+  propia** del documento general, `[reference.repeat_detection]`, cuya
+  **presencia activa la detección**
   (REQ-REF-38). La sección **declara el deslizamiento común**: el generador
   de REQ-CONF-139 —modelo, media de pasos, sesgo de expansión y tamaño de
   paso—, que se aplica a todo locus detectado y a todo locus declarado que no
@@ -1033,10 +1033,15 @@ su asignación por fase está en la matriz de trazabilidad.
   sección se rechaza antes de simular, con un diagnóstico que remite a ella.
   Donde otros requisitos hablan de «loci de repetición declarados»
   (REQ-CONF-138, REQ-CONF-141), se entiende **los loci del catálogo** de la
-  simulación, detectados o declarados. **Provisional, pendiente de la pausa de
-  la entrega 1:** el nombre definitivo de la sección, un tope de unidades
-  común para los detectados y una posible lista de regiones a las que limitar
-  la detección.
+  simulación, detectados o declarados. Decidido en la pausa de la entrega 1
+  del plan de detección (29/10/2026): la sección conserva su nombre; admite un
+  **tope de unidades** común para los detectados (`max_units`, 200 por
+  omisión), por encima del cual un tramo se descarta como satélite; y una
+  **lista opcional de regiones** (`[[reference.repeat_detection.regions]]`,
+  con secuencia, inicio y fin en base uno y coordenadas de la referencia
+  final), sin la cual se barre la referencia entera. Una región fuera de su
+  secuencia, dos regiones solapadas de la misma secuencia o una lista vacía
+  se rechazan antes de simular.
 - **REQ-CONF-143.** Un cambio de base escrito a mano, una fila suministrada de la
   matriz de SNV o un SNV de los cambios directos que caiga **dentro de un tramo
   detectado** **retira ese tramo del catálogo**: queda sin variación, y la
@@ -1704,15 +1709,34 @@ su asignación por fase está en la matriz de trazabilidad.
   suficiente, juzgada con la puntuación del propio detector y con la medida de
   pureza que el simulador ya aplica a todo tracto. El sistema debe **contar**
   cuántos tramos descarta y por qué, por longitud de motivo y por criterio.
-  **Provisional, pendiente de la pausa de decisión de la entrega 1 del plan de
-  detección:** sobre qué se cuentan las copias, las fronteras del tramo, la
-  regla de desempate entre tramos solapados, el trato de los tractos
-  compuestos e impuros, el tope de unidades para descartar satélites, la
-  `N` y los bordes de secuencia, y la forma de los identificadores de los loci
-  detectados; todo ello se fija con las cifras medidas sobre el tomate reducido
-  y no se escribe aquí hasta entonces. El algoritmo de detección es el del
-  proyecto `pop_var_caller`, copiado con su atribución y sin depender de él
-  (DTC-103).
+  Decidido en la pausa de la entrega 1 del plan de detección (29/10/2026),
+  con las cifras medidas sobre el tomate reducido, y completado el 30/10/2026:
+  - las copias que cuentan son las **copias completas** de la descomposición
+    con la que el simulador anota el alelo, y la pureza y la tirada mínimas son
+    las generales de `[reference.repeat_admission]` (0,8 y 3 por omisión), sin
+    una segunda perilla;
+  - el motivo es la lectura del tramo **en la fase de su inicio**, y las
+    **fronteras** son las del detector, sin recortar (el tramo no empieza
+    dentro de una tira previa de su misma base);
+  - entre **tramos solapados** gana uno por regla fija —mayor puntuación del
+    detector, luego más bases, luego periodo menor, luego el de la
+    izquierda— y los demás se descartan y se cuentan; dos tramos que solo se
+    tocan no se solapan;
+  - la detección produce **solo loci de un motivo**: un compuesto se declara
+    a mano (REQ-REF-40);
+  - un tramo de más de un **tope de unidades** común, 200 por omisión y
+    declarable en la sección, es un satélite y se descarta;
+  - una **`N` suelta dentro de un tracto** cuenta como discrepancia de pureza,
+    no lo corta; el tramo necesita **una base A, C, G o T a cada lado**, de
+    modo que uno pegado al borde de la secuencia o a una `N` se descarta;
+  - con la lista opcional de **regiones** (REQ-CONF-142), un tramo se detecta
+    solo si cabe **entero** en una de ellas;
+  - el identificador de un locus detectado es
+    `SSR-<índice de la secuencia en base uno>-<inicio>-<fin>-<motivo>`, en base
+    uno y en coordenadas de la referencia final (DTC-096).
+  El algoritmo de detección es el del proyecto `pop_var_caller`, copiado con su
+  atribución y sin depender de él (DTC-103). Sus pérdidas conocidas en la
+  frontera entre repeticiones pegadas están en DT-061.
 - **REQ-REF-40.** Con la sección de microsatélites, **todo locus declarado a mano,
   todo tracto insertado y todo tracto plantado debe coincidir con uno
   detectado**, o la configuración se rechaza antes de simular, nombrando el
@@ -1722,11 +1746,18 @@ su asignación por fase está en la matriz de trazabilidad.
   declarado **conserva los alelos que el usuario escribió a mano**. Un locus
   declarado con motivo de **siete o más pares de base** es una **excepción**
   (REQ-CONF-60): la detección solo ve de 1 a 6 y no podría coincidir nunca.
-  **Provisional, pendiente de la pausa de la entrega 1:** la regla exacta de
-  coincidencia (la propuesta es que el intervalo declarado se solape con un
-  tramo detectado cuyo motivo sea una rotación de uno de los declarados) y qué
-  fronteras mandan (la propuesta es que mandan las del declarado, que
-  sustituye a los detectados que solapa).
+  La regla de coincidencia, decidida en la pausa de la entrega 1 del plan de
+  detección (29/10/2026): el intervalo declarado, en coordenadas de la
+  referencia final, **se solapa** con un tramo detectado de su secuencia
+  —después de los criterios, las regiones y los solapes— cuyo motivo es **una
+  rotación** de uno de los declarados. Mandan las **fronteras del declarado**,
+  que **sustituye** a todos los detectados que solapa y conserva su
+  identificador; un compuesto coincide así con los tramos de sus motivos
+  aunque alguno no se detecte, y uno de siete o más pares de base sustituye
+  también a lo que solapa. Sin coincidencia, el rechazo nombra el locus, el
+  detectado más cercano de su secuencia y la etapa en la que cayó el tramo de
+  su motivo que lo solapaba. Un declarado con el identificador de un detectado
+  que queda en el catálogo se rechaza como identificador repetido.
 
 **Decisión funcional cerrada el 14 de agosto de 2026.** `reduction_percent`
 expresa el porcentaje eliminado, usa el cálculo decimal exacto y el redondeo de

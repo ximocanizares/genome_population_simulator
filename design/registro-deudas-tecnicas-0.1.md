@@ -94,6 +94,7 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-058 | Los alelos de los microsatélites ignoran el coeficiente de endogamia F: con `f_diploid` se sorteaban copia a copia como en Hardy-Weinberg | Media | 25/10/2026 | **Cerrada (25/10/2026)** |
 | DT-059 | Con `schema_version = "3"` y microsatélites, el error habla del escenario F5 y de un campo desconocido `initial_populations`, no de la versión | Baja | 25/10/2026 | Abierta |
 | DT-060 | En una molécula quimérica, el tartamudeo situaba los tractos con la copia del primer tramo sobre la molécula entera: tartamudeaba bases que no eran un tracto y no evaluaba los tractos del segundo tramo | Media | 27/10/2026 | **Cerrada (27/10/2026)** |
+| DT-061 | Se pierden microsatélites pegados a otro: (a) por **nuestra** regla de solapes, que descarta entero el tramo que pisa a otro solo en la copia parcial de la frontera (`(CA)×10 A×12`, el `(TCTG)` central de un compuesto); (b) por el buscador de `pop_var_caller`, que no emite un microsatélite corto entre dos tiras largas de una misma base ni recupera una repetición con una interrupción que desplaza la fase | Media | 30/10/2026 | Abierta: (a) arreglo propio pendiente de decisión; (b) pendiente de una versión nueva de `pop_var_caller` |
 
 ---
 
@@ -5629,3 +5630,81 @@ buscara los tractos del sufijo con la secuencia del prefijo, y que la batería
 anterior dejaba pasar. Ver `evidence/final-pairs-f4-5-3/mutaciones.md` (M21 y
 M23).
 
+## DT-061. Se pierden microsatélites pegados a otro: una parte por nuestra regla de solapes y otra por el buscador de `pop_var_caller`
+
+**Gravedad: media.** Hallada el 30/10/2026 al copiar en
+`src/repeat_detection.rs` el núcleo nuevo de `pop_var_caller` (`fa215c23`,
+rama `str-adjacent-runs`). Ver el apartado 11.11 del plan de detección de
+microsatélites. **Abierta.** **Corregida el 31/10/2026:** la primera versión
+de esta entrada atribuía todas las pérdidas al buscador copiado; una sonda que
+separa lo que devuelve el buscador de lo que hacen después nuestros criterios
+y nuestra regla de solapes demostró que la parte (a) es nuestra.
+
+El núcleo nuevo ya no funde dos repeticiones pegadas de motivos distintos
+(`A×12 T×12`, `G×60 A×15`, `(GA)×12 C×12` y `(CA)×10 (GT)×10` salen como dos
+loci). Quedan dos causas de pérdida distintas.
+
+### (a) Nuestra regla de solapes descarta entero un tramo que pisa a otro en la frontera
+
+Un microsatélite suele acabar con una copia parcial del motivo que coincide
+con el principio de lo que viene detrás. **El buscador emite bien los dos
+tramos**, nuestros criterios (suelo, pureza, tirada, tope, borde) **aceptan
+los dos**, y es la regla de solapes (DP-SSR-05: puntuación > longitud >
+periodo menor > posición) la que descarta uno **entero** aunque solo comparta
+una base. Sonda del 31/10/2026, coordenadas relativas al tracto:
+
+| Secuencia | Intervalos de `find_tandem_repeats` | Criterios | Tras la regla de solapes |
+|---|---|---|---|
+| `(CA)×10 A×12` | `CA [0,20)` y `A [19,32)` (1 base común) | aceptan los dos | solo `[0,20)`: **se pierde la tira de `A`** |
+| `(TCTA)×8 (TCTG)×8 (TCTA)×8` | `TCTA [0,98)` (tramo unido), `TCTA [0,35)`, `TCTG [32,67)`, `TCTA [64,98)` | el unido cae por pureza; aceptan los tres trozos | `[0,35)` y `[64,98)`: **se pierde el `(TCTG)` central**, que pisa 3 bases con cada vecino |
+
+El original lo deja expresamente al consumidor: su documentación dice que
+`find_tandem_repeats` entrega «intervalos en bruto, posiblemente solapados,
+para consumidores que resuelven los solapes ellos mismos». **Una versión
+nueva de `pop_var_caller` no lo arregla**, salvo que cambie las fronteras que
+emite. Es la imagen especular, en el final del tramo, del inicio recortado
+que el responsable decidió el 29/10/2026 (apartado 11.8 del plan).
+
+**Alcance medido.** En el tomate reducido, con el suelo por omisión, 100
+candidatos que el núcleo anterior aceptaba se pierden por solape con uno nuevo
+de otro motivo; 58 de ellos por una sola base.
+
+**Arreglo propuesto, pendiente de decisión del responsable.** Cuando dos
+candidatos se solapan en menos de una copia del motivo del que pierde, se
+recorta este en vez de descartarlo y se vuelve a comprobar el suelo de
+copias; un solape de una copia o más se sigue resolviendo como hoy. El
+30/10/2026 se había descartado esta propuesta, pero sobre la premisa falsa de
+que la pérdida era del buscador.
+
+### (b) El buscador de `pop_var_caller` no emite el tramo
+
+- **Un microsatélite corto entre dos tiras largas de una misma base.** Con
+  `G×116 (CA)×13 G×122`, el buscador emite un solo intervalo `G` de 264 bases
+  que cruza el `(CA)×13` como si fuera una interrupción, porque las dos tiras
+  pagan de sobra sus discrepancias; el `(CA)×13` no aparece entre los
+  intervalos (con `G×60` a la izquierda sí aparece; un `(CA)×5` se pierde ya
+  con 40 `G` a la izquierda y 200 a la derecha). El tramo de `G` cae luego por
+  el tope de unidades, y no queda nada. Hallado al adaptar las pruebas de la
+  entrega 3; en un genoma real es raro y la medición del tomate no lo
+  registró. Esas pruebas usan desde entonces un fondo de `G` y `T` sin tiras
+  de más de dos bases (`gt_background`, en `tests/support/detection_section.rs`).
+- **Una repetición con una interrupción que desplaza la fase**
+  (`ATATATATA AAA TATATATATAT`): el buscador la parte en dos trozos y no la
+  vuelve a unir, porque la unión mide la pureza en una sola fase. Ninguno de
+  los dos trozos alcanza el suelo de copias. **5** casos en el tomate.
+
+**Decisión del responsable (30/10/2026).** Esta parte la abordará una versión
+nueva de `pop_var_caller`, cuyo núcleo se copiará como se hizo con
+`fa215c23`.
+
+### Cómo se cierra
+
+- **(a)** Con el arreglo de la regla de solapes, si el responsable lo aprueba,
+  y pruebas que fallen contra la regla de hoy: `(CA)×10 A×12` debe dar dos
+  loci y el compuesto, tres.
+- **(b)** Copiando el núcleo corregido, con pruebas que fallen contra el de
+  `fa215c23`: `G×116 (CA)×13 G×122` debe dar el `(CA)×13`, y una repetición
+  con desplazamiento de fase debe salir entera.
+- En los dos casos, volviendo a medir el tomate (apartado 11.1 del plan) para
+  anotar cuántos de los 100 y de los 5 se recuperan. Las cifras congeladas que
+  dependen del catálogo detectado cambiarán y se decidirán por escrito.

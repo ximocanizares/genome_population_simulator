@@ -34,6 +34,9 @@ use genome_population_simulator::vcf_semantic_validation::{
     validate_published_vcf_semantics, validate_vcf_against_truth,
 };
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 const COMPOSITE_TRACT_BASES: i64 = 67;
@@ -72,7 +75,7 @@ fn scenario(bases: &str, loci: &str) -> (PathBuf, PathBuf) {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -112,7 +115,7 @@ genotype_model = "hwe"
 [vcf_output]
 mode = "text"
 "#
-        ),
+        )),
     )
     .expect("configuración");
     (root, config)

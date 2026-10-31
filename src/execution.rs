@@ -36,7 +36,7 @@ use crate::integrity::{Sha256Writer, configuration_digest};
 use crate::materialization::SnpLocus;
 use crate::population_snvs::{
     PopulationSnvsProvenance, canonical_metadata_document, canonical_tsv_bytes,
-    generate_population_snvs_from_reference_with_tolerance, normalization_audit_document,
+    generate_population_snvs_from_reference_excluding, normalization_audit_document,
     parse_supplied_tsv, prepare_population_snvs_from_reference,
     validate_reusable_population_snvs_with_matrix_sha256,
 };
@@ -136,13 +136,87 @@ pub fn preflight_validated_config_with_authorizations(
     authorizations: ExecutionAuthorizations,
 ) -> Result<(), Diagnostic> {
     let prepared_reference = prepare_reference(effective)?;
-    // `validate` tiene que ver **lo mismo** que `run`, y eso incluye el abanico
-    // que el deslizamiento biológico genera: sin generarlo aquí, un escenario
-    // con loci generados pasaba la validación con los loci vacíos y solo
-    // fallaba al ejecutar, que es tarde.
-    let generated = effective.with_generated_repeat_alleles(prepared_reference.reference())?;
-    let effective: &EffectiveConfig = generated.as_ref().unwrap_or(effective);
-    preflight_prepared_config(effective, authorizations, &prepared_reference).map(|_| ())
+    // `validate` tiene que ver **lo mismo** que `run`, y eso incluye el
+    // catálogo de microsatélites y el abanico que el deslizamiento biológico
+    // genera: sin hacerlo aquí, un escenario con loci generados pasaba la
+    // validación con los loci vacíos y solo fallaba al ejecutar, que es tarde.
+    let (resolved, population_snvs) =
+        resolve_repeat_catalog(effective, authorizations, &prepared_reference)?;
+    let effective: &EffectiveConfig = resolved.as_ref().unwrap_or(effective);
+    preflight_prepared_config(
+        effective,
+        authorizations,
+        &prepared_reference,
+        population_snvs,
+    )
+    .map(|_| ())
+}
+
+/// **Las tres etapas de una simulación, en su orden** (REQ-REF-38): con la
+/// referencia final ya preparada, detectar sus microsatélites, preparar la
+/// matriz de SNV —la generada excluye los loci del catálogo—, retirar los
+/// detectados que una variante suministrada o escrita a mano invade
+/// (REQ-CONF-143) y generar los abanicos de alelos por deslizamiento. Al
+/// final, sobre el catálogo que queda, la regla de la PCR y la desconexión del
+/// tartamudeo clonal si no queda ningún locus (`with_final_repeat_catalog`).
+///
+/// Devuelve la configuración resultante, o `None` si ninguna etapa la cambió,
+/// y la matriz ya preparada. Sin la sección de microsatélites, detectar y
+/// retirar no hacen nada, la exclusión está vacía y todo es como antes.
+///
+/// Corre **antes** de crear nada publicado, en `validate` y en `run`.
+fn resolve_repeat_catalog(
+    effective: &EffectiveConfig,
+    authorizations: ExecutionAuthorizations,
+    prepared_reference: &PreparedReference,
+) -> Result<
+    (
+        Option<EffectiveConfig>,
+        Option<PreparedPopulationSnvsForExecution>,
+    ),
+    Diagnostic,
+> {
+    preflight_vcf_samples(effective)?;
+    preflight_reductions(effective, prepared_reference.reference())?;
+    let detected = effective.with_detected_repeat_loci(prepared_reference.reference())?;
+    let with_catalog: &EffectiveConfig = detected.as_ref().unwrap_or(effective);
+    // La guarda de admisión, sobre el catálogo entero: un detectado la pasa
+    // por construcción; un declarado, con sus mínimos propios, sobre su
+    // tramo; y un declarado de 7 pb o más, que la detección no ve, solo por
+    // ella.
+    admit_declared_repeat_loci(with_catalog, prepared_reference.reference())?;
+    let population_snvs =
+        prepare_population_snvs_for_execution(with_catalog, authorizations, prepared_reference)?;
+    let rows: Vec<(&str, u64, &str)> = population_snvs
+        .as_ref()
+        .map(|prepared| {
+            prepared
+                .matrix
+                .rows()
+                .iter()
+                .map(|row| {
+                    (
+                        row.contig().as_str(),
+                        row.position_1based(),
+                        row.variant_id().as_str(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let retired = with_catalog.with_retired_repeat_loci(&rows)?;
+    drop(rows);
+    let without_retired: &EffectiveConfig = retired.as_ref().unwrap_or(with_catalog);
+    let generated =
+        without_retired.with_generated_repeat_alleles(prepared_reference.reference())?;
+    let with_alleles: &EffectiveConfig = generated.as_ref().unwrap_or(without_retired);
+    // Sobre el catálogo final: la PCR y el tartamudeo clonal (ver
+    // `with_final_repeat_catalog`).
+    let finished = with_alleles.with_final_repeat_catalog()?;
+    Ok((
+        finished.or(generated).or(retired).or(detected),
+        population_snvs,
+    ))
 }
 
 fn execute_validated_config_with_effective_document(
@@ -164,12 +238,17 @@ fn execute_validated_config_with_effective_document(
     //
     // Sigue siendo **antes** de crear el provisional, de modo que un rechazo
     // del generador no deja nada escrito.
-    let generated = effective.with_generated_repeat_alleles(prepared_reference.reference())?;
-    let effective: &EffectiveConfig = generated.as_ref().unwrap_or(effective);
+    let (resolved, population_snvs) =
+        resolve_repeat_catalog(effective, authorizations, &prepared_reference)?;
+    let effective: &EffectiveConfig = resolved.as_ref().unwrap_or(effective);
     // Todo error de dominio o preflight ocurre antes de crear el provisional y
     // antes de que exista cualquier RNG local de selección.
-    let prepared_execution =
-        preflight_prepared_config(effective, authorizations, &prepared_reference)?;
+    let prepared_execution = preflight_prepared_config(
+        effective,
+        authorizations,
+        &prepared_reference,
+        population_snvs,
+    )?;
     let configuration_digest = configuration_digest(effective.configuration_input().bytes())?;
     let execution_id = derive_execution_id(
         effective.reproducibility().root_seed(),
@@ -1963,11 +2042,8 @@ fn preflight_prepared_config(
     effective: &EffectiveConfig,
     authorizations: ExecutionAuthorizations,
     prepared_reference: &PreparedReference,
+    prepared_population_snvs: Option<PreparedPopulationSnvsForExecution>,
 ) -> Result<PreparedExecution, Diagnostic> {
-    preflight_vcf_samples(effective)?;
-    preflight_reductions(effective, prepared_reference.reference())?;
-    let prepared_population_snvs =
-        prepare_population_snvs_for_execution(effective, authorizations, prepared_reference)?;
     admit_repeat_loci_against_small_variants(
         effective,
         prepared_population_snvs
@@ -2159,11 +2235,12 @@ fn prepare_population_snvs_for_execution(
     let reference = prepared_reference.reference();
     let prepared = match source {
         crate::application::EffectivePopulationSnvs::Generate { parameters } => {
-            let matrix = generate_population_snvs_from_reference_with_tolerance(
+            let matrix = generate_population_snvs_from_reference_excluding(
                 parameters,
                 reference,
                 effective.reproducibility().root_seed(),
                 effective.normalization().tolerance(),
+                &repeat_catalog_exclusion(effective),
             )
             .map_err(|error| population_snvs_error("population_snvs.generate", error.to_string()))?
             .authorize_empty_matrix(authorizations.allow_empty_snv_matrix)
@@ -2222,6 +2299,26 @@ fn prepare_population_snvs_for_execution(
         }
     };
     Ok(Some(prepared))
+}
+
+/// Los loci del catálogo, por secuencia, como tramos que el generador de la
+/// matriz no puede elegir (REQ-CONF-143). Sin loci, vacío: el generador hace
+/// exactamente lo de siempre.
+fn repeat_catalog_exclusion(
+    effective: &EffectiveConfig,
+) -> crate::population_snvs::ExcludedIntervals {
+    let mut excluded = crate::population_snvs::ExcludedIntervals::new();
+    for locus in effective.repeat_loci() {
+        let interval = locus.declaration().interval();
+        excluded
+            .entry(interval.sequence_id().as_str().to_owned())
+            .or_default()
+            .push((interval.start(), interval.end()));
+    }
+    for intervals in excluded.values_mut() {
+        intervals.sort_unstable();
+    }
+    excluded
 }
 
 fn publish_prepared_population_snvs(
@@ -2573,12 +2670,16 @@ fn requires_materialized_bases(effective: &EffectiveConfig) -> bool {
         || effective.technical_event().is_some()
         || effective.vcf_output().is_some()
         || !effective.repeat_loci().is_empty()
+        || effective.repeat_detection().is_some()
 }
 
+/// Prepara la referencia final. La guarda de admisión de los loci declarados
+/// ya no corre aquí sino después de detectar (`resolve_repeat_catalog`): con
+/// la detección, un declarado que no coincide con ningún tramo tiene que
+/// rechazarse con el diagnóstico de la coincidencia (REQ-REF-40), que nombra
+/// lo detectado más cercano y la etapa que no supera.
 fn prepare_reference(effective: &EffectiveConfig) -> Result<PreparedReference, Diagnostic> {
-    let prepared = prepare_reference_without_repeat_admission(effective)?;
-    admit_declared_repeat_loci(effective, prepared.reference())?;
-    Ok(prepared)
+    prepare_reference_without_repeat_admission(effective)
 }
 
 /// **Guarda de admisión de los loci sobre la referencia.**
@@ -3598,7 +3699,8 @@ mod tests {
         let config = root.join("general.toml");
         fs::write(
             &config,
-            r#"config_kind = "general"
+            crate::test_detection_section::with_detection_section(
+                r#"config_kind = "general"
 schema_version = "4"
 seed = "00000000000000000000000000000000000000000000000000000000000000aa"
 
@@ -3662,6 +3764,7 @@ individual_id = "I1"
 i7 = "ACGTACGT"
 i5 = "TGCATGCA"
 "#,
+            ),
         )
         .expect("configuración");
         let effective = load_and_validate_config(&config).expect("configuración válida");
@@ -3920,7 +4023,7 @@ i5 = "TGCATGCA"
         let config = root.join("general.toml");
         fs::write(
             &config,
-            format!(
+            crate::test_detection_section::with_detection_section(&format!(
                 r#"config_kind = "general"
 schema_version = "4"
 seed = "00000000000000000000000000000000000000000000000000000000000000bb"
@@ -3969,7 +4072,7 @@ individual_ids = [{population_ids}]
 ploidy = 2
 genotype_model = "hwe"
 {event}"#
-            ),
+            )),
         )
         .expect("config");
         config
@@ -4433,7 +4536,7 @@ genotype_model = "hwe"
         let config = root.join("general.toml");
         fs::write(
             &config,
-            format!(
+            crate::test_detection_section::with_detection_section(&format!(
                 r#"config_kind = "general"
 schema_version = "4"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
@@ -4461,7 +4564,7 @@ genotype_model = "hwe"
 event_id = "reads-main"
 {event}"#,
                 bases.len()
-            ),
+            )),
         )
         .expect("config");
         (config, libraries, schemas.0, schemas.1)
@@ -4522,7 +4625,8 @@ event_id = "reads-main"
         let config = root.join("general.toml");
         fs::write(
             &config,
-            r#"config_kind = "general"
+            crate::test_detection_section::with_detection_section(
+                r#"config_kind = "general"
 schema_version = "2"
 seed = "0f0e0d0c0b0a09080706050403020100f0e0d0c0b0a090807060504030201000"
 [reference]
@@ -4564,6 +4668,7 @@ individual_id = "sample-A"
 i7 = "ACGTACGT"
 i5 = "TGCATGCA"
 "#,
+            ),
         )
         .expect("config");
         let destination = root.join("result");
@@ -4819,7 +4924,7 @@ i5 = "TGCATGCA"
         let config = root.join("general.toml");
         fs::write(
             &config,
-            format!(
+            crate::test_detection_section::with_detection_section(&format!(
                 r#"config_kind = "general"
 schema_version = "4"
 seed = "00000000000000000000000000000000000000000000000000000000000000cc"
@@ -4856,7 +4961,7 @@ individual_ids = ["I1", "I2"]
 ploidy = 2
 genotype_model = "hwe"
 {event}{vcf}"#
-            ),
+            )),
         )
         .expect("config");
         config
@@ -5212,7 +5317,7 @@ genotype_model = "hwe"
         let config = root.join("general.toml");
         fs::write(
             &config,
-            format!(
+            crate::test_detection_section::with_detection_section(&format!(
                 r#"config_kind = "general"
 schema_version = "4"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
@@ -5253,7 +5358,7 @@ genotype_model = "hwe"
 mode = "text"
 "#,
                 bases.len()
-            ),
+            )),
         )
         .expect("config");
         config
@@ -5414,7 +5519,8 @@ print(truth, vcf)
         let config = root.join("general.toml");
         fs::write(
             &config,
-            r#"config_kind = "general"
+            crate::test_detection_section::with_detection_section(
+                r#"config_kind = "general"
 schema_version = "4"
 seed = "00000000000000000000000000000000000000000000000000000000000000aa"
 
@@ -5471,6 +5577,7 @@ genotype_model = "hwe"
 [vcf_output]
 mode = "text"
 "#,
+            ),
         )
         .expect("config");
         config
@@ -5800,7 +5907,11 @@ mode = "text"
             "\n[[direct_events]]\nevent_id = \"extra-ins\"\ncontig = \"chr1\"\nindividual_id = \"ind-1\"\nphase = 0\nkind = \"insertion\"\npoint = 60\nbases = \"GGA\"\n\n[[direct_events]]\nevent_id = \"extra-del\"\ncontig = \"chr1\"\nindividual_id = \"ind-1\"\nphase = 2\nkind = \"deletion\"\nstart = 250\nend = 253\n",
         );
         let path = root.join("general.toml");
-        fs::write(&path, config).expect("write config");
+        fs::write(
+            &path,
+            crate::test_detection_section::with_detection_section(&config),
+        )
+        .expect("write config");
         let effective = load_and_validate_config(&path).expect("valid config");
         let _guard = crate::truth_projection::test_tamper::install(tamper);
         let result = execute_validated_config_with_effective_document(
@@ -6065,7 +6176,11 @@ mode = "text"
         );
         fs::write(root.join("snvs.tsv"), snvs).expect("write matrix");
         let path = root.join("general.toml");
-        fs::write(&path, config).expect("write config");
+        fs::write(
+            &path,
+            crate::test_detection_section::with_detection_section(&config),
+        )
+        .expect("write config");
         let effective = load_and_validate_config(&path).expect("valid config");
         let _guard = crate::truth_projection::test_tamper::install(tamper);
         let result = execute_validated_config_with_effective_document(

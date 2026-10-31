@@ -39,6 +39,9 @@ use genome_population_simulator::results::{
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
@@ -80,7 +83,11 @@ fn publish(files: &[(&str, &str)]) -> Package {
     let destination = root.join("published");
     let package = Package { root, destination };
     for (name, content) in files {
-        fs::write(package.root.join(name), content).expect("fichero de entrada");
+        fs::write(
+            package.root.join(name),
+            detection_section::with_detection_section(content),
+        )
+        .expect("fichero de entrada");
     }
     execute_validated_config(
         &load_and_validate_config(&package.root.join("general.toml"))

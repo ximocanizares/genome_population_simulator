@@ -50,6 +50,9 @@ use rand_chacha::ChaCha12Rng;
 use rand_chacha::rand_core::{Rng, SeedableRng};
 use serde_json::Value;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 const SEED_HEX: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 /// Contexto de derivación del proyecto, escrito aquí a mano.
 const DERIVATION_CONTEXT: &str = "genome_population_simulator/v1/subseed";
@@ -445,22 +448,30 @@ fn run(rate: f64) -> Published {
     // expansión —una unidad más, 28 bases— entra con holgura por los dos
     // lados.
     let tract = "CA".repeat(13);
+    // Flancos de `G` y `T` al azar, no tiras de `G`: entre dos tiras largas de
+    // una sola base el detector no ve el `(CA)×13`, y el locus no coincidiría
+    // con nada (ver `gt_background`). Sin `A` ni `C`, las copias de `CA` de una
+    // lectura siguen siendo solo las del tracto.
     let bases = format!(
         "{}{tract}{}",
-        "G".repeat(116),
-        "G".repeat(264 - 116 - tract.len())
+        detection_section::gt_background(0x9E37_79B9_7F4A_7C15, 116),
+        detection_section::gt_background(0xD1B5_4A32_D192_ED03, 264 - 116 - tract.len())
     );
     assert_eq!(bases.len(), 264);
     fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
+    let reference = &bases[19..20];
+    let alternate = if reference == "G" { "T" } else { "G" };
     fs::write(
         root.join("population-snvs.tsv"),
-        "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t20\tG\tT\tP1\t0.5\n",
+        format!(
+            "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t20\t{reference}\t{alternate}\tP1\t0.5\n"
+        ),
     )
     .expect("matriz");
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED_HEX}"
@@ -531,7 +542,7 @@ individual_id = "sample-A"
 i7 = "ACGTACGT"
 i5 = "TGCATGCA"
 "#
-        ),
+        )),
     )
     .expect("configuración");
     let destination = root.join("published");

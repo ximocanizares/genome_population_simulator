@@ -21,6 +21,9 @@ use genome_population_simulator::results::validate_effective_config_against_mani
 use noodles_bgzf as bgzf;
 use serde_json::Value;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -161,7 +164,7 @@ fn run(coverage: u32) -> Published {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -245,7 +248,7 @@ i5 = "TGCATGCA"
 "#,
             short = "CA".repeat(SHORT_UNITS),
             long = "CA".repeat(LONG_UNITS),
-        ),
+        )),
     )
     .expect("configuración");
     let destination = root.join("published");
@@ -552,7 +555,7 @@ fn run_amplified() -> Published {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -647,7 +650,7 @@ i5 = "TGCATGCA"
             short = "CA".repeat(CLONAL_SHORT_UNITS),
             long = "CA".repeat(CLONAL_LONG_UNITS),
             coverage = CLONAL_MOLECULES,
-        ),
+        )),
     )
     .expect("configuración");
     let destination = root.join("published");

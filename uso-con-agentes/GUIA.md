@@ -164,7 +164,14 @@ Otras cosas a tener presentes:
   marca (`coarse`) y cita sus fuentes.
 - Los ejemplos usan una referencia FASTA aportada, con el tracto del
   microsatélite ya escrito entre `start` y `end`; los SNV deben quedar fuera de
-  él. El programa también puede simular la referencia (`kind = "simulated"`),
+  él.
+- **Un microsatélite solo existe con la sección `[reference.repeat_detection]`**
+  (desde el 30/10/2026): con ella el simulador detecta todos los
+  microsatélites de 1 a 6 pb de la referencia y los hace variar con el
+  deslizamiento común que la sección declara; un locus declarado tiene que
+  coincidir con uno detectado y solo ajusta sus parámetros o sus alelos. En
+  los tres ejemplos el único que se detecta es el declarado. Para limitar la
+  detección a unas zonas, la sección admite una lista de regiones. El programa también puede simular la referencia (`kind = "simulated"`),
   pero esa vía no se ha probado en esta guía.
 
 ## Ejemplos

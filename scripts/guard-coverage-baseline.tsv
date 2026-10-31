@@ -478,10 +478,21 @@
 # (`tests/technical_catalog_contract.rs`) y
 # `the_general_manifest_carries_the_profile_and_the_catalog_of_the_effective_config`, y
 # murieron los cinco mutantes que la anulan o la aflojan rama a rama.
+# **El 30/10/2026 (entrega 3 del plan de detección de microsatélites) `src/results.rs`
+# pasa de 724 a 725 comprobaciones y sigue en 153 sin disparar.** Entra una: la sección
+# de microsatélites de la configuración efectiva tiene que ser la que el TOML copiado, la
+# referencia y la matriz publicadas producen («la sección de microsatélites efectiva no
+# es la que el TOML, la referencia y la matriz producen»). La disparan los casos
+# «sección de microsatélites: tope» y «sección de microsatélites: un retirado inventado» de
+# `the_effective_repeat_loci_are_the_ones_the_toml_produces`
+# (`tests/results_repeat_guards.rs`), que exigen ese motivo exacto. Ninguna guarda que
+# antes se disparaba deja de hacerlo: la comparación de «lo declarado de cada locus»
+# dejó de ir por identificador para no tapar la guarda del abanico que rechaza un locus
+# sin identificador (ver la nota de estado del 30/10/2026 en el plan de detección).
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
-src/results.rs	724	153
+src/results.rs	725	153
 src/event_manifest.rs	147	8
 src/truth_validation.rs	121	32
 # **El 13/10/2026 (DT-015) `src/truth_schema.rs` pasa de 69 a 70 comprobaciones

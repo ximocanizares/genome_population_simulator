@@ -2349,10 +2349,11 @@ identificador de un locus **detectado depende solo de su propio tramo** —su
 secuencia, sus coordenadas y su motivo—, nunca del orden en que el barrido los
 encuentra ni de cuántos otros haya. Por eso **se conserva la propiedad que esta
 decisión exige**: añadir un locus a la referencia no cambia el abanico de los
-demás. **Provisional, pendiente de la pausa de la entrega 1:** la forma exacta
-del identificador; la propuesta es
-`SSR-<índice de secuencia>-<inicio>-<fin>-<motivo>` en base uno, que cabe en los
-64 caracteres que admite un identificador y no estrena clase de identificador.
+demás. El identificador es
+`SSR-<índice de la secuencia en base uno>-<inicio>-<fin>-<motivo>`, en base uno
+y en coordenadas de la referencia final (decidido en la pausa de la entrega 1
+del plan de detección, 29/10/2026), que cabe en los 64 caracteres que admite un
+identificador y no estrena clase de identificador.
 Un locus declarado conserva el que le puso el usuario, y uno declarado que
 imite el patrón y choque con un detectado se rechaza como identificador
 repetido.
@@ -2739,9 +2740,10 @@ el saturado.
 ## DTC-103 — Detección de microsatélites sobre la referencia final
 
 Decisión del responsable de los días 27 y 28/10/2026, que concreta REQ-REF-38 a
-REQ-REF-40 y REQ-CONF-142. **Las partes marcadas «provisional» se fijan en la
-pausa de decisión de la entrega 1 del plan de detección, con las cifras
-medidas sobre el tomate reducido, y no se escriben aquí antes.**
+REQ-REF-40 y REQ-CONF-142. Los criterios y la regla de coincidencia, que aquí
+figuraban como provisionales, se fijaron en la pausa de decisión de la
+entrega 1 del plan de detección (29/10/2026), con las cifras medidas sobre el
+tomate reducido, y se completaron el 30/10/2026; la entrega 3 los implementa.
 
 **Qué se decide.** La referencia final de la simulación —suministrada, con
 tractos insertados, o simulada con tractos plantados— se barre una vez para
@@ -2769,15 +2771,23 @@ periodo menor cubre la mitad o más. Devuelve intervalos semiabiertos en base
 cero; el motivo es la lectura de las bases al inicio del tramo. Los dos números
 son constantes del algoritmo y no se exponen como parámetro.
 
-**Criterios (REQ-REF-39).** Los de partida son el mínimo de copias por longitud
-de motivo `[8, 6, 6, 6, 5, 4]`, configurable, y la pureza y la tirada mínimas
-que ya rigen la admisión de todo locus. **Provisional:** sobre qué se cuentan
-las copias (la propuesta es las copias completas de la descomposición del
-simulador), las fronteras (las del detector, sin recortar), el desempate entre
-tramos solapados (mayor puntuación, luego más bases, luego periodo menor, luego
-el de la izquierda), el trato de los compuestos (la detección solo produce loci
-de un motivo y los compuestos se declaran), el tope de unidades para los
-satélites, y la `N` y los bordes de secuencia (al menos una base a cada lado).
+**Criterios (REQ-REF-39).** El mínimo de copias por longitud de motivo
+`[8, 6, 6, 6, 5, 4]`, configurable, contado sobre las **copias completas** de
+la descomposición del simulador, y la pureza y la tirada mínimas que ya rigen
+la admisión de todo locus. Las fronteras son las del detector, sin recortar,
+con la única desviación propia del núcleo copiado: el tramo no empieza dentro
+de una tira previa de su misma base (apartado 11.8 del plan). Entre tramos
+solapados gana uno por regla fija (mayor puntuación, luego más bases, luego
+periodo menor, luego el de la izquierda) y dos que solo se tocan no se solapan.
+La detección solo produce loci de un motivo y los compuestos se declaran. Un
+tramo de más de un tope común de unidades, 200 por omisión y declarable, se
+descarta como satélite. Una `N` suelta dentro de un tracto cuenta como
+discrepancia de pureza y no lo corta (decisión del 30/10/2026), y el tramo
+necesita una base A, C, G o T a cada lado. Con la lista opcional de regiones,
+un tramo solo se detecta si cabe entero en una (decisión del 30/10/2026). Sin
+copias haplotípicas no se generan alelos de los detectados (decisión del
+30/10/2026); la entrega 3 lo implementa dejándolos fuera del catálogo, porque
+un locus publicado necesita al menos un alelo y un detectado no tiene otros.
 
 **Cuándo corre.** Después de preparar la referencia final y **antes del
 generador de deslizamiento** de DTC-095, igual en `validate` y en `run`, y antes
@@ -2793,11 +2803,13 @@ intervalo, por búsqueda binaria sobre ese orden: la usan la exclusión del
 generador de SNV (REQ-CONF-143) y el plan de *indels* poblacionales.
 
 **Coincidencia de los declarados (REQ-REF-40).** Un locus declarado, insertado o
-plantado debe coincidir con un tramo detectado. **Provisional:** la propuesta es
-que su intervalo se solape con un tramo detectado de la misma secuencia cuyo
-motivo sea una **rotación** de uno de los suyos, que manden las fronteras del
-declarado y que sustituya a los detectados que solapa. Un declarado de 7 o más
-pb queda exento.
+plantado debe coincidir con un tramo detectado: su intervalo se solapa con un
+tramo detectado de la misma secuencia —después de criterios, regiones y
+solapes— cuyo motivo es una **rotación** de uno de los suyos. Mandan las
+fronteras del declarado, que **sustituye** a todos los detectados que solapa y
+conserva su identificador y sus alelos. Un compuesto declarado coincide así
+con los tramos de sus motivos aunque alguno no se detecte. Un declarado de 7 o
+más pb queda exento y también sustituye a lo que solapa.
 
 **Identificadores de los detectados:** ver DTC-096. **Versión del algoritmo:**
 `ssr-detection-v1`, que se publica con el catálogo.

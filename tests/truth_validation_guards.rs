@@ -2082,10 +2082,10 @@ fn reference_without_bases() -> Reference {
     let path = root.join("reference.fa");
     std::fs::write(
         &path,
-        format!(
+        truth_guard_scenario::detection_section::with_detection_section(&format!(
             ">chr1\n{}\n",
             std::str::from_utf8(&reference_bases()).expect("ASCII")
-        ),
+        )),
     )
     .expect("FASTA");
     let summary = validate_supplied_fasta_summary(

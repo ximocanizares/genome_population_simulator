@@ -35,6 +35,9 @@ use genome_population_simulator::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
 };
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 /// Cien bases: veinte `G` de flanco, sesenta de tracto `(CA)30` y veinte más.
 const SEQUENCE_LENGTH: u64 = 100;
@@ -145,7 +148,7 @@ ploidy = 2
     );
     let admitted = admit_toml_header(
         Path::new("repeat-genotype-draw.toml"),
-        source.into_bytes(),
+        detection_section::with_detection_section(&source).into_bytes(),
         ExpectedConfigKind::General,
     )
     .expect("header");

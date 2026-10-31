@@ -1150,67 +1150,328 @@ del VCF y los que la medición añadió llevan sufijo.
 
 ### Entrega 3 — detección en el producto
 
-- ☐ **F6.4.a.9.** Tabla `[reference.repeat_detection]` y su resolución.
+Reescrita el 29/10/2026 con las decisiones del responsable de la sección 3 y
+del apartado 11.7. Lo que cambia respecto de la versión anterior:
+
+- **Modo único (DP-SSR-01).** La detección se activa por la presencia de la
+  sección `[reference.repeat_detection]`, que declara el deslizamiento común.
+  Sin la sección **no hay microsatélites**: un locus declarado, un tracto
+  insertado o uno plantado sin ella se rechazan con un diagnóstico que remite
+  a la sección. Se retira el régimen de loci declarados sin detección.
+- **Tres etapas siempre:** construir la referencia → detectar sobre la
+  referencia **final** → variar.
+- **Criterios de 11.7:** copias completas con suelo `[8, 6, 6, 6, 5, 4]`
+  configurable; pureza 0,8 y tirada 3, los de la admisión
+  (`[reference.repeat_admission]`); tope de 200 unidades configurable; una base
+  A/C/G/T a cada lado; la regla de solapes de DP-SSR-05; solo loci de un motivo.
+- **Regiones (DP-SSR-18)**, paso nuevo F6.4.a.10b.
+- **Esquemas en su versión actual** (nota alfa de DTC-036): se retocan in situ
+  el general v4, la efectiva v6 y el manifiesto v6. **No** se crean versiones.
+- **Publicación mínima:** el catálogo aparte es de la entrega 4. Aquí cada
+  locus de `repeat_loci` (efectiva y manifiesto) gana su `origin`
+  (`detected`/`declared`), y la efectiva una sección `repeat_detection` con
+  los criterios, el deslizamiento común, las regiones y los tramos retirados.
+  Nada más.
+
+Los números F6.4.a.9 a F6.4.a.13 se conservan; lo añadido lleva sufijo.
+
+- ☑ **F6.4.a.9.** Sección `[reference.repeat_detection]` y su resolución.
   - Depende de: pausa de la entrega 1; F6.4.a.1.
-  - Procede de: REQ-CONF-142; decisiones 5 y 6; DP-SSR-01, 02, 07, 15.
-  - Cambia: `src/configuration.rs`, `src/adapters.rs`, `src/application.rs`,
-    `schemas/config-general-v5.schema.json` (según DP-SSR-15).
-  - Se comprueba con: sin la tabla, la huella intacta; con ella, el
-    deslizamiento común es obligatorio y su ausencia se rechaza nombrando el
-    campo y con un ejemplo en el mensaje (como los pesos del tartamudeo); los
-    suelos por omisión aparecen en la efectiva aunque no se declaren; un suelo
-    0 o una tabla de cinco valores se rechazan. **Debe fallar contra:** un
-    valor por omisión del deslizamiento (la decisión 6 lo prohíbe).
-- ☐ **F6.4.a.10.** La detección corre en su sitio.
+  - Procede de: REQ-CONF-142; REQ-CONF-139; decisiones 5 y 6; DP-SSR-01, 02,
+    07, 15 (en la forma del 28/10: retocar in situ).
+  - Cambia: `src/configuration.rs` (`DeclaredRepeatDetection`),
+    `src/adapters.rs` (la lectura; un locus sin alelos ni generador se admite
+    con la sección, porque hereda el común), `src/application.rs`
+    (`EffectiveRepeatDetection`; un locus declarado sin generador ni alelos
+    recibe el deslizamiento común; el rechazo de loci sin la sección),
+    `schemas/config-general-v4.schema.json` **en su versión actual**.
+  - Forma: `min_copies` (seis enteros positivos, opcional), `max_units`
+    (entero positivo, opcional, 200 por omisión), la tabla obligatoria
+    `[reference.repeat_detection.slippage]` con `model` y `mean_events`
+    obligatorios y `expansion_bias` y `step_units` como en REQ-CONF-139, y la
+    lista opcional `[[reference.repeat_detection.regions]]` del paso F6.4.a.10b.
+  - Se comprueba con: `tests/repeat_detection_config.rs`: sin la sección, la
+    huella de F6.4.a.2 intacta y un locus declarado rechazado nombrando la
+    sección; con ella, la falta de `slippage`, de `model` o de `mean_events` se
+    rechaza nombrando el campo y con un ejemplo en el mensaje; los suelos por
+    omisión aparecen en la efectiva aunque no se declaren; un suelo 0, una
+    tabla de cinco valores y un tope 0 se rechazan; un declarado sin alelos ni
+    generador hereda el común. **Debe fallar contra:** un valor por omisión de
+    `mean_events` (la decisión 6 lo prohíbe).
+- ☑ **F6.4.a.10.** La detección corre en su sitio.
   - Depende de: F6.4.a.4, F6.4.a.9.
-  - Procede de: decisión 1; REQ-REF-38; DTC-103.
+  - Procede de: decisión 1; REQ-REF-38; DTC-103; DP-SSR-10.
   - Cambia: `src/application.rs` (`EffectiveConfig::with_detected_repeat_loci`,
-    hermana de `with_generated_repeat_alleles`) y `src/execution.rs:143` y
-    `167`: detectar antes de generar abanicos, en `validate` y en `run`; y
-    `requires_materialized_bases` cuenta la tabla de detección.
-  - Se comprueba con: `validate` y `run` ven el mismo catálogo; una referencia
-    con tractos plantados en posiciones conocidas da exactamente esos loci;
-    con inserción, el tracto insertado se detecta en coordenadas **finales**;
-    con referencia simulada, el plantado. **Debe fallar contra:** detectar
-    sobre la referencia de partida en un escenario con inserción (el locus
-    sale desplazado la longitud del tracto anterior).
-- ☐ **F6.4.a.11.** Coincidencia de declarados e insertados.
+    hermana de `with_generated_repeat_alleles`: barre cada secuencia de la
+    referencia final, convierte cada candidato en locus con origen
+    `detected`, identificador `SSR-<índice de secuencia en base uno>-<inicio>-<fin>-<motivo>`
+    en base uno, el deslizamiento común, el tope de la sección y los mínimos
+    generales; la lista final queda **ordenada por secuencia y por inicio**),
+    `src/execution.rs` (detectar antes de preparar la matriz y de generar
+    abanicos, en `validate` y en `run`; `requires_materialized_bases` cuenta la
+    sección) y `src/results.rs` (la reconstrucción del juez físico, que rehace
+    la configuración desde el TOML copiado, detecta igual sobre la referencia
+    publicada; el juez independiente sin detector es de la entrega 4). Las
+    comprobaciones del tartamudeo y de la PCR contra los loci (REQ-CONF-132,
+    REQ-CONF-138) se aplican también a los detectados.
+  - Se comprueba con: `tests/repeat_detection_run.rs`: `validate` y `run` ven
+    el mismo catálogo; una referencia suministrada con tractos plantados en
+    posiciones **escritas en la prueba** da exactamente esos loci (riesgo R-1:
+    el oráculo no llama al detector), con **dos semillas** (R-5); con
+    inserción, el tracto insertado **antes** de un tracto existente se detecta
+    en coordenadas finales y el existente sale desplazado la longitud del
+    insertado (R-6); con referencia simulada, el plantado; la `N` suelta
+    dentro de un tracto largo (apartado 11.6 bis) da un solo locus, con la `N`
+    contada como discrepancia de pureza, y la ejecución publica su VCF.
+    **Debe fallar contra:** detectar sobre la referencia de partida en un
+    escenario con inserción.
+- ☑ **F6.4.a.10b.** Regiones de detección (DP-SSR-18, añadido el 29/10/2026).
   - Depende de: F6.4.a.10.
-  - Procede de: decisión 3; REQ-REF-40; DP-SSR-09.
-  - Cambia: `src/application.rs`.
-  - Se comprueba con: un declarado con fronteras distintas de las detectadas
-    pero solapadas coincide y manda sus fronteras; uno de motivo `AC` sobre un
-    tracto detectado `CA` coincide; uno sin tracto se rechaza nombrando el
-    locus y lo más cercano; uno de 7 pb se rechaza con el diagnóstico de
-    DP-SSR-09.5; un compuesto declarado sustituye a los dos tramos que solapa.
-    **Debe fallar contra:** emparejar por igualdad de cadena del motivo;
-    emparejar por igualdad exacta de fronteras.
-- ☐ **F6.4.a.12.** Variantes pequeñas frente a tractos detectados.
+  - Procede de: DP-SSR-18 y apartado 11.7.
+  - Cambia: `src/adapters.rs`, `src/application.rs` (cada región en base uno,
+    cerrada, en coordenadas **finales**, dentro de su secuencia; dos regiones
+    de la misma secuencia no se solapan; una lista vacía se rechaza) y
+    `src/repeat_detection.rs` (un tramo se conserva solo si cabe **entero** en
+    una región; el descarte se cuenta en una etapa propia, `outside_regions`,
+    que se aplica **antes** de los solapes, de modo que lo de fuera no puede
+    quitarle sitio a lo de dentro).
+  - Se comprueba con: dos tractos plantados, una región que contiene uno: sale
+    solo ese; una región que corta un tracto por la mitad no lo detecta; sin
+    lista, los dos; una región con coordenadas de partida en un escenario con
+    inserción se rechaza o no contiene el tracto (las coordenadas son
+    finales). **Debe fallar contra:** conservar un tramo que solo **solapa** la
+    región.
+- ☑ **F6.4.a.11.** Coincidencia de declarados, insertados y plantados.
   - Depende de: F6.4.a.10.
-  - Procede de: REQ-CONF-143; DP-SSR-11; S-32.
-  - Cambia: `src/population_snvs.rs` (`select_generated_loci` recibe los
-    intervalos excluidos), `src/execution.rs`
-    (`admit_repeat_loci_against_small_variants` y la retirada), y la consulta
-    por intervalo de la sección 5.1.
-  - Se comprueba con: matriz generada de 1000 SNV sobre una referencia con un
-    0,7 % de tractos, aceptada con **dos semillas** y ninguna fila dentro; fila
-    suministrada dentro de un detectado: el tracto se retira y se publica la
-    causa; la misma fila dentro de un **declarado**: rechazo como hoy. **Debe
-    fallar contra:** un generador que excluya solo el interior y no la base
-    inicial del tracto; una exclusión que cambie el consumo de azar sin
-    detección (la huella lo caza).
-- ☐ **F6.4.a.13.** Diagnósticos de dos pasos.
+  - Procede de: decisión 3; REQ-REF-40; DP-SSR-09 (aceptado: conserva sus
+    alelos escritos a mano).
+  - Cambia: `src/application.rs`. Un declarado coincide si su intervalo final
+    **se solapa** con un locus detectado (después de criterios, regiones y
+    solapes) de la misma secuencia cuyo motivo sea una **rotación** de uno de
+    los suyos; mandan sus fronteras y **sustituye** a los detectados que
+    solapa; conserva su identificador y sus alelos. Un declarado cuyos motivos
+    tienen **todos** 7 pb o más queda exento (REQ-CONF-60) y también sustituye
+    a lo que solapa. Sin coincidencia se rechaza nombrando el locus, el
+    detectado más cercano de su secuencia y la **etapa** en que cayó el tramo
+    de su motivo que lo solapaba (suelo, pureza, tirada, tope, borde, región o
+    solape). Un declarado cuyo identificador repite el de un detectado que
+    queda se rechaza como identificador repetido.
+  - Se comprueba con: `tests/repeat_detection_run.rs`: fronteras
+    distintas pero solapadas coinciden y mandan las declaradas; `AC` sobre un
+    detectado `CA` coincide; uno sin tracto se rechaza nombrando el locus y lo
+    más cercano; uno por debajo del suelo nombra la etapa `min_copies`; uno de
+    7 pb pasa sin detector; un compuesto declarado sustituye a los dos tramos
+    que solapa. **Debe fallar contra:** emparejar por igualdad de cadena del
+    motivo; emparejar por igualdad exacta de fronteras.
+- ☑ **F6.4.a.12.** Variantes pequeñas frente a tractos detectados.
+  - Depende de: F6.4.a.10.
+  - Procede de: REQ-CONF-143; DP-SSR-11 (provisional, con la tarea de DTF-066);
+    S-32.
+  - Cambia: `src/population_snvs.rs` (el generador recibe los intervalos
+    excluidos: una posición dentro de un locus del catálogo tiene peso cero y
+    no consume azar; sin intervalos, el recorrido es el de siempre),
+    `src/application.rs` (`EffectiveConfig::with_retired_repeat_loci`: un
+    cambio de base directo o una fila de la matriz —suministrada o
+    reutilizada— dentro de un locus **detectado** lo retira del catálogo, y la
+    efectiva publica cuál y por qué en `repeat_detection.retired_loci`),
+    `src/execution.rs` (orden: detectar → preparar la matriz excluyendo el
+    catálogo → retirar → generar abanicos → resto del preflight; un SNV dentro
+    de un **declarado** se sigue rechazando en
+    `admit_repeat_loci_against_small_variants`) y la reconstrucción del juez
+    físico en `src/results.rs` en el mismo orden.
+  - Se comprueba con: `tests/repeat_detection_run.rs`: matriz generada de
+    1000 SNV sobre una referencia con tractos plantados que cubren alrededor
+    del 0,7 %, aceptada con **dos semillas** y ninguna fila dentro de un locus;
+    fila suministrada dentro de un detectado: el tracto se retira y la causa
+    se publica; la misma fila dentro de un **declarado**: rechazo como hoy.
+    **Debe fallar contra:** un generador que excluya solo el interior y no la
+    primera base del tracto; una exclusión que cambie el consumo de azar sin
+    detección (la huella de F6.4.a.2 lo caza).
+- ☑ **F6.4.a.13.** Diagnósticos de dos pasos.
   - Depende de: F6.4.a.9.
   - Procede de: decisión 2; REQ-REF-37; DP-SSR-12.
-  - Cambia: `src/application.rs:2714-2720` y el rechazo nuevo de detección con
-    reducción.
-  - Se comprueba con: `tests/reference_tract_insertion_run.rs` actualizado
-    exige que el mensaje nombre las dos ejecuciones y el campo `fasta` de la
-    segunda. **Debe fallar contra:** el texto de hoy.
+  - Cambia: `src/application.rs` (el texto del rechazo de la inserción junto a
+    la reducción, y el rechazo nuevo de la sección de detección junto a una
+    reducción en la misma ejecución).
+  - Se comprueba con: `tests/reference_tract_insertion_run.rs` actualizado y
+    `tests/repeat_detection_config.rs`: el mensaje nombra las dos ejecuciones y
+    el campo `fasta` de la segunda. **Debe fallar contra:** el texto de hoy.
+- ☑ **F6.4.a.13b.** Reescritura de las pruebas del régimen retirado y de la
+  huella de escala.
+  - Depende de: F6.4.a.9 a F6.4.a.12.
+  - Procede de: DP-SSR-01 («las pruebas que lo usan se reescriben»).
+  - Cambia: las pruebas del inventario de abajo, que declaran loci sin la
+    sección; cada una gana la sección con **regiones que cubren exactamente
+    sus loci declarados** (y, si un locus suyo queda por debajo del suelo por
+    omisión, un `min_copies` propio del escenario), de modo que lo detectado
+    coincide con lo declarado y la prueba sigue comprobando lo mismo.
+    `tests/repeat_scale_frozen_identity.rs` se reescribe así y **no** se
+    recongela a ciegas: los literales siguen siendo los obtenidos de
+    `dcae406`; solo pueden cambiar la configuración efectiva, el manifiesto y
+    la copia del TOML, en los campos nuevos, y lo que dependa de la huella del
+    TOML (el identificador de ejecución). La prueba escribe qué cambió y por
+    qué.
+  - Se comprueba con: la huella de F6.4.a.2 sin tocar un literal; la de escala
+    con la demostración anterior; las puertas.
+  - **Inventario** (29/10/2026, `grep -l repeat_loci tests/`): 
+    `clonal_composition`, `clonal_independent_validator`, `clonal_lineage`,
+    `event_manifest_guards`, `final_pairs_against_truth` y
+    `final_pairs_oracle/mod.rs`, `manifest_minimal`, `pcr_admission`,
+    `publication_process`, `published_resource_validation`,
+    `reference_tract_insertion_run`, `repeat_admission_guard`,
+    `repeat_genotype_draw`, `repeat_locus_contract`, `repeat_locus_invasion`,
+    `repeat_manifest`, `repeat_scale_frozen_identity`,
+    `repeat_scale_regressions`, `repeat_slippage`, `repeat_tract_budget`,
+    `repeat_truth_v3`, `repeat_vcf_projection`, `results_effective_guards`,
+    `results_manifest_guards`, `results_population_snvs_guards`,
+    `results_repeat_guards`, `simulated_reference_repeat_tract`,
+    `stutter_admission`, `stutter_independent_validator`, `stutter_pipeline`,
+    `stutter_tract_length`, `truth_guard_scenario/mod.rs`,
+    `vcf_null_effect_case`, `vcf_overlap_fusion`, y los TOML de
+    `tests/fixtures/vcf-fusion/review/*` (quince de veintiuno),
+    `tests/fixtures/vcf-fusion/tract-without-indels` y
+    `tests/fixtures/vcf-null-effect/direct-cancel`. Las pruebas de la interfaz
+    (`tests_ui/test_repeat_loci_ui.py`, `tests_ui/test_stutter_ui.py`) **no**
+    se tocan aquí: son de la entrega 5.
 
 > **Revisión de la entrega 3:** la detección se ejecuta en las tres clases de
 > referencia, coincide o rechaza los declarados, y no deja rechazos que
 > dependan de la semilla. Revisión adversarial de la entrega.
+>
+> **Estado, 29/10/2026: detenida en F6.4.a.13b, pendiente de una decisión.**
+> F6.4.a.9 a F6.4.a.13 están implementados con sus pruebas
+> (`tests/repeat_detection_config.rs`, `tests/repeat_detection_run.rs`), y cada
+> «debe fallar contra» se comprobó mutando una copia aparte. La reescritura de
+> las pruebas del régimen retirado se detuvo porque **el detector funde en un
+> solo tramo dos tractos contiguos que comparten periodo**, y entonces un
+> locus declarado no encuentra tramo con el que coincidir: `(GA)×12` pegado a
+> `C×12` sale como un tramo de periodo 2 de pureza 24/36, que se descarta, y
+> la `C×12` aparte (escenario 1 de `tests/repeat_scale_frozen_identity.rs`);
+> `G×60` pegado a `A×15` sale como un tramo de periodo 1 con motivo `G`, y la
+> `A×15` desaparece (la evidencia de DT-009 y `tests/clonal_composition.rs`);
+> `G×50 (GT)×25 (CA)×50 G×100` da un solo tramo de periodo 2 que no alcanza la
+> pureza, y el `(CA)×50` desaparece (`tests/repeat_slippage.rs` y otras); un
+> compuesto declarado `(TCTA)(TCTG)(TCTA)` sale como un solo tramo de periodo
+> 4 que no alcanza la pureza y no puede coincidir. Lo segundo deja sin
+> respuesta en las normas a los compuestos declarados (DP-SSR-06 y DP-SSR-09
+> dicen que se declaran a mano y coinciden con lo detectado). La huella de
+> escala no puede reproducirse sin cambiar su referencia, y no se ha
+> recongelado.
+>
+> **Estado, 30/10/2026: se reanuda con el núcleo de `pop_var_caller`
+> `fa215c23`** (apartado 11.11), que ya no funde tramos pegados de motivos
+> distintos. Un compuesto declarado `(TCTA)(TCTG)(TCTA)` coincide con los dos
+> `(TCTA)` detectados (se solapa con ellos y su motivo es una rotación de uno
+> de los suyos) y los sustituye, aunque el `(TCTG)` central no se detecte. Las
+> pérdidas que quedan en la frontera son en parte de nuestra regla de solapes
+> y en parte del buscador original (DT-061, corregida el 31/10/2026). Decisiones menores del responsable del 30/10/2026, las cuatro
+> según la recomendación:
+>
+> 1. **Sin individuos no se generan alelos** de los loci detectados.
+>    Confirmada por el responsable el 30/10/2026: los detectados se dejan
+>    fuera del catálogo; un declarado sin alelos en la misma situación se
+>    sigue rechazando, y la diferencia se acepta.
+> 2. **Con PCR, el tartamudeo solo se exige si hay al menos un locus
+>    detectado**; sin ninguno, la PCR se admite sin tartamudeo.
+> 3. **Una `N` suelta dentro de un tracto cuenta como fallo de pureza**, no
+>    corta el tracto.
+> 4. **Un tramo solo se detecta si cabe entero en una región**; uno que solo
+>    la solapa se descarta en la etapa `outside_regions`.
+>
+> **Estado, 30/10/2026 (noche): entrega 3 terminada, pendiente de la revisión
+> adversarial.** Sin *commit*.
+>
+> - **Las cuatro decisiones menores.** La 3 (la `N` cuenta como fallo de
+>   pureza) y la 4 (un tramo solo cuenta si cabe entero en una región) ya
+>   estaban implementadas y probadas; se comprobó que sus pruebas mueren con la
+>   variante contraria. La 1 y la 2 se implementaron: sin copias haplotípicas
+>   los detectados **no entran en el catálogo** (no hay alelos que generar ni
+>   otros que darles) y la ejecución se publica; la PCR sin tartamudeo de base
+>   solo se rechaza al resolver la configuración si hay loci declarados, y
+>   después de detectar y de retirar si el catálogo final tiene algún locus.
+>   El tartamudeo clonal se conecta con la sección al resolver la
+>   configuración y **se desconecta si el catálogo final se queda vacío**
+>   (ronda 2 de la revisión, abajo).
+> - **F6.4.a.13b.** Las pruebas del régimen retirado ganan la sección con
+>   `tests/support/detection_section.rs`: una región por locus con seis bases
+>   de margen y suelos que son la mitad de las copias del locus más corto de
+>   cada longitud de motivo (inalcanzables en las longitudes que nadie
+>   declara). Se comprobó ejecutando la batería entera con un registro de cada
+>   locus detectado que queda en el catálogo que, fuera de las pruebas de la
+>   detección, ninguna gana un locus que no declare. Cuatro grupos de pruebas
+>   necesitaron algo más, y se dice en cada una: las que rodeaban su tracto de
+>   tiras largas de `G` usan un fondo de `G` y `T` (el detector no ve un
+>   microsatélite corto entre dos tiras largas de una misma base; anotado en
+>   DT-061); las que declaran un locus que es parte de una repetición más
+>   larga llevan su propia región; las que suponían el orden del TOML usan el
+>   del catálogo (por secuencia y por inicio); y tres cambian lo que comprueban
+>   porque el régimen lo cambia —una región sin repetición ya se rechaza por
+>   la coincidencia (REQ-REF-40) y no por la guarda de admisión, las variantes
+>   generadas ya no pueden caer dentro de un tracto (REQ-CONF-143), y el VCF de
+>   `61b9177` se compara sin la línea del identificador de ejecución—.
+> - **La huella de escala** (`tests/repeat_scale_frozen_identity.rs`) tiene
+>   sus literales: la tabla normalizada sale de los árboles que publicó el
+>   binario de `dcae406`, compilado aparte, y la verdad, el VCF y los FASTQ de
+>   los 23 escenarios son idénticos a los de `dcae406` tras la normalización.
+>   Solo cambian la efectiva (`repeat_detection` y el `origin` de cada locus),
+>   el manifiesto (el `origin`, el identificador de ejecución y las huellas y
+>   tamaños de lo que depende del TOML) y la copia del TOML.
+> - **Las huellas de la evidencia de DT-009** en
+>   `tests/technical_catalog_contract.rs` y `tests/clonal_homopolymer_fold.rs`
+>   cambian con la misma justificación, comparada también contra `dcae406`.
+> - **Juez físico.** La comparación de «lo declarado de cada locus» con el
+>   TOML deja de ir por identificador: compara las posiciones declaradas como
+>   lista ordenada, como antes comparaba la lista en el orden del TOML, y la
+>   comparación exacta de los loci ata cada declaración a su locus. Con la
+>   versión por identificador, quitarle el identificador a un locus se
+>   rechazaba ahí y dejaba sin alcanzar la guarda del juez del abanico que lo
+>   comprueba.
+> - Quitada la marca «provisional» de REQ-REF-39, DTC-103 y DTC-096 en lo que
+>   la pausa de la entrega 1 y las decisiones del 30/10 resolvieron.
+>   Actualizados los tres ejemplos de `uso-con-agentes` y su guía.
+> - **Puertas** (con `python3` 3.12.7 del entorno del proyecto y `bcftools` y
+>   `tabix` 1.24): formato y `clippy` limpios; batería 2208 pasan, 0 fallan,
+>   14 ignoradas; pruebas de documentación 2; compilación optimizada; cinco
+>   PASS de los validadores independientes; cobertura de los jueces dentro de
+>   su techo, con `src/results.rs` en 725 comprobaciones y 153 sin disparar
+>   (una nueva, que se dispara; nota en la línea base); Marimo limpio; 178
+>   pruebas de Python con los 7 fallos esperados (los dos antiguos y los cinco
+>   de la entrega 5).
+>
+> **Ronda 2 de la revisión adversarial (30/10/2026).** Un hallazgo grave y dos
+> medios, aplicados:
+>
+> - **Grave: PCR con el catálogo final vacío.** `validate` aceptaba y `run`
+>   moría con GPS-FMT-006, porque el tartamudeo clonal, conectado al leer la
+>   sección, dejaba el evento con el catálogo de azar v6 y el manifiesto general
+>   en la versión 4. Pasaba con regiones que no contienen nada y con una fila
+>   de la matriz que retira el único detectado. Ahora un paso final sobre el
+>   catálogo (`with_final_repeat_catalog`, en `validate`, en `run` y en la
+>   reconstrucción del juez) aplica la regla de la PCR **después de retirar** y
+>   desconecta el tartamudeo clonal si no queda ningún locus; el juez compara
+>   el evento técnico con el catálogo publicado. La prueba ejecuta `run` en
+>   los dos casos y exige `f4-technical-v5` y los FASTQ y el manifiesto de
+>   evento idénticos a los de la misma ejecución sin la sección.
+> - **Medio: efectiva sin su sección.** El juez físico leía la referencia sin
+>   bases si la efectiva no declaraba la sección, aunque el TOML copiado sí, y
+>   la reconstrucción moría con un defecto interno. Ahora mira también la
+>   sección del TOML, y el rechazo es el de la sección.
+> - **Medio: el compuesto que sustituye a dos tramos.** El fixture cambia a
+>   un `(CA)×10` y un `(GAT)×7` separados por dos bases de flanco, con un
+>   control que demuestra que sin el declarado salen las dos piezas.
+> - Pruebas nuevas para el identificador repetido, las regiones en
+>   coordenadas finales con inserción y la retirada por un cambio de base
+>   escrito a mano; `validate_and_run_see_the_same_catalog` pasa a llamarse
+>   `validate_and_run_accept_and_reject_the_same_scenarios`, porque no compara
+>   catálogos. Quitada la marca «provisional» de REQ-CONF-142 y REQ-REF-40 en
+>   lo decidido.
+> - Cada arreglo tiene una prueba que muere con la variante contraria,
+>   comprobado mutando una copia aparte. Puertas tras la ronda: formato y
+>   `clippy` limpios; batería 2213 pasan, 0 fallan, 14 ignoradas; pruebas de
+>   documentación 2; compilación optimizada; cinco PASS de los validadores
+>   independientes; cobertura de los jueces sin cambios (`src/results.rs` en
+>   725 y 153); Marimo limpio; 178 pruebas de Python con los mismos 7 fallos
+>   esperados.
 
 ### Entrega 4 — publicación y juez
 
@@ -1373,6 +1634,11 @@ Pendientes; este plan no las resuelve.
 Medida el 28/10/2026 por el implementador de la entrega 1. **Son cifras, no
 decisiones**: las propuestas del apartado 11.7 las decide el responsable en la
 pausa.
+
+Los apartados 11.2 a 11.10 se midieron con el núcleo copiado de `pop_var_caller`
+en el commit `950909f`. Desde el 30/10/2026 el núcleo procede de `fa215c23`,
+que ya no funde dos repeticiones pegadas de motivos distintos; sus cifras están
+en el apartado 11.11.
 
 ### 11.1. Entorno y forma de medir
 
@@ -2287,3 +2553,117 @@ Cómo se extrapola, para que se pueda rehacer:
    una matriz grande y muchos loci, sí.
 4. **Lo de 11.9.6 que sigue igual**: los dos recorridos cuadráticos del
    juez semántico del VCF, `copy_is_reference_at` y la memoria.
+
+### 11.11. Núcleo nuevo de `pop_var_caller` (`fa215c23`): tramos pegados de motivos distintos (30/10/2026)
+
+**Qué cambia.** El núcleo de `950909f` fundía en un solo intervalo dos
+repeticiones pegadas de motivos distintos, con el motivo de la primera, y el
+tramo fundido no pasaba la pureza: `A×12 T×12`, `(CA)×10 (GT)×10` y
+`(TCTA)×8 (TCTG)×8 (TCTA)×8` no daban ningún candidato; `(GA)×12 C×12` daba
+solo la tira de `C`, y `G×60 A×15` un solo candidato `G` de 75 bases que se
+tragaba la tira de `A`. El núcleo de `fa215c23` parte cada segmento donde
+cambia el motivo, vuelve a unir una interrupción corta cuando el motivo de
+fuera reaparece y emite el tramo unido junto con sus trozos; la cadena de
+`detect_repeat_candidates` juzga cada lectura por separado y la regla de
+solapes (DP-SSR-05) se queda con una. Se conserva la desviación propia
+decidida el 29/10 (apartado 11.8, tercera versión), aplicada ahora también al
+trozo nacido de un corte: sin ella, el trozo empieza en la última base de la
+tira previa (`A×8 (GA)×10` daría `[7, 28)`). Detalle y pruebas, en la cabecera
+de `src/repeat_detection.rs`.
+
+**Medición.** Mismos comandos y FASTA que el apartado 11.1; `rustc 1.97.1`.
+Binario de pruebas optimizado de SHA-256 `85da6f0a…`, del árbol con
+`src/repeat_detection.rs` de SHA-256 `de1c504a…` (la entrega 3, a medias, sin
+*commit*). Dos pasadas con recuentos idénticos línea a línea. El «antes» es
+la tercera versión del apartado 11.8; se volvió a medir en la misma sesión con
+un binario del núcleo viejo compilado en una copia aparte (SHA-256
+`0d2d8de2…`), y sus recuentos coinciden con 11.8 cifra a cifra. Suelo por
+omisión `[8,6,6,6,5,4]`, antes → después:
+
+| Etapa | p1 | p2 | p3 | p4 | p5 | p6 | Total |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Intervalos del detector | 15 813 346 → 15 822 760 | 2 784 387 → 2 789 346 | 1 169 475 → 1 178 087 | 338 019 → 341 924 | 132 284 → 132 757 | 56 536 → 57 244 | 20 294 047 → **20 322 118** |
+| Suelo de copias | 15 766 649 → 15 773 834 | 2 778 972 → 2 783 034 | 1 168 253 → 1 175 382 | 337 869 → 341 711 | 132 255 → 132 727 | 56 375 → 57 022 | 20 240 373 → 20 263 710 |
+| Pureza | 2 133 → **27** | 744 → 117 | 315 → 826 | 59 → 49 | 6 → 5 | 80 → 86 | 3 337 → **1 110** |
+| Tirada | 0 → 0 | 0 → 0 | 0 → 0 | 0 → 0 | 0 → 0 | 2 → 3 | 2 → 3 |
+| Tope | 0 → 0 | 0 → 0 | 2 → 10 | 0 → 0 | 0 → 0 | 0 → 0 | 2 → 10 |
+| Borde | 1 → 1 | 0 → 0 | 1 → 3 | 0 → 0 | 0 → 0 | 0 → 0 | 2 → 4 |
+| Fuera de regiones | 0 → 0 | 0 → 0 | 0 → 0 | 0 → 0 | 0 → 0 | 0 → 0 | 0 → 0 |
+| Solape | 7 → 306 | 20 → 552 | 9 → 200 | 10 → 28 | 0 → 0 | 1 → 9 | 47 → **1 095** |
+| **Aceptados** | 44 556 → **48 592** | 4 651 → **5 643** | 895 → **1 666** | 81 → **136** | 23 → 25 | 78 → **124** | 50 284 → **56 186** |
+
+Los intervalos del detector suben porque un tramo unido sale con sus trozos
+(cada lectura se cuenta), y los solapes suben por lo mismo: el trozo que
+pierde frente a su tramo unido, o al revés, se cuenta en «Solape». Con los
+otros suelos: el bajo pasa de 261 122 a **274 286** aceptados (pureza 7 986 →
+1 744; solapes 710 → 3 341) y el alto de 13 690 a **16 122** (pureza 1 445 →
+919; solapes 11 → 515). Bases en candidatos con el suelo por omisión:
+561 431 → **673 012** (0,717 % → 0,860 %).
+
+Cifras auxiliares, suelo por omisión, antes → después: copia parcial final
+2 921 → 4 065; pares de candidatos que se tocan 48 → **1 012**; pureza media
+0,9955 → 0,9937; longitud en pb, mediana 9 → 9, percentil 90 15 → 17,
+percentil 99 55 → 62, máxima 459 → 691. DP-SSR-02: 9 073 → 512 intervalos
+pasan por longitud y no por copias completas, y 16 → 26 superarían además
+pureza y tirada. DP-SSR-07: sin tope saldrían 56 175 (11 menos que con él:
+los 10 tramos largos que el tope descarta ganarían solapes a varios trozos);
+con más de 50 unidades, 50 → 102; de 100, 6 → 23; de 200, 1 → 7; de 500,
+0 → 2; de 1 000, 0 → 1; máximo 422 → 1 262 unidades.
+
+Barrido (`measure_scan`, misma sesión): núcleo viejo 12,0 y 12,1 s, núcleo
+nuevo **7,8 y 6,9 s**; memoria residente máxima 229 952 kB → **181 724 y
+181 704 kB**. El núcleo viejo midió 7,1–8,1 s el 29/10 (apartado 11.8) en la
+misma máquina; la diferencia con los 12 s de hoy es de la máquina, no del
+código (mismos recuentos), así que la comparación que vale es la de la misma
+sesión. La mejora viene de la revisión de rendimiento del original
+(`cdce162c`): la pila de Ruzzo y Tompa emite los segmentos en cuanto son
+definitivos, y los segmentos demasiado cortos no se recorren.
+
+**Cuántos tramos pegados recupera.** Comparando locus a locus los candidatos
+de los dos núcleos (suelo por omisión): 50 125 comunes, **6 061 solo en el
+nuevo** (4 110 de periodo 1, 1 062 de 2, 785 de 3, 56 de 4, 2 de 5 y 46 de 6)
+y **159 solo en el viejo**. De los 6 061 nuevos, **1 920 tocan a otro
+candidato** (1 904 homopolímeros, 10 de periodo 2 y 6 de periodo 3): son los
+tramos pegados que el núcleo viejo fundía. 5 897 caen donde el viejo no tenía
+candidato, 103 junto a o dentro de un candidato viejo de otro motivo y 61 son
+la misma repetición que un candidato viejo con otras fronteras.
+
+**Lo que se pierde, sin decidirlo aquí.** De los 159 candidatos que solo da el
+viejo:
+
+- **54** siguen ahí con otras fronteras (la misma repetición, por ejemplo un
+  `(TA)n` que ahora acaba 6 bases antes porque su cola de otro motivo se
+  cortó).
+- **100** se pierden por solape con un candidato nuevo de otro motivo: 58
+  solapan **1 base**, casi siempre una tira de una sola base que empieza en la
+  última base de un microsatélite (`…TATATATATATA AAAAAAAA`: el `(TA)n`
+  nuevo acaba en la primera `A` de la tira y la regla de solapes deja uno). Es
+  la imagen especular, en el **final** del tramo, del caso que el responsable
+  decidió el 29/10 para el **inicio**; esa decisión no cubre el final. Los
+  otros 42 solapan de 2 a 5 bases o con dos trozos, casi siempre la copia
+  parcial que un trozo comparte con el motivo siguiente (`(AC)n` contra un
+  `(CACG)n` pegado; el compuesto `(TCTA)×8 (TCTG)×8 (TCTA)×8` de las pruebas
+  pierde así su `(TCTG)n`, que solapa 3 bases con cada vecino).
+- **5** desaparecen sin nada nuevo encima. Son repeticiones con una
+  interrupción que desplaza la fase (`ATATATATA AAA TATATATATAT`): el viejo las
+  aceptaba enteras, con pureza ≥ 0,8 por la descomposición en copias
+  completas; el nuevo las corta en la interrupción y no las vuelve a unir
+  (comprobado en una copia aparte sobre cuatro de los cinco: salen dos trozos
+  y ningún tramo unido), porque la unión mide la pureza en una sola fase, la
+  del trozo de fuera, y la interrupción la desplaza, como documenta el
+  original; los dos trozos no alcanzan el suelo de copias.
+
+El saldo con el suelo por omisión es **+5 902** candidatos.
+
+**Decisión del responsable (30/10/2026), corregida el 31/10/2026.** El
+30/10 se decidió esperar a una versión nueva de `pop_var_caller` para todas
+las pérdidas de la frontera. El 31/10 una sonda demostró que el buscador
+emite bien los dos tramos en `(CA)×10 A×12` y los tres trozos del compuesto,
+y que es **nuestra** regla de solapes (DP-SSR-05) la que descarta uno entero:
+esas pérdidas (los 100 por solape) son nuestras, y el arreglo propuesto
+(recortar en vez de descartar cuando el solape es menor que una copia del
+motivo) queda pendiente de decisión. Solo el microsatélite corto entre dos
+tiras largas de una misma base y los 5 de desplazamiento de fase son del
+buscador y esperan su nueva versión. Detalle en el registro de deudas
+técnicas (DT-061). Mientras tanto, la entrega 3 sigue con el núcleo de
+`fa215c23` y congela el catálogo que este da.

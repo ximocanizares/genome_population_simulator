@@ -363,6 +363,176 @@ pub struct EffectiveRepeatLocus {
     slippage: Option<EffectiveRepeatSlippage>,
     alleles: Vec<EffectiveRepeatAllele>,
     normalization: RepeatFrequencyNormalization,
+    /// De dónde sale el locus: declarado por el usuario o detectado en la
+    /// referencia final (REQ-CONF-56, REQ-MAN-98).
+    origin: RepeatLocusOrigin,
+}
+
+/// De dónde sale un locus del catálogo de microsatélites.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RepeatLocusOrigin {
+    /// Lo declaró el usuario; con la detección, ajusta uno detectado
+    /// (REQ-REF-40) o es un motivo de 7 pb o más, que la detección no ve.
+    Declared,
+    /// Lo encontró la detección sobre la referencia final (REQ-REF-38).
+    Detected,
+}
+
+impl RepeatLocusOrigin {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Declared => "declared",
+            Self::Detected => "detected",
+        }
+    }
+}
+
+/// Versión del algoritmo de detección que se publica con el catálogo
+/// (DTC-103): el núcleo copiado con su única desviación y los criterios del
+/// apartado 11.7 del plan.
+pub const REPEAT_DETECTION_ALGORITHM_VERSION: &str = "ssr-detection-v1";
+
+/// La sección de microsatélites ya resuelta (REQ-CONF-142).
+#[derive(Clone, Debug, PartialEq)]
+pub struct EffectiveRepeatDetection {
+    min_copies: [u64; crate::repeat_detection::DETECTION_MOTIF_LENGTHS],
+    max_units: u64,
+    slippage: SlippageSettings,
+    /// En el orden del catálogo de la referencia final y por inicio; `None`
+    /// es la referencia entera.
+    regions: Option<Vec<EffectiveDetectionRegion>>,
+    /// Loci detectados que un SNV suministrado o escrito a mano retiró del
+    /// catálogo (REQ-CONF-143), en el orden del catálogo.
+    retired: Vec<RetiredRepeatLocus>,
+}
+
+impl EffectiveRepeatDetection {
+    /// Mínimo de copias completas por longitud de motivo, de 1 a 6 pb.
+    #[must_use]
+    pub const fn min_copies(&self) -> &[u64; crate::repeat_detection::DETECTION_MOTIF_LENGTHS] {
+        &self.min_copies
+    }
+
+    /// Tope de unidades de un locus detectado.
+    #[must_use]
+    pub const fn max_units(&self) -> u64 {
+        self.max_units
+    }
+
+    /// El deslizamiento común.
+    #[must_use]
+    pub const fn slippage(&self) -> SlippageSettings {
+        self.slippage
+    }
+
+    #[must_use]
+    pub fn regions(&self) -> Option<&[EffectiveDetectionRegion]> {
+        self.regions.as_deref()
+    }
+
+    #[must_use]
+    pub fn retired(&self) -> &[RetiredRepeatLocus] {
+        &self.retired
+    }
+
+    /// Los criterios del detector: los de la sección más los mínimos
+    /// **generales** de admisión, sin una segunda perilla (DP-SSR-02).
+    #[must_use]
+    pub fn criteria(
+        &self,
+        admission: EffectiveRepeatAdmission,
+    ) -> crate::repeat_detection::DetectionCriteria {
+        crate::repeat_detection::DetectionCriteria {
+            min_copies: self.min_copies,
+            min_purity: admission.min_purity(),
+            min_longest_run_units: admission.min_longest_run_units(),
+            max_units: self.max_units,
+        }
+    }
+
+    /// Las regiones de una secuencia en base cero y semiabiertas, ordenadas;
+    /// `None` si no hay lista (toda la secuencia).
+    fn regions_of(&self, sequence_id: &str) -> Option<Vec<(u64, u64)>> {
+        self.regions.as_ref().map(|regions| {
+            regions
+                .iter()
+                .filter(|region| region.sequence_id == sequence_id)
+                .map(|region| (region.start - 1, region.end))
+                .collect()
+        })
+    }
+}
+
+/// Una región de detección: base uno, cerrada, en la referencia final.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectiveDetectionRegion {
+    sequence_id: String,
+    start: u64,
+    end: u64,
+}
+
+impl EffectiveDetectionRegion {
+    #[must_use]
+    pub fn sequence_id(&self) -> &str {
+        &self.sequence_id
+    }
+
+    #[must_use]
+    pub const fn start(&self) -> u64 {
+        self.start
+    }
+
+    #[must_use]
+    pub const fn end(&self) -> u64 {
+        self.end
+    }
+}
+
+/// Un locus detectado que una variante pequeña retiró del catálogo
+/// (REQ-CONF-143): queda sin variación y se publica con su causa.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetiredRepeatLocus {
+    locus_id: String,
+    sequence_id: String,
+    /// Base uno, cerrado, en la referencia final.
+    start: u64,
+    end: u64,
+    motif: String,
+    cause: String,
+}
+
+impl RetiredRepeatLocus {
+    #[must_use]
+    pub fn locus_id(&self) -> &str {
+        &self.locus_id
+    }
+
+    #[must_use]
+    pub fn sequence_id(&self) -> &str {
+        &self.sequence_id
+    }
+
+    #[must_use]
+    pub const fn start(&self) -> u64 {
+        self.start
+    }
+
+    #[must_use]
+    pub const fn end(&self) -> u64 {
+        self.end
+    }
+
+    #[must_use]
+    pub fn motif(&self) -> &str {
+        &self.motif
+    }
+
+    /// Qué variante cae dentro, dicho para leerlo.
+    #[must_use]
+    pub fn cause(&self) -> &str {
+        &self.cause
+    }
 }
 
 /// Cómo situó el usuario un locus, en coordenadas del genoma de partida y en
@@ -641,6 +811,12 @@ impl EffectiveRepeatLocus {
     pub const fn normalization(&self) -> RepeatFrequencyNormalization {
         self.normalization
     }
+
+    /// Declarado por el usuario o detectado.
+    #[must_use]
+    pub const fn origin(&self) -> RepeatLocusOrigin {
+        self.origin
+    }
 }
 
 /// Mínimos de la guarda de admisión con referencia real, ya resueltos.
@@ -816,6 +992,9 @@ pub struct EffectiveConfig {
     /// referencia suministrada (DTC-098). Con él, la referencia de la
     /// simulación es la final y no la suministrada.
     tract_insertion: Option<EffectiveTractInsertion>,
+    /// La sección de microsatélites, si el documento la declara
+    /// (REQ-CONF-142). Sin ella no hay ningún locus.
+    repeat_detection: Option<EffectiveRepeatDetection>,
 }
 
 /// Configuración F5 ya resuelta entre sus dos documentos de autoría y el
@@ -1576,6 +1755,12 @@ impl EffectiveConfig {
         self.tract_insertion.as_ref()
     }
 
+    /// La sección de microsatélites, si el documento la declara.
+    #[must_use]
+    pub const fn repeat_detection(&self) -> Option<&EffectiveRepeatDetection> {
+        self.repeat_detection.as_ref()
+    }
+
     /// **Identificador de la referencia sobre la que se simula.** Es el de la
     /// referencia final cuando hay inserción de tractos (DTC-098) y el de la
     /// declarada en los demás casos. Todo consumidor que siembre un sorteo o
@@ -1588,6 +1773,504 @@ impl EffectiveConfig {
             .map_or(&self.reference_id, |insertion| {
                 &insertion.derived_reference_id
             })
+    }
+
+    /// **Detecta los microsatélites de la referencia final** y devuelve la
+    /// configuración con el catálogo entero: los detectados más los
+    /// declarados, ordenados por secuencia y por inicio (REQ-REF-38 a
+    /// REQ-REF-40, DTC-103).
+    ///
+    /// Devuelve `None` sin la sección de microsatélites: entonces no hay
+    /// ningún locus y nada cambia.
+    ///
+    /// # Qué hace con cada declarado
+    ///
+    /// Tiene que **coincidir** con un detectado: su intervalo se solapa con un
+    /// locus detectado de su secuencia cuyo motivo es una rotación de uno de
+    /// los suyos. Entonces mandan sus fronteras y **sustituye** a todos los
+    /// detectados que solapa, conservando su identificador y sus alelos. Un
+    /// declarado cuyos motivos tienen todos 7 pb o más queda exento, porque
+    /// la detección no los ve (REQ-CONF-60), y también sustituye a lo que
+    /// solapa. Sin coincidencia se rechaza nombrando el locus, el detectado
+    /// más cercano y la etapa en la que cayó el tramo de su motivo.
+    ///
+    /// # Sin individuos
+    ///
+    /// Sin copias haplotípicas no se generan alelos de los detectados
+    /// (decisión del responsable del 30/10/2026; REQ-CONF-140), y un locus
+    /// detectado no tiene otros, mientras que un locus publicado necesita al
+    /// menos uno: **los detectados no entran en el catálogo** y la ejecución
+    /// no se rechaza. Los declarados siguen sus reglas.
+    ///
+    /// # Por qué no puede hacerse al resolver la configuración
+    ///
+    /// Por la misma razón que el generador de deslizamiento: la referencia
+    /// final no existe hasta que se prepara.
+    pub fn with_detected_repeat_loci(
+        &self,
+        reference: &Reference,
+    ) -> Result<Option<Self>, Diagnostic> {
+        let Some(detection) = &self.repeat_detection else {
+            return Ok(None);
+        };
+        let criteria = detection.criteria(self.repeat_admission);
+        let reference_id = ReferenceId::parse(self.simulation_reference_id(), "execution")
+            .map_err(|diagnostic| diagnostic.with("path", &self.source_path))?;
+        let mut catalog: Vec<(usize, u64, EffectiveRepeatLocus)> =
+            Vec::with_capacity(self.repeat_loci.len());
+        let declared_ids = self
+            .repeat_loci
+            .iter()
+            .map(EffectiveRepeatLocus::id)
+            .collect::<BTreeSet<_>>();
+        let lineages = self.haplotype_copy_count()?;
+        for (sequence_index, sequence) in reference.sequences().iter().enumerate() {
+            let mut declared: Vec<&EffectiveRepeatLocus> = self
+                .repeat_loci
+                .iter()
+                .filter(|locus| locus.declaration.interval().sequence_id() == sequence.id())
+                .collect();
+            declared.sort_by_key(|locus| locus.declaration.interval().start());
+            let regions = detection.regions_of(sequence.id().as_str());
+            if regions.as_ref().is_some_and(Vec::is_empty) && declared.is_empty() {
+                continue;
+            }
+            let bases = sequence.sequence().as_bytes().map_err(|error| {
+                Diagnostic::internal_invariant("application", "repeat_detection").with(
+                    "detail",
+                    format!("las bases de la referencia no están materializadas: {error:?}"),
+                )
+            })?;
+            let found = crate::repeat_detection::detect_repeat_candidates_in_regions(
+                bases,
+                &criteria,
+                regions.as_deref(),
+            );
+            let candidates = found.candidates();
+            // Los candidatos no se solapan y van por inicio: los que pisan
+            // `[start, end)` empiezan en el primero que acaba después de
+            // `start`.
+            let overlapping = |start: u64, end: u64| {
+                let first = candidates.partition_point(|candidate| candidate.end() <= start);
+                candidates[first..]
+                    .iter()
+                    .take_while(move |candidate| candidate.start() < end)
+            };
+            for locus in &declared {
+                let interval = locus.declaration.interval();
+                let (start, end) = (interval.start(), interval.end());
+                let exempt = locus.motifs().iter().all(|motif| {
+                    motif.length() > crate::repeat_detection::DETECTION_MOTIF_LENGTHS as u64
+                });
+                let matches = overlapping(start, end).any(|candidate| {
+                    locus.motifs().iter().any(|motif| {
+                        crate::repeat_detection::is_rotation(
+                            candidate.motif().bases(),
+                            motif.bases(),
+                        )
+                    })
+                });
+                if !exempt && !matches {
+                    return Err(self.unmatched_declared_locus(
+                        locus,
+                        sequence.id().as_str(),
+                        bases,
+                        &criteria,
+                        regions.as_deref(),
+                        candidates,
+                    ));
+                }
+                catalog.push((sequence_index, start, (*locus).clone()));
+            }
+            // **Sin copias haplotípicas no hay alelos que generar**, y un locus
+            // detectado no tiene otros: no entra en el catálogo (decisión del
+            // responsable del 30/10/2026). Un declarado sí, con sus reglas.
+            if lineages == 0 {
+                continue;
+            }
+            for candidate in candidates {
+                let first = declared.partition_point(|locus| {
+                    locus.declaration.interval().end() <= candidate.start()
+                });
+                if declared
+                    .get(first)
+                    .is_some_and(|locus| locus.declaration.interval().start() < candidate.end())
+                {
+                    continue;
+                }
+                let motif = candidate.motif().clone();
+                let id = format!(
+                    "SSR-{}-{}-{}-{}",
+                    sequence_index + 1,
+                    candidate.start() + 1,
+                    candidate.end(),
+                    motif.as_text()
+                );
+                if declared_ids.contains(id.as_str()) {
+                    return Err(Diagnostic::configuration(
+                        "GPS-CONF-008",
+                        "La configuración contiene una combinación de campos incompatible.",
+                    )
+                    .with("path", &self.source_path)
+                    .with("fields", "reference.repeat_loci.id")
+                    .with(
+                        "detail",
+                        format!(
+                            "identificador de locus repetido: {id} es también el de un locus \
+                             detectado en otro tramo; los detectados se llaman \
+                             SSR-<secuencia>-<inicio>-<fin>-<motivo>, y un declarado no puede \
+                             usar ese nombre para otro tramo"
+                        ),
+                    ));
+                }
+                let locus_id = RepeatLocusId::parse(&id, "repeat_locus")
+                    .map_err(|diagnostic| diagnostic.with("path", &self.source_path))?;
+                let sequence_id = SequenceId::parse(sequence.id().as_str(), reference_id.as_str())
+                    .map_err(|diagnostic| diagnostic.with("path", &self.source_path))?;
+                let interval = GenomicInterval::new(
+                    reference_id.clone(),
+                    sequence_id,
+                    candidate.start(),
+                    candidate.end(),
+                    sequence.length(),
+                )
+                .map_err(|error| {
+                    Diagnostic::internal_invariant("application", "repeat_detection")
+                        .with("detail", format!("{id}: {error:?}"))
+                })?;
+                let declaration =
+                    TandemRepeatLocus::new(locus_id, interval, vec![motif]).map_err(|error| {
+                        Diagnostic::internal_invariant("application", "repeat_detection")
+                            .with("detail", format!("{id}: {}", error.detail()))
+                    })?;
+                catalog.push((
+                    sequence_index,
+                    candidate.start(),
+                    EffectiveRepeatLocus {
+                        declaration,
+                        reference_units: None,
+                        declared_position: None,
+                        max_units: detection.max_units,
+                        admission: self.repeat_admission,
+                        slippage: Some(EffectiveRepeatSlippage {
+                            settings: detection.slippage,
+                            generation: None,
+                        }),
+                        alleles: Vec::new(),
+                        normalization: RepeatFrequencyNormalization {
+                            tolerance: self.normalization.tolerance(),
+                            original_sum: 0.0,
+                            original_delta: 0.0,
+                            effective_sum: 0.0,
+                            effective_delta: 0.0,
+                        },
+                        origin: RepeatLocusOrigin::Detected,
+                    },
+                ));
+            }
+        }
+        catalog.sort_by_key(|(sequence_index, start, _)| (*sequence_index, *start));
+        let mut resolved = self.clone();
+        resolved.repeat_loci = catalog.into_iter().map(|(_, _, locus)| locus).collect();
+        resolved.admit_detected_loci_against_stutter()?;
+        Ok(Some(resolved))
+    }
+
+    /// **El último paso sobre el catálogo final**, después de detectar, de
+    /// retirar lo que invade una variante y de generar los abanicos (en
+    /// `validate`, en `run` y en la reconstrucción del juez físico). Solo hace
+    /// algo con la sección de microsatélites:
+    ///
+    /// - con algún locus, la PCR exige el tartamudeo de base
+    ///   (`admit_amplified_preparation_against_the_catalog`);
+    /// - sin ninguno, **desconecta el tartamudeo clonal**, que se conectó al
+    ///   resolver la configuración porque entonces aún no se sabía qué quedaría:
+    ///   una biblioteca amplificada sin loci publica lo mismo que sin la sección
+    ///   (DTC-092, catálogo de azar v5).
+    ///
+    /// Devuelve `None` si no cambia nada.
+    pub fn with_final_repeat_catalog(&self) -> Result<Option<Self>, Diagnostic> {
+        if self.repeat_detection.is_none() {
+            return Ok(None);
+        }
+        if !self.repeat_loci.is_empty() {
+            self.admit_amplified_preparation_against_the_catalog()?;
+            return Ok(None);
+        }
+        Ok(self.without_clonal_stutter())
+    }
+
+    /// La misma configuración con el tartamudeo clonal desconectado, o `None`
+    /// si no lo tenía.
+    #[must_use]
+    pub fn without_clonal_stutter(&self) -> Option<Self> {
+        let event = self.technical_event.as_ref()?;
+        event.pcr.as_ref()?.clonal_stutter()?;
+        let mut resolved = self.clone();
+        if let Some(event) = resolved.technical_event.as_mut() {
+            event.pcr = event.pcr.take().map(PcrSettings::without_clonal_stutter);
+        }
+        Some(resolved)
+    }
+
+    /// **La PCR exige el tartamudeo de base si el catálogo final tiene algún
+    /// locus** (REQ-CONF-138, con «loci declarados» como los del catálogo,
+    /// según REQ-CONF-142). Es la misma regla que
+    /// `admit_amplified_preparation_against_loci` aplica al resolver la
+    /// configuración con loci declarados, ahora sobre lo que queda después de
+    /// detectar y de retirar: sin ningún locus, la PCR se admite sin
+    /// tartamudeo (decisión del responsable del 30/10/2026).
+    fn admit_amplified_preparation_against_the_catalog(&self) -> Result<(), Diagnostic> {
+        let Some(event) = self.technical_event.as_ref() else {
+            return Ok(());
+        };
+        let Some(first) = self.repeat_loci.first() else {
+            return Ok(());
+        };
+        if event.preparation() != LibraryPreparation::Pcr || event.stutter().enabled() {
+            return Ok(());
+        }
+        Err(Diagnostic::configuration(
+            "GPS-CONF-008",
+            "La configuración contiene una combinación de campos incompatible.",
+        )
+        .with("path", &self.source_path)
+        .with(
+            "fields",
+            "technical_event.library_preparation,technical_event.stutter.enabled",
+        )
+        .with(
+            "detail",
+            format!(
+                "la preparación amplificada por PCR con microsatélites en el catálogo ({} loci, el \
+                 primero es {}) exige technical_event.stutter.enabled = true: el tartamudeo clonal \
+                 de la PCR solo despeja el incremento de la amplificación, y sin la parte de base \
+                 la biblioteca subestimaría el tartamudeo. O se activa el tartamudeo de base, o \
+                 se limita la detección con regiones que no contengan ninguno, o se usa \
+                 library_preparation = \"{}\"",
+                self.repeat_loci.len(),
+                first.id(),
+                LibraryPreparation::PcrFree.as_str()
+            ),
+        ))
+    }
+
+    /// El tartamudeo encendido alcanza a los detectados con las tasas por
+    /// longitud de motivo (REQ-CONF-132): una longitud sin tasa declarada se
+    /// rechaza como con un declarado, nombrando el locus.
+    fn admit_detected_loci_against_stutter(&self) -> Result<(), Diagnostic> {
+        let Some(event) = self.technical_event.as_ref() else {
+            return Ok(());
+        };
+        if !event.stutter().enabled() {
+            return Ok(());
+        }
+        for locus in &self.repeat_loci {
+            if locus.origin != RepeatLocusOrigin::Detected {
+                continue;
+            }
+            for motif in locus.motifs() {
+                let length = motif.length();
+                if event
+                    .stutter()
+                    .motif_length_rates()
+                    .rate_for_motif_length(length)
+                    .is_none()
+                {
+                    return Err(Diagnostic::configuration(
+                        "GPS-CONF-008",
+                        "La configuración contiene una combinación de campos incompatible.",
+                    )
+                    .with("path", &self.source_path)
+                    .with(
+                        "fields",
+                        "reference.repeat_detection,technical_event.stutter.motif_length_rates",
+                    )
+                    .with(
+                        "detail",
+                        format!(
+                            "el locus detectado {} tiene un motivo de {length} pb y el tartamudeo \
+                             no declara tasa para esa longitud; declárela en \
+                             technical_event.stutter.motif_length_rates o limite la detección \
+                             con regiones",
+                            locus.id()
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// El rechazo de un declarado que no coincide con ningún detectado
+    /// (REQ-REF-40): nombra el locus, lo detectado más cercano de su
+    /// secuencia y la etapa en la que cayó el tramo de su motivo que lo
+    /// solapaba.
+    #[allow(clippy::too_many_arguments)]
+    fn unmatched_declared_locus(
+        &self,
+        locus: &EffectiveRepeatLocus,
+        sequence_id: &str,
+        bases: &[u8],
+        criteria: &crate::repeat_detection::DetectionCriteria,
+        regions: Option<&[(u64, u64)]>,
+        candidates: &[crate::repeat_detection::RepeatCandidate],
+    ) -> Diagnostic {
+        let interval = locus.declaration.interval();
+        let (start, end) = (interval.start(), interval.end());
+        let why = crate::repeat_detection::explain_missing_tract(
+            bases,
+            criteria,
+            regions,
+            start,
+            end,
+            locus.motifs(),
+        )
+        .map_or_else(
+            || "el detector no ve ningún tramo de ese motivo que lo solape".to_owned(),
+            |missing| {
+                format!(
+                    "el tramo {sequence_id}:{}..{} de periodo {} no superó la etapa {}",
+                    missing.start + 1,
+                    missing.end,
+                    missing.period,
+                    missing.stage.name()
+                )
+            },
+        );
+        let nearest = candidates
+            .iter()
+            .min_by_key(|candidate| {
+                if candidate.end() <= start {
+                    start - candidate.end()
+                } else {
+                    candidate.start().saturating_sub(end)
+                }
+            })
+            .map_or_else(
+                || format!("no hay ningún locus detectado en {sequence_id}"),
+                |candidate| {
+                    format!(
+                        "el detectado más cercano es {sequence_id}:{}..{} con motivo {}",
+                        candidate.start() + 1,
+                        candidate.end(),
+                        candidate.motif().as_text()
+                    )
+                },
+            );
+        Diagnostic::configuration(
+            "GPS-CONF-008",
+            "La configuración contiene una combinación de campos incompatible.",
+        )
+        .with("path", &self.source_path)
+        .with("fields", "reference.repeat_loci,reference.repeat_detection")
+        .with(
+            "detail",
+            format!(
+                "locus {}: no coincide con ningún microsatélite detectado en la referencia final \
+                 ({sequence_id}:{}..{}, motivos {}): {why}; {nearest}. Un locus declarado solo \
+                 ajusta los parámetros de uno detectado",
+                locus.id(),
+                start + 1,
+                end,
+                locus
+                    .motifs()
+                    .iter()
+                    .map(RepeatMotif::as_text)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )
+    }
+
+    /// **Retira del catálogo los loci detectados que contienen una variante
+    /// pequeña** suministrada o escrita a mano (REQ-CONF-143, DP-SSR-11,
+    /// provisional hasta DTF-066): un cambio de base directo, o una fila de la
+    /// matriz de SNV, en coordenadas de la referencia final. El locus queda
+    /// sin variación y la sección publica cuál y por qué.
+    ///
+    /// Los **declarados** no se retiran: una variante dentro de uno se sigue
+    /// rechazando (S-32) más adelante, en la admisión de los loci frente a las
+    /// variantes pequeñas. Devuelve `None` sin la sección o si no retira
+    /// nada.
+    ///
+    /// `matrix_rows` son `(secuencia, posición en base uno, identificador)`.
+    pub fn with_retired_repeat_loci(
+        &self,
+        matrix_rows: &[(&str, u64, &str)],
+    ) -> Result<Option<Self>, Diagnostic> {
+        if self.repeat_detection.is_none() {
+            return Ok(None);
+        }
+        let mut variants: std::collections::BTreeMap<(&str, u64), String> =
+            std::collections::BTreeMap::new();
+        for event in &self.direct_events {
+            if let EffectiveDirectEvent::Snp {
+                sequence_id,
+                position_1based,
+                ..
+            } = event
+                && *position_1based > 0
+            {
+                variants
+                    .entry((sequence_id.as_str(), position_1based - 1))
+                    .or_insert_with(|| {
+                        format!(
+                            "el cambio de base {} en {sequence_id}:{position_1based}",
+                            event.event_id()
+                        )
+                    });
+            }
+        }
+        for (contig, position_1based, variant_id) in matrix_rows {
+            if *position_1based > 0 {
+                variants
+                    .entry((contig, position_1based - 1))
+                    .or_insert_with(|| {
+                        format!(
+                            "la variante {variant_id} de la matriz en {contig}:{position_1based}"
+                        )
+                    });
+            }
+        }
+        let mut retired = Vec::new();
+        let mut kept = Vec::with_capacity(self.repeat_loci.len());
+        for locus in &self.repeat_loci {
+            let interval = locus.declaration.interval();
+            let sequence_id = interval.sequence_id().as_str();
+            let inside = (locus.origin == RepeatLocusOrigin::Detected)
+                .then(|| {
+                    variants
+                        .range((sequence_id, interval.start())..(sequence_id, interval.end()))
+                        .next()
+                })
+                .flatten();
+            match inside {
+                Some((_, cause)) => retired.push(RetiredRepeatLocus {
+                    locus_id: locus.id().to_owned(),
+                    sequence_id: sequence_id.to_owned(),
+                    start: interval.start() + 1,
+                    end: interval.end(),
+                    motif: locus
+                        .motifs()
+                        .iter()
+                        .map(RepeatMotif::as_text)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    cause: format!("{cause} cae dentro del tracto"),
+                }),
+                None => kept.push(locus.clone()),
+            }
+        }
+        if retired.is_empty() {
+            return Ok(None);
+        }
+        let mut resolved = self.clone();
+        resolved.repeat_loci = kept;
+        if let Some(detection) = resolved.repeat_detection.as_mut() {
+            detection.retired = retired;
+        }
+        Ok(Some(resolved))
     }
 
     /// Genera el abanico de alelos de los loci que lo piden, partiendo del
@@ -2504,12 +3187,22 @@ pub fn build_effective_config_with_entropy(
     // **El plan de inserción va antes que los loci**: es lo que traduce los
     // intervalos de los demás al genoma final (DTC-098).
     let tract_insertion = effective_tract_insertion(general, &sequences)?;
+    // Las regiones de detección viven en el genoma **final** (DP-SSR-18).
+    let repeat_detection = effective_repeat_detection(
+        general,
+        tract_insertion
+            .as_ref()
+            .map_or(sequences.as_slice(), EffectiveTractInsertion::sequences),
+    )?;
     let repeat_loci = effective_repeat_loci(
         general,
         &sequences,
         normalization.tolerance,
         repeat_admission,
         tract_insertion.as_ref(),
+        repeat_detection
+            .as_ref()
+            .map(EffectiveRepeatDetection::slippage),
     )?;
     let reproducibility = ReproducibilityMetadata::new(root_seed, seed_origin);
     let initial_populations = effective_initial_populations(general, root_seed)?;
@@ -2575,8 +3268,34 @@ pub fn build_effective_config_with_entropy(
     // efectivo, y su rechazo ocurre aquí: antes de materializar a nadie.
     let repeat_output_budget = repeat_output_budget(general, &repeat_loci, &initial_populations)?;
     admit_loci_against_stutter(general, technical_event.as_ref(), &repeat_loci)?;
+    // **La PCR sin tartamudeo de base se rechaza aquí solo con loci
+    // declarados**: con ellos el catálogo no puede quedar vacío. Los
+    // detectados solo se conocen al barrer la referencia, después de esta
+    // frontera, y la misma regla se aplica entonces sobre el catálogo entero
+    // (`with_detected_repeat_loci`): sin ningún locus, la PCR se admite sin
+    // tartamudeo (decisión del responsable del 30/10/2026). El tartamudeo
+    // clonal, en cambio, se conecta aquí con la sección, porque su tabla se
+    // resuelve con el documento, y se desconecta después si el catálogo final
+    // se queda vacío (`with_final_repeat_catalog`).
+    let microsatellites = !repeat_loci.is_empty() || repeat_detection.is_some();
     admit_amplified_preparation_against_loci(general, technical_event.as_ref(), &repeat_loci)?;
-    attach_clonal_stutter(general, technical_event.as_mut(), &repeat_loci)?;
+    if repeat_detection.is_some()
+        && let Some(event) = technical_event.as_ref()
+        && event.stutter().enabled()
+        && repeat_admission.min_longest_run_units() < 2
+    {
+        return Err(config_error(
+            general,
+            "reference.repeat_admission.min_longest_run_units,technical_event.stutter",
+            format!(
+                "la tirada mínima general es {} unidad(es) y el tartamudeo exige al menos 2 en los \
+                 loci detectados, que la usan: una tirada de una sola copia no puede contraerse \
+                 nunca",
+                repeat_admission.min_longest_run_units()
+            ),
+        ));
+    }
+    attach_clonal_stutter(general, technical_event.as_mut(), microsatellites)?;
     Ok(EffectiveConfig {
         source_path: general.source().path().display().to_string(),
         reference_id: general.reference().id.value().clone(),
@@ -2605,7 +3324,183 @@ pub fn build_effective_config_with_entropy(
         repeat_loci,
         repeat_admission,
         tract_insertion,
+        repeat_detection,
     })
+}
+
+/// **La sección de microsatélites** (REQ-CONF-142), resuelta y comprobada
+/// antes de leer la referencia: los mínimos y el tope, el deslizamiento común
+/// y las regiones contra el catálogo de la referencia **final**.
+fn effective_repeat_detection(
+    general: &DeclaredGeneralConfig,
+    frame_sequences: &[EffectiveSequence],
+) -> Result<Option<EffectiveRepeatDetection>, Diagnostic> {
+    let Some(declared) = &general.reference().repeat_detection else {
+        return Ok(None);
+    };
+    // **Detección y reducción no van en la misma ejecución** (DP-SSR-12): la
+    // simulación correría sobre la suministrada entera y no sobre la reducida.
+    if !general.reduced_references().is_empty() {
+        return Err(config_error(
+            general,
+            "reference.repeat_detection,reduced_references",
+            "la detección de microsatélites no se combina con una reducción en la misma \
+             ejecución: la simulación correría sobre la referencia suministrada entera, no sobre \
+             la reducida. Hágalo en dos ejecuciones: en la primera, solo la reducción, que \
+             publica el FASTA reducido; en la segunda, ese FASTA como reference.fasta y la \
+             sección [reference.repeat_detection]",
+        ));
+    }
+    let mut min_copies = crate::repeat_detection::DEFAULT_MIN_COPIES_BY_MOTIF_LENGTH;
+    if let Some(declared_copies) = &declared.min_copies {
+        let values = declared_copies.value();
+        if values.len() != min_copies.len() {
+            return Err(config_error(
+                general,
+                "reference.repeat_detection.min_copies",
+                format!(
+                    "min_copies lleva {} valores y exige exactamente {}, uno por longitud de \
+                     motivo de 1 a 6 pb; por omisión es {:?}",
+                    values.len(),
+                    min_copies.len(),
+                    crate::repeat_detection::DEFAULT_MIN_COPIES_BY_MOTIF_LENGTH
+                ),
+            ));
+        }
+        if let Some(position) = values.iter().position(|value| *value == 0) {
+            return Err(config_error(
+                general,
+                "reference.repeat_detection.min_copies",
+                format!(
+                    "el mínimo de copias de los motivos de {} pb es 0; cada mínimo es un entero \
+                     positivo",
+                    position + 1
+                ),
+            ));
+        }
+        min_copies.copy_from_slice(values);
+    }
+    let max_units = declared.max_units.as_ref().map_or(
+        crate::repeat_detection::DEFAULT_DETECTION_MAX_UNITS,
+        |value| *value.value(),
+    );
+    if max_units == 0 {
+        return Err(config_error(
+            general,
+            "reference.repeat_detection.max_units",
+            "el tope de unidades de los loci detectados debe ser un entero positivo",
+        ));
+    }
+    let slippage = &declared.slippage;
+    let number = |field: &str, value: &crate::configuration::DeclaredNumber| {
+        value.literal().parse::<f64>().map_err(|_| {
+            config_error(
+                general,
+                &format!("reference.repeat_detection.slippage.{field}"),
+                format!("{field} no es un decimal válido: {}", value.literal()),
+            )
+        })
+    };
+    let settings = SlippageSettings::new(
+        slippage.model.value().as_str(),
+        slippage
+            .step_units
+            .as_ref()
+            .map_or(crate::repeat_slippage::SLIPPAGE_STEP_UNITS, |value| {
+                *value.value()
+            }),
+        number("mean_events", &slippage.mean_events)?,
+        match &slippage.expansion_bias {
+            None => crate::repeat_slippage::SLIPPAGE_DEFAULT_EXPANSION_BIAS,
+            Some(value) => number("expansion_bias", value)?,
+        },
+    )
+    .map_err(|error| {
+        config_error(
+            general,
+            &error.parameter().replace(
+                "reference.repeat_loci.slippage",
+                "reference.repeat_detection.slippage",
+            ),
+            format!("deslizamiento común: {}", error.detail()),
+        )
+    })?;
+    let regions = match &declared.regions {
+        None => None,
+        Some(declared_regions) => {
+            const FIELD: &str = "reference.repeat_detection.regions";
+            if declared_regions.is_empty() {
+                return Err(config_error(
+                    general,
+                    FIELD,
+                    "la lista de regiones está vacía: no se detectaría nada. Declare al menos una \
+                     región o retire la lista para barrer la referencia entera",
+                ));
+            }
+            let mut resolved = Vec::with_capacity(declared_regions.len());
+            for region in declared_regions {
+                let (start, end) = (*region.start.value(), *region.end.value());
+                let (index, sequence) = frame_sequences
+                    .iter()
+                    .enumerate()
+                    .find(|(_, sequence)| sequence.id() == region.sequence.value())
+                    .ok_or_else(|| {
+                        config_error(
+                            general,
+                            FIELD,
+                            format!(
+                                "la región nombra la secuencia {}, que no está en la referencia \
+                                 final",
+                                region.sequence.value()
+                            ),
+                        )
+                    })?;
+                if start == 0 || start > end || end > sequence.length() {
+                    return Err(config_error(
+                        general,
+                        FIELD,
+                        format!(
+                            "la región {}:{start}..{end} no cabe en la secuencia ({} bases de la \
+                             referencia final; base uno, cerrada)",
+                            sequence.id(),
+                            sequence.length()
+                        ),
+                    ));
+                }
+                resolved.push((index, start, end, sequence.id().to_owned()));
+            }
+            resolved.sort();
+            for pair in resolved.windows(2) {
+                if pair[0].0 == pair[1].0 && pair[1].1 <= pair[0].2 {
+                    return Err(config_error(
+                        general,
+                        FIELD,
+                        format!(
+                            "las regiones {}:{}..{} y {}:{}..{} se solapan; declárelas como una sola",
+                            pair[0].3, pair[0].1, pair[0].2, pair[1].3, pair[1].1, pair[1].2
+                        ),
+                    ));
+                }
+            }
+            Some(
+                resolved
+                    .into_iter()
+                    .map(|(_, start, end, sequence_id)| EffectiveDetectionRegion {
+                        sequence_id,
+                        start,
+                        end,
+                    })
+                    .collect(),
+            )
+        }
+    };
+    Ok(Some(EffectiveRepeatDetection {
+        min_copies,
+        max_units,
+        slippage: settings,
+        regions,
+        retired: Vec::new(),
+    }))
 }
 
 /// **El plan de inserción de tractos** (REQ-REF-37, DTC-098).
@@ -2716,7 +3611,7 @@ fn effective_tract_insertion(
             general,
             "reference.repeat_loci.insert_after,reduced_references",
             first.id.value(),
-            "insertar un tracto junto a una reducción de referencia no se admite en esta versión: la reducción se haría sobre la suministrada, sin el tracto",
+            "insertar un tracto junto a una reducción de referencia en la misma ejecución no se admite: la reducción se haría sobre la suministrada, sin el tracto. Hágalo en dos ejecuciones: en la primera, solo la reducción, que publica el FASTA reducido; en la segunda, ese FASTA como reference.fasta, donde ya puede recibir la inserción",
         ));
     }
     let mut points: Vec<(usize, EffectiveInsertionPoint)> = Vec::with_capacity(inserting.len());
@@ -3031,13 +3926,13 @@ fn admit_amplified_preparation_against_loci(
 fn attach_clonal_stutter(
     general: &DeclaredGeneralConfig,
     technical_event: Option<&mut EffectiveTechnicalEvent>,
-    repeat_loci: &[EffectiveRepeatLocus],
+    microsatellites: bool,
 ) -> Result<(), Diagnostic> {
     let Some(event) = technical_event else {
         return Ok(());
     };
     let homopolymer_pcr_fold = declared_homopolymer_pcr_fold(general)?;
-    if event.preparation != LibraryPreparation::Pcr || repeat_loci.is_empty() {
+    if event.preparation != LibraryPreparation::Pcr || !microsatellites {
         return Ok(());
     }
     let substitutions = declared_per_cycle_slips(general)?;
@@ -4857,6 +5752,7 @@ fn effective_repeat_loci(
     tolerance: f64,
     admission: EffectiveRepeatAdmission,
     insertion: Option<&EffectiveTractInsertion>,
+    common_slippage: Option<SlippageSettings>,
 ) -> Result<Vec<EffectiveRepeatLocus>, Diagnostic> {
     // **Con inserción, los intervalos viven en el genoma final** (DTC-098):
     // llevan su identificador y miden contra su catálogo. Sin ella, todo es
@@ -5010,6 +5906,35 @@ fn effective_repeat_loci(
         // del escalonado o un salto de varias unidades se rechazan nombrando el
         // parámetro y el valor, sin haber gastado una sola copia.
         let slippage = match &locus.slippage {
+            // **Hereda el deslizamiento común** (REQ-CONF-139): un declarado
+            // sin alelos ni generador propio solo existe con la sección de
+            // microsatélites, que el lector ya exigió. Como un generador
+            // propio, solo admite un motivo.
+            None if locus.alleles.is_empty() => {
+                let Some(settings) = common_slippage else {
+                    return Err(Diagnostic::internal_invariant(
+                        "application",
+                        "repeat_locus_common_slippage",
+                    )
+                    .with(
+                        "detail",
+                        "un locus sin alelos ni generador llegó sin la sección de microsatélites",
+                    ));
+                };
+                if motifs.len() != 1 {
+                    return Err(crate::repeat_slippage::SlippageError::CompositeLocus {
+                        motifs: motifs.len(),
+                    }
+                    .into_diagnostic(
+                        &general.source().path().display().to_string(),
+                        locus.id.value(),
+                    ));
+                }
+                Some(EffectiveRepeatSlippage {
+                    settings,
+                    generation: None,
+                })
+            }
             None => None,
             Some(declared) => {
                 let settings = SlippageSettings::new(
@@ -5162,6 +6087,7 @@ fn effective_repeat_loci(
                     effective_sum: 0.0,
                     effective_delta: 0.0,
                 },
+                origin: RepeatLocusOrigin::Declared,
             });
             continue;
         }
@@ -5214,6 +6140,7 @@ fn effective_repeat_loci(
             slippage,
             alleles,
             normalization,
+            origin: RepeatLocusOrigin::Declared,
         });
     }
     Ok(resolved)

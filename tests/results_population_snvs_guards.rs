@@ -66,6 +66,9 @@ use genome_population_simulator::results::{
 };
 use serde_json::{Value, json};
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 struct Package {
@@ -104,7 +107,11 @@ fn publish_files(files: &[(&str, &str)]) -> Package {
     };
     fs::create_dir_all(&package.root).expect("directorio");
     for (name, content) in files {
-        fs::write(package.root.join(name), content).expect("fichero de entrada");
+        fs::write(
+            package.root.join(name),
+            detection_section::with_detection_section(content),
+        )
+        .expect("fichero de entrada");
     }
     execute_validated_config(
         &load_and_validate_config(&package.root.join("general.toml"))
@@ -2916,7 +2923,11 @@ fn the_physical_judge_reads_the_matrix_source_the_toml_declares() {
     let end = original.find("[reference]").expect("referencia");
     let without_matrix = format!("{}{}", &original[..start], &original[end..]);
     assert_ne!(without_matrix, original, "la alteración no alteró nada");
-    fs::write(&toml_path, &without_matrix).expect("TOML alterado");
+    fs::write(
+        &toml_path,
+        detection_section::with_detection_section(&without_matrix),
+    )
+    .expect("TOML alterado");
     let digest = configuration_digest(without_matrix.as_bytes()).expect("huella del TOML");
     let seed = effective["seed"]["root"].as_str().expect("semilla");
     reused_manifest["execution_id"] = json!(
@@ -2925,7 +2936,11 @@ fn the_physical_judge_reads_the_matrix_source_the_toml_declares() {
             .as_str()
     );
     let result = full(&package, &reused_effective, &reused_manifest);
-    fs::write(&toml_path, original).expect("TOML restaurado");
+    fs::write(
+        &toml_path,
+        detection_section::with_detection_section(&original),
+    )
+    .expect("TOML restaurado");
     assert_eq!(result, "reutilización SNV sin fuente física");
 }
 

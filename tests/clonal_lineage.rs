@@ -27,6 +27,9 @@ use genome_population_simulator::stutter::StutterStepWeights;
 use noodles_bgzf as bgzf;
 use serde_json::Value;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -416,7 +419,15 @@ fn run(scenario: &Scenario<'_>) -> Published {
     let first = scenario.sequences[0].0;
     fs::write(
         root.join("population-snvs.tsv"),
-        format!("contig\tposition\tref\talt\tpopulation_id\talt_af\n{first}\t20\tG\tT\tP1\t0.5\n"),
+        // La base 20 del flanco, con la que la referencia lleva y la otra del
+        // fondo como alternativa.
+        {
+            let reference = &scenario.sequences[0].1[19..20];
+            let alternate = if reference == "G" { "T" } else { "G" };
+            format!(
+                "contig\tposition\tref\talt\tpopulation_id\talt_af\n{first}\t20\t{reference}\t{alternate}\tP1\t0.5\n"
+            )
+        },
     )
     .expect("matriz");
     let declarations = scenario
@@ -432,7 +443,7 @@ fn run(scenario: &Scenario<'_>) -> Published {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -469,7 +480,7 @@ i5 = "TGCATGCA"
             loci = scenario.loci,
             coverage = scenario.coverage,
             event_extra = scenario.event_extra,
-        ),
+        )),
     )
     .expect("configuración");
     let destination = root.join("published");
@@ -503,6 +514,23 @@ fn locus_block(id: &str, sequence: &str, start: usize, motif: &str, allele: &str
 fn bases_with_tract(tract: &str) -> String {
     let head = format!("{}{tract}", "G".repeat(60));
     let bases = format!("{head}{}", "G".repeat(300 - head.len()));
+    assert_eq!(bases.len(), 300);
+    bases
+}
+
+/// Lo mismo con un fondo de `G` y `T` al azar en vez de `G`: entre dos tiras
+/// largas de `G` el detector no ve un tracto de cuatro copias, y el locus no
+/// coincidiría con nada (ver `gt_background`). Sin `A` ni `C`, las copias de
+/// `CA` de una lectura siguen siendo solo las del tracto.
+fn bases_with_tract_in_gt_background(tract: &str) -> String {
+    let head = format!(
+        "{}{tract}",
+        detection_section::gt_background(0x9E37_79B9_7F4A_7C15, 60)
+    );
+    let bases = format!(
+        "{head}{}",
+        detection_section::gt_background(0xD1B5_4A32_D192_ED03, 300 - head.len())
+    );
     assert_eq!(bases.len(), 300);
     bases
 }
@@ -837,7 +865,7 @@ fn the_longest_run_is_recomputed_between_the_two_steps() {
 /// la guarda no muerda.
 #[test]
 fn the_lineage_step_goes_before_the_base_decision() {
-    let sequences = [("chr1", bases_with_tract(&"CA".repeat(4)))];
+    let sequences = [("chr1", bases_with_tract_in_gt_background(&"CA".repeat(4)))];
     let published = run(&Scenario {
         sequences: &sequences,
         loci: locus_block("STR-1", "chr1", 60, "CA", &"CA".repeat(4)),
@@ -993,7 +1021,7 @@ fn a_high_chimera_rate_does_not_break_the_pair_source_check() {
 #[test]
 fn a_net_step_that_does_not_fit_the_chimeric_molecule_is_not_written() {
     let tract = "CA".repeat(4);
-    let sequences = [("chr1", bases_with_tract(&tract))];
+    let sequences = [("chr1", bases_with_tract_in_gt_background(&tract))];
     let scenario = |chimera_rate: f64| Scenario {
         sequences: &sequences,
         loci: locus_block("STR-1", "chr1", 60, "CA", &tract),

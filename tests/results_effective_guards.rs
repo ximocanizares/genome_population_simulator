@@ -61,6 +61,9 @@ use genome_population_simulator::results::{
 };
 use serde_json::{Value, json};
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
@@ -98,7 +101,11 @@ fn publish(files: &[(&str, &str)]) -> Package {
     ));
     fs::create_dir_all(&root).expect("directorio");
     for (name, content) in files {
-        fs::write(root.join(name), content).expect("fichero de entrada");
+        fs::write(
+            root.join(name),
+            detection_section::with_detection_section(content),
+        )
+        .expect("fichero de entrada");
     }
     let destination = root.join("published");
     execute_validated_config(
@@ -2129,14 +2136,15 @@ fn judge_with_toml(package: &Package, rewrite: impl Fn(&str) -> String) -> Strin
     let original = fs::read_to_string(&path).expect("TOML copiado");
     let altered = rewrite(&original);
     assert_ne!(altered, original, "la alteración del TOML no alteró nada");
-    fs::write(&path, &altered).expect("TOML alterado");
+    fs::write(&path, detection_section::with_detection_section(&altered)).expect("TOML alterado");
     let result = judge(
         Judge::Full,
         package,
         &package.json("effective-config.json"),
         &manifest,
     );
-    fs::write(&path, original).expect("TOML restaurado");
+    fs::write(&path, detection_section::with_detection_section(&original))
+        .expect("TOML restaurado");
     detail(result)
 }
 

@@ -345,8 +345,60 @@ pub fn effective_config_document_with_reductions(
             "min_longest_run_units": config.repeat_admission().min_longest_run_units(),
         });
         document["repeat_output_budget"] = repeat_output_budget_json(config);
+        // **La sección de microsatélites**, solo cuando el documento la declara
+        // (REQ-CONF-142): sin ella no hay loci y el documento es el de antes.
+        if let Some(detection) = config.repeat_detection() {
+            document["repeat_detection"] = repeat_detection_json(detection);
+        }
     }
     Ok(document)
+}
+
+/// Lo que la efectiva publica de la detección mientras el catálogo aparte no
+/// existe (entrega 4 del plan de detección): la versión del algoritmo, los
+/// criterios propios de la sección, el deslizamiento común, las regiones y
+/// los loci detectados que una variante retiró, con su causa (REQ-CONF-143).
+/// Los mínimos de pureza y de tirada son los de `repeat_admission`, que ya se
+/// publica al lado.
+fn repeat_detection_json(detection: &crate::application::EffectiveRepeatDetection) -> Value {
+    let slippage = detection.slippage();
+    json!({
+        "algorithm_version": crate::application::REPEAT_DETECTION_ALGORITHM_VERSION,
+        "min_copies": detection.min_copies(),
+        "max_units": detection.max_units(),
+        "slippage": {
+            "model": crate::repeat_slippage::SLIPPAGE_MODEL_STEPWISE,
+            "step_units": crate::repeat_slippage::SLIPPAGE_STEP_UNITS,
+            "mean_events": slippage.mean_events(),
+            "expansion_bias": slippage.expansion_bias(),
+        },
+        "regions": detection.regions().map(|regions| {
+            regions
+                .iter()
+                .map(|region| {
+                    json!({
+                        "sequence_id": region.sequence_id(),
+                        "start": region.start(),
+                        "end": region.end(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        }),
+        "retired_loci": detection
+            .retired()
+            .iter()
+            .map(|retired| {
+                json!({
+                    "id": retired.locus_id(),
+                    "sequence_id": retired.sequence_id(),
+                    "start": retired.start(),
+                    "end": retired.end(),
+                    "motif": retired.motif(),
+                    "cause": retired.cause(),
+                })
+            })
+            .collect::<Vec<_>>(),
+    })
 }
 
 /// Publica cada locus con su motivo, su intervalo, su tope, sus alelos y la
@@ -367,6 +419,7 @@ fn repeat_loci_json(config: &EffectiveConfig) -> Result<Value, Diagnostic> {
         let normalization = locus.normalization();
         loci.push(json!({
             "id": locus.id(),
+            "origin": locus.origin().as_str(),
             "sequence_id": locus.sequence_id(),
             "start": locus.start()?,
             "end": locus.end()?,
@@ -1063,6 +1116,7 @@ pub fn repeat_loci_manifest_json(
             .collect::<Vec<_>>();
         loci.push(json!({
             "id": locus.id(),
+            "origin": locus.origin().as_str(),
             "sequence_id": locus.sequence_id(),
             "start": locus.start()?,
             "end": locus.end()?,
@@ -1988,6 +2042,11 @@ fn validate_effective_config_v3_against_manifest_bytes(
         if object.contains_key("inserted_reference") {
             fields.push("inserted_reference");
         }
+        // Opcional también: solo con la sección de microsatélites
+        // (REQ-CONF-142).
+        if object.contains_key("repeat_detection") {
+            fields.push("repeat_detection");
+        }
     }
     // El nombre del esquema que se denuncia es el de la versión que el documento
     // declara. Antes se denunciaba siempre el de la versión 4, de modo que una
@@ -2451,7 +2510,12 @@ fn validate_published_resources_v3(
         reference_value,
         &artifact_paths,
         effective_path,
+        // La sección de microsatélites del TOML copiado también pide las
+        // bases, aunque la efectiva no la publique: la reconstrucción detecta
+        // según el TOML, y sin bases se rompería con un defecto interno en vez
+        // de rechazar la efectiva por su sección.
         if effective_needs_reference_bases(effective)
+            || physical_config.repeat_detection().is_some()
             || effective.contains_key("inserted_reference")
         {
             CatalogBases::Materialized
@@ -2497,8 +2561,59 @@ fn validate_published_resources_v3(
     // el abanico **por su cuenta**, desde los bytes publicados, y contrasta lo
     // escrito con lo rehecho.
     validate_published_slippage_fans(effective, source_reference, root_seed, effective_path)?;
+    // **La reconstrucción sigue las tres etapas del productor** (REQ-REF-38):
+    // detectar sobre la referencia publicada, leer la matriz publicada,
+    // retirar los detectados que una variante invade y generar los abanicos.
+    // Llama al productor, como siempre ha hecho para el abanico: lo que ata
+    // el catálogo a la referencia **sin** el detector es el juez de la
+    // entrega 4 (REQ-VAL-64).
+    let physical_config = physical_config
+        .with_detected_repeat_loci(source_reference)?
+        .unwrap_or(physical_config);
+    // Inalcanzable: `validate_effective_authorizations` ya exigió dos booleanos en la efectiva. Intento ejecutado:
+    // `unreachable_physical_guards_are_shadowed_by_other_checks`.
+    let allow_empty_snv_matrix = effective
+        .get("authorizations")
+        .and_then(|value| value.get("allow_empty_snv_matrix"))
+        .and_then(Value::as_bool)
+        .ok_or_else(|| effective_error(effective_path, "authorizations inválido"))?;
+    let matrix = validate_physical_population_snvs(
+        root,
+        effective,
+        &physical_config,
+        &artifacts,
+        source_reference,
+        effective_path,
+        allow_empty_snv_matrix,
+        reused_snv_metadata,
+    )?;
+    let rows: Vec<(&str, u64, &str)> = matrix
+        .as_ref()
+        .map(|matrix| {
+            matrix
+                .rows()
+                .iter()
+                .map(|row| {
+                    (
+                        row.contig().as_str(),
+                        row.position_1based(),
+                        row.variant_id().as_str(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let physical_config = physical_config
+        .with_retired_repeat_loci(&rows)?
+        .unwrap_or(physical_config);
+    drop(rows);
     let physical_config = physical_config
         .with_generated_repeat_alleles(source_reference)?
+        .unwrap_or(physical_config);
+    // Y el último paso del productor sobre el catálogo final: la PCR y el
+    // tartamudeo clonal, que se desconecta si no queda ningún locus.
+    let physical_config = physical_config
+        .with_final_repeat_catalog()?
         .unwrap_or(physical_config);
     validate_physical_technical_event(
         root,
@@ -2518,23 +2633,6 @@ fn validate_published_resources_v3(
         source_reference,
         effective_path,
         manifest_path,
-    )?;
-    // Inalcanzable: `validate_effective_authorizations` ya exigió dos booleanos en la efectiva. Intento ejecutado:
-    // `unreachable_physical_guards_are_shadowed_by_other_checks`.
-    let allow_empty_snv_matrix = effective
-        .get("authorizations")
-        .and_then(|value| value.get("allow_empty_snv_matrix"))
-        .and_then(Value::as_bool)
-        .ok_or_else(|| effective_error(effective_path, "authorizations inválido"))?;
-    let matrix = validate_physical_population_snvs(
-        root,
-        effective,
-        &physical_config,
-        &artifacts,
-        source_reference,
-        effective_path,
-        allow_empty_snv_matrix,
-        reused_snv_metadata,
     )?;
     validate_physical_initial_population_statistics(
         effective,
@@ -3268,6 +3366,12 @@ fn judge_inserted_reference(
         .and_then(Value::as_array)
         .map_or(&[][..], Vec::as_slice);
     for locus in loci {
+        // Un detectado no se declaró: no hay nada que traducir. Que su tramo
+        // es el de la referencia final lo ata la reconstrucción, que detecta
+        // sobre la referencia final publicada.
+        if locus.get("origin").and_then(Value::as_str) == Some("detected") {
+            continue;
+        }
         let id = locus.get("id").and_then(Value::as_str).unwrap_or_default();
         let sequence = locus
             .get("sequence_id")
@@ -4240,6 +4344,20 @@ fn validate_published_repeat_loci(
                 "los mínimos de admisión efectivos no son los del TOML",
             ));
         }
+        // La sección de microsatélites —criterios, deslizamiento común,
+        // regiones y retirados— es la que resuelven el TOML, la referencia y
+        // la matriz publicadas.
+        if effective.get("repeat_detection")
+            != physical_config
+                .repeat_detection()
+                .map(repeat_detection_json)
+                .as_ref()
+        {
+            return Err(effective_error(
+                effective_path,
+                "la sección de microsatélites efectiva no es la que el TOML, la referencia y la matriz producen",
+            ));
+        }
     }
     // El manifiesto ya lo leyeron, como JSON, los jueces de antes; si no se
     // pudiera leer, la sección ausente no coincidiría con la esperada.
@@ -5133,28 +5251,50 @@ fn validate_effective_targets_against_configuration(
                 inserted.get("insertions").cloned(),
             )
         });
-    let expected_declared = expected
-        .repeat_loci()
-        .iter()
-        .map(|locus| {
-            locus.declared_position().map(|declared| match declared {
-                crate::application::DeclaredLocusPosition::Interval { start, end } => {
-                    json!({"start": start, "end": end})
-                }
-                crate::application::DeclaredLocusPosition::InsertAfter(point) => {
-                    json!({"insert_after": point})
-                }
+    // **Lo declarado de cada locus**, que solo existe con inserción, como lista
+    // ordenada y sin identificadores: con la detección el catálogo publicado
+    // va ordenado por secuencia y por inicio, no en el orden del TOML
+    // (DTC-103), y lleva además los detectados, que no declaran nada. Antes se
+    // comparaba la lista en el orden del TOML, también sin identificadores;
+    // qué locus lleva qué declaración, y cuántos loci hay, lo ata la
+    // comparación exacta de los loci con lo que el TOML produce
+    // (`validate_published_repeat_loci`). Así, quitarle el identificador o
+    // cambiarle el origen a un locus se sigue rechazando en el juez que lo
+    // lee, no aquí.
+    let canonical = |declarations: Vec<Value>| {
+        let mut texts = declarations
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>();
+        texts.sort_unstable();
+        texts
+    };
+    let expected_declared = canonical(
+        expected
+            .repeat_loci()
+            .iter()
+            .filter_map(|locus| {
+                locus.declared_position().map(|declared| match declared {
+                    crate::application::DeclaredLocusPosition::Interval { start, end } => {
+                        json!({"start": start, "end": end})
+                    }
+                    crate::application::DeclaredLocusPosition::InsertAfter(point) => {
+                        json!({"insert_after": point})
+                    }
+                })
             })
-        })
-        .collect::<Vec<_>>();
-    let published_declared = effective
-        .get("repeat_loci")
-        .and_then(Value::as_array)
-        .map_or_else(Vec::new, |loci| {
-            loci.iter()
-                .map(|locus| locus.get("declared").cloned())
-                .collect()
-        });
+            .collect(),
+    );
+    let published_declared = canonical(
+        effective
+            .get("repeat_loci")
+            .and_then(Value::as_array)
+            .map_or_else(Vec::new, |loci| {
+                loci.iter()
+                    .filter_map(|locus| locus.get("declared").cloned())
+                    .collect()
+            }),
+    );
     if published_inserted != expected_inserted.map(|(id, changes)| (Some(id), Some(changes)))
         || (expected.document_version() == DeclaredDocumentVersion::V4
             && published_declared != expected_declared)
@@ -5177,9 +5317,22 @@ fn validate_effective_targets_against_configuration(
             "direct_events efectivo no coincide exactamente con el TOML resuelto",
         ));
     }
-    let expected_technical_event = expected
+    // Con la sección de microsatélites el tartamudeo clonal se desconecta si el
+    // catálogo final se queda vacío (`with_final_repeat_catalog`), y eso solo se
+    // sabe después de detectar. Aquí se compara contra lo que corresponde al
+    // catálogo **publicado**; que el publicado sea el que el TOML, la
+    // referencia y la matriz producen lo exige `validate_published_repeat_loci`.
+    let published_catalog_is_empty = effective
+        .get("repeat_loci")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty);
+    let detached = (expected.repeat_detection().is_some() && published_catalog_is_empty)
+        .then(|| expected.without_clonal_stutter())
+        .flatten();
+    let event_config = detached.as_ref().unwrap_or(&expected);
+    let expected_technical_event = event_config
         .technical_event()
-        .map(|event| technical_event_json(&expected, event));
+        .map(|event| technical_event_json(event_config, event));
     if effective.get("technical_event") != expected_technical_event.as_ref() {
         return Err(effective_error(
             effective_path,
@@ -5237,7 +5390,10 @@ fn effective_needs_reference_bases(effective: &serde_json::Map<String, Value>) -
         .and_then(|reference| reference.get("source"))
         .and_then(Value::as_str)
         == Some("simulated");
+    // Con la sección de microsatélites, la reconstrucción detecta sobre la
+    // referencia publicada: necesita sus bases.
     simulated
+        || declared("repeat_detection")
         || declared("population_snvs")
         || declared("technical_event")
         || declared("vcf_output")
@@ -5438,6 +5594,11 @@ fn published_simulated_tracts<'a>(
     })?;
     let mut tracts = Vec::with_capacity(loci.len());
     for locus in loci {
+        // Un locus **detectado** no se planta: es lo que el relleno al azar
+        // dejó en la referencia, y la detección lo encontró después.
+        if locus.get("origin").and_then(Value::as_str) == Some("detected") {
+            continue;
+        }
         let id = locus.get("id").and_then(Value::as_str).unwrap_or("sin id");
         let detail =
             |what: &str| format!("tracto del locus {id} en la referencia simulada: {what}");
@@ -5810,8 +5971,9 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
         let locus = locus
             .as_object()
             .ok_or_else(|| reason("un locus publicado no es un objeto"))?;
-        const LOCUS_FIELDS: [&str; 10] = [
+        const LOCUS_FIELDS: [&str; 11] = [
             "id",
+            "origin",
             "sequence_id",
             "start",
             "end",
@@ -5866,7 +6028,7 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
             return Err(reason("el tope del locus no es un entero positivo"));
         }
         // **Inalcanzable** (DT-001, tanda 6): `admission` figura en `LOCUS_FIELDS`, y el
-        // cierre de campos de más arriba exige las diez claves obligatorias,
+        // cierre de campos de más arriba exige las once claves obligatorias,
         // de modo que no puede faltar sin que ese cierre rechace antes.
         validate_repeat_admission(
             locus
@@ -7261,11 +7423,13 @@ fn validate_manifest_technical_events(
         // configuración efectiva (DT-041, 12/10/2026): sin PCR, el v3 o el v4
         // del tartamudeo de base; con PCR, el v5 de la amplificación o el v6
         // del tartamudeo clonal. El v4 y el v6 solo existen con loci de
-        // repetición, que son los que publican la versión 6 del manifiesto. Y
-        // con PCR y loci **siempre** hay tartamudeo clonal (la configuración
-        // exige el tartamudeo de base con loci y PCR), de modo que en la
-        // versión 6 con PCR solo cabe el v6 y el v5 es exclusivo de la 4
-        // (DTC-092). Es lo mismo que fijan los esquemas de las dos versiones.
+        // repetición en el catálogo final, que son los que publican la versión
+        // 6 del manifiesto. Y con PCR y loci **siempre** hay tartamudeo clonal
+        // (la configuración exige el tartamudeo de base con loci y PCR, y con
+        // la sección de microsatélites el clonal se desconecta si el catálogo
+        // se queda vacío), de modo que en la versión 6 con PCR solo cabe el v6
+        // y el v5 es exclusivo de la 4 (DTC-092). Es lo mismo que fijan los
+        // esquemas de las dos versiones.
         let catalog_matches = match object.get("rng_catalog").and_then(Value::as_str) {
             Some(crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3) => !amplified,
             Some(crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4) => !amplified && with_repeats,

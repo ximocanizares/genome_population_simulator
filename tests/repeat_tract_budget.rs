@@ -33,6 +33,9 @@ use genome_population_simulator::results::{
 };
 use serde_json::Value;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -116,7 +119,7 @@ fn scenario_on(
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -154,7 +157,7 @@ ploidy = 2
 genotype_model = "hwe"
 {vcf}"#,
             bases.len()
-        ),
+        )),
     )
     .expect("configuración");
     (root, config)

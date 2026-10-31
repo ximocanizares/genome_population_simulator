@@ -29,6 +29,9 @@ use genome_population_simulator::truth_validation::{
 };
 use serde_json::{Value, json};
 
+#[path = "../support/detection_section.rs"]
+pub mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 // ---------------------------------------------------------------------------
@@ -356,7 +359,11 @@ pub fn publish(repeats: bool) -> Vec<Value> {
     )
     .expect("FASTA");
     fs::write(root.join("population-snvs.tsv"), matrix).expect("matriz");
-    fs::write(root.join("general.toml"), config).expect("configuración");
+    fs::write(
+        root.join("general.toml"),
+        detection_section::with_detection_section(&config),
+    )
+    .expect("configuración");
     let destination = root.join("published");
     execute_validated_config(
         &load_and_validate_config(&root.join("general.toml")).expect("configuración válida"),

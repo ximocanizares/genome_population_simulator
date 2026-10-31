@@ -30,6 +30,17 @@ model = "stepwise"
 mean_events = 3.0
 expansion_bias = 0.5
 
+# Sección de microsatélites: su presencia activa la detección sobre la
+# referencia y es obligatoria para declarar un locus. El deslizamiento común
+# (modelo y media de pasos, sin valores por omisión) lo reciben los loci
+# detectados que nadie declara; en esta referencia el único microsatélite que
+# se detecta es el declarado, que coincide con él y conserva lo suyo.
+[reference.repeat_detection]
+
+[reference.repeat_detection.slippage]
+model = "stepwise"
+mean_events = 1.0
+
 [[initial_populations]]
 population_id = "P1"
 individual_count = 20

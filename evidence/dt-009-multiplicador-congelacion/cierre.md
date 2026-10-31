@@ -84,3 +84,19 @@ microsatélites no cambian. Por eso `linea-base.sha256`, `con-el-multiplicador.s
 y `multiplicador-2.5.sha256` guardan huellas anteriores a ese texto y hoy no se
 reproducirían tal cual en esos tres ficheros. Las huellas de antes y de después
 están en el cierre de DT-034 del registro de deudas.
+
+*Nota del 30/10/2026.* Con la entrega 3 del plan de detección de
+microsatélites un locus declarado solo existe con la sección
+`[reference.repeat_detection]`, y los cuatro `general.toml` de `inputs/` con
+microsatélites (`sin-pcr-loci`, `amplificado-loci`, `amplificado-multiplicador`
+y `amplificado-sustitucion`) la llevan añadida al final: una región que cubre
+los dos loci y suelos de copias que dejan fuera la `G×4` que los separa, para
+que el catálogo siga siendo exactamente esos dos loci. En esos escenarios
+cambian la copia del TOML, la verdad (por el identificador de ejecución y la
+huella del TOML que cita), `effective-config.json` (gana la sección y el origen
+de cada locus) y `manifest.json`. Se comparó con el binario de `dcae406`,
+compilado aparte, sobre los TOML de antes: los FASTQ, el manifiesto de evento,
+la matriz y la referencia salen byte a byte iguales, y la verdad, la efectiva
+y el manifiesto, iguales una vez quitados esos campos. Los ficheros `.sha256`
+de aquí siguen siendo los de la entrega de DT-009, con los TOML de entonces;
+las huellas vigentes están en `tests/technical_catalog_contract.rs`.

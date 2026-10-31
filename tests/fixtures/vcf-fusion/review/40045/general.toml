@@ -68,3 +68,16 @@ kind = "snp"
 position_1based = 148
 ref = "A"
 alt = "T"
+
+[reference.repeat_detection]
+min_copies = [1000, 3, 1000, 1000, 1000, 1000]
+
+[reference.repeat_detection.slippage]
+model = "stepwise"
+mean_events = 1.0
+
+[[reference.repeat_detection.regions]]
+sequence = "chr1"
+start = 145
+end = 168
+

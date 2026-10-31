@@ -108,6 +108,13 @@ model = "stepwise"
 mean_events = 3.0
 expansion_bias = 0.5
 
+[reference.repeat_detection]       # OBLIGATORIA con microsatélites: activa la detección
+[reference.repeat_detection.slippage]   # deslizamiento común; model y mean_events obligatorios
+model = "stepwise"
+mean_events = 1.0
+# opcionales: min_copies = [8, 6, 6, 6, 5, 4] (motivos de 1 a 6 pb), max_units = 200,
+# y [[reference.repeat_detection.regions]] (sequence, start, end) para limitar la detección
+
 [[initial_populations]]
 population_id = "P1"
 individual_count = 20
@@ -133,6 +140,14 @@ enabled = true                     # declarar un microsatélite NO enciende el t
 # y una [[technical_event.libraries]] por individuo (individual_id, i7, i5)
 ```
 
+**Con la sección de microsatélites el simulador barre la referencia y detecta
+todos sus microsatélites de 1 a 6 pb**; cada uno varía con el deslizamiento
+común. Un locus declarado solo ajusta uno detectado: tiene que solaparse con un
+microsatélite detectado de su motivo (o una rotación), y entonces mandan sus
+fronteras y sus alelos. Si la persona quiere solo los loci que declara, limita
+la detección con regiones que los cubran. En los tres ejemplos el único
+microsatélite que se detecta es el declarado (comprobado).
+
 Si pide alelos explícitos en vez de deslizamiento, usa `[[reference.repeat_loci.alleles]]`
 con `sequence` (o `units`) y `frequency` (suman 1); no los mezcles con `slippage`.
 Con `ploidy = 2` y `genotype_model = "f_diploid"`, F va en
@@ -142,6 +157,8 @@ Con `ploidy = 2` y `genotype_model = "f_diploid"`, F va en
 
 | Trampa | Qué ocurre |
 |---|---|
+| Microsatélite sin `[reference.repeat_detection]` | `los loci de repetición, los tractos insertados y los plantados solo existen con la sección de microsatélites: declare [reference.repeat_detection] ...`. Añade la sección con su `slippage`. |
+| Locus declarado donde la referencia no tiene ese microsatélite | `locus ...: no coincide con ningún microsatélite detectado en la referencia final (...)`, con el detectado más cercano y el criterio que no alcanzó el tramo. Comprueba posiciones y motivo. |
 | Microsatélite con `schema_version = "3"` (u otra) | Error `GPS-CONF-101` que dice «campo desconocido: initial_populations». El mensaje confunde: la causa es la versión. Pon `"4"`. |
 | Tartamudeo sin los cuatro pasos | `hay que declarar el peso de los cuatro pasos admitidos [-3, -2, -1, 1]; faltan -3`. Declara los cuatro (pueden tener peso 0). |
 | Declarar el microsatélite y esperar tartamudeo | No se enciende solo: hace falta `[technical_event.stutter] enabled = true` (especificaciones, 4.4). |

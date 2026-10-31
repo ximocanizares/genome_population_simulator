@@ -71,24 +71,46 @@ const EVIDENCE: &str = "evidence/dt-009-multiplicador-congelacion/inputs";
 // loci de repetición (`sin-pcr-loci` y `amplificado-loci`), y por arrastre su
 // manifiesto general (huella y `size_bytes` de esos dos). Con el texto antiguo
 // restituido, la efectiva y el manifiesto de evento dan las huellas de partida.
+//
+// **30/10/2026 (entrega 3 del plan de detección):** desde entonces un locus
+// declarado solo existe con la sección de microsatélites, y los TOML de la
+// evidencia con loci (`sin-pcr-loci`, `amplificado-loci`,
+// `amplificado-sustitucion` y `amplificado-multiplicador`) la llevan, escrita
+// por `tests/support/detection_section.rs`: una región que cubre los dos loci y
+// suelos que dejan fuera la `G×4` que los separa. En las dos ejecuciones con
+// loci que se congelan aquí cambian a propósito la copia del TOML, la verdad
+// (por el identificador de ejecución y la huella del TOML, que lleva dentro), la
+// efectiva (gana `repeat_detection` y el `origin` de cada locus) y el manifiesto
+// general (gana el `origin`, y cambian el identificador de ejecución y la
+// huella y el tamaño de los ficheros anteriores). Comprobado contra el binario
+// de `dcae406`, compilado aparte, sobre los TOML de antes: los FASTQ, el
+// manifiesto de evento, la matriz y la referencia salen byte a byte iguales, y
+// la verdad, la efectiva y el manifiesto salen iguales una vez quitados esos
+// campos. Las huellas viejas quedan en el comentario de cada una.
 // ---------------------------------------------------------------------------
 
 const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
+    // Cambia a propósito el 30/10/2026 (entrega 3 del plan de detección): era
+    // 61809c4359781e56ac0d419c77c1014a43e83c42b77a34260fbc9e3f4659b975.
     (
         "effective-config.json",
-        "61809c4359781e56ac0d419c77c1014a43e83c42b77a34260fbc9e3f4659b975",
+        "f9d7b7dd5c2bf0a0461ae8e4322d692e637df97af4275fd1125450465ea564f2",
     ),
     (
         "events/reads-main/manifest.json",
         "75aedb1c798cc994e91684e9b0623a691e0c8d06b7cec9814fc20517ea4ecaed",
     ),
+    // Cambia a propósito el 30/10/2026 (entrega 3 del plan de detección): era
+    // 04b18080405ac7659985af85343f6d12bd89374626385f484dce9eef3d0b5112.
     (
         "inputs/config/general.toml",
-        "04b18080405ac7659985af85343f6d12bd89374626385f484dce9eef3d0b5112",
+        "1071fd4092a2e5266e701c5e711d92347ad9983c568b0a0decd4ac1f6e73e8d3",
     ),
+    // Cambia a propósito el 30/10/2026 (entrega 3 del plan de detección): era
+    // eaa1a6c1e9e2d2dc5db7cb9dea370951ae4a5ddad63984b0ed8b86c0635ca123.
     (
         "manifest.json",
-        "eaa1a6c1e9e2d2dc5db7cb9dea370951ae4a5ddad63984b0ed8b86c0635ca123",
+        "bb1498a051ae5363926b81fa9a055ee6a9f7273c32ded0dd070b9eb6fe4287dd",
     ),
     (
         "outputs/fastq/reads-main/sample-A_R1.fastq.gz",
@@ -106,9 +128,11 @@ const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
         "outputs/fastq/reads-main/sample-B_R2.fastq.gz",
         "a29364c401393696809b92c23ab1ca3089f478b0122baf0ebf7d63c3ccd67c5f",
     ),
+    // Cambia a propósito el 30/10/2026 (entrega 3 del plan de detección): era
+    // bca71bde0d2b215f56a11642814c9efd2eef45e1f2f172b15f51e261133ebab0.
     (
         "outputs/truth.jsonl",
-        "bca71bde0d2b215f56a11642814c9efd2eef45e1f2f172b15f51e261133ebab0",
+        "23ed97f2ffa7c34d2a0a7d2f418b3ed87fd77ea1601fa95a8e89bac0650b165d",
     ),
     (
         "population_snvs.metadata.json",
@@ -209,23 +233,29 @@ const WITHOUT_TECHNICAL_EVENT: [(&str, &str); 7] = [
 const AMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
     // Cambia a propósito el 12/10/2026 (DT-040): era
     // 834848fea5745b4d8e7b7e0f41a329bcc4d50a7a91fc28dfb82fcf82392b6b64.
+    // Y otra vez el 30/10/2026 (entrega 3 del plan de detección): era
+    // b9c5280d983d94b50aa08c4cab453ba67e5a260521cd814361d6770272a0b37e.
     (
         "effective-config.json",
-        "b9c5280d983d94b50aa08c4cab453ba67e5a260521cd814361d6770272a0b37e",
+        "44019117080453d9c9e86f31e5122c77a82a083248d797aebbbbedce9e9710eb",
     ),
     (
         "events/reads-main/manifest.json",
         "bc59706c711f5bdcabefddc8f39b00ac4ddcda3cf998c4f26aabfd198ec30576",
     ),
+    // Cambia a propósito el 30/10/2026 (entrega 3 del plan de detección): era
+    // 4312136af5ee12661904fc6f2aa0720222925d11b7fdc2a5cc5a1597a39f36d7.
     (
         "inputs/config/general.toml",
-        "4312136af5ee12661904fc6f2aa0720222925d11b7fdc2a5cc5a1597a39f36d7",
+        "b0b4d8db655594c7ab3dd0567711c4283f848c3fac43c11976eb83d2fdcb636e",
     ),
     // Cambia a propósito el 12/10/2026 (DT-040): era
     // a40a8cbb245653eacbbf04449d1db2b66a8877ac8e4ec971f80f95b91caf0de5.
+    // Y otra vez el 30/10/2026 (entrega 3 del plan de detección): era
+    // 679a61e0c7924f7256b049a41adeb80a5dda0aa4c1ff274c482d370acb1badf2.
     (
         "manifest.json",
-        "679a61e0c7924f7256b049a41adeb80a5dda0aa4c1ff274c482d370acb1badf2",
+        "8beaf3fcc5be556c1c78d6305dfb788fe57ccb833796f3044046816624bc962e",
     ),
     (
         "outputs/fastq/reads-main/sample-A_R1.fastq.gz",
@@ -243,9 +273,11 @@ const AMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
         "outputs/fastq/reads-main/sample-B_R2.fastq.gz",
         "a29364c401393696809b92c23ab1ca3089f478b0122baf0ebf7d63c3ccd67c5f",
     ),
+    // Cambia a propósito el 30/10/2026 (entrega 3 del plan de detección): era
+    // 0ee74f98b072b70e88ed344656e250b3a978def3ac97aa04e20f8a3de2e2d7ae.
     (
         "outputs/truth.jsonl",
-        "0ee74f98b072b70e88ed344656e250b3a978def3ac97aa04e20f8a3de2e2d7ae",
+        "fa398a3d952478bc4318fb37e3ac0c0246475cb91ed90c2b2c84e47d2ec11154",
     ),
     (
         "population_snvs.metadata.json",

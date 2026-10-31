@@ -2795,6 +2795,7 @@ pub fn generate_population_snvs(
         },
         root_seed,
         1e-9,
+        &ExcludedIntervals::new(),
     )
 }
 
@@ -2817,6 +2818,39 @@ pub fn generate_population_snvs_from_reference_with_tolerance(
     root_seed: RootSeed,
     normalization_tolerance: f64,
 ) -> Result<PreparedPopulationSnvs, PopulationSnvsGenerationError> {
+    generate_population_snvs_from_reference_excluding(
+        config,
+        reference,
+        root_seed,
+        normalization_tolerance,
+        &ExcludedIntervals::new(),
+    )
+}
+
+/// Tramos que el generador **no** puede elegir, por secuencia: base cero,
+/// semiabiertos, ordenados por inicio y sin solaparse. Son los loci del
+/// catálogo de microsatélites (REQ-CONF-143): una matriz generada nunca cae
+/// dentro de uno, de modo que nunca obliga a retirarlo ni hace depender el
+/// resultado de la semilla.
+pub type ExcludedIntervals = BTreeMap<String, Vec<(u64, u64)>>;
+
+/// Si la base `offset` (base cero) cae dentro de algún tramo excluido.
+fn excluded_offset(intervals: &[(u64, u64)], offset: u64) -> bool {
+    let index = intervals.partition_point(|(start, _)| *start <= offset);
+    index > 0 && offset < intervals[index - 1].1
+}
+
+/// Como [`generate_population_snvs_from_reference_with_tolerance`], pero una
+/// posición dentro de un tramo de `excluded` tiene **peso cero**: no cuenta
+/// como espacio elegible ni consume azar. Sin tramos, el recorrido es
+/// exactamente el de siempre.
+pub fn generate_population_snvs_from_reference_excluding(
+    config: &PopulationSnvsGenerationConfig,
+    reference: &Reference,
+    root_seed: RootSeed,
+    normalization_tolerance: f64,
+    excluded: &ExcludedIntervals,
+) -> Result<PreparedPopulationSnvs, PopulationSnvsGenerationError> {
     generate_population_snvs_view(
         config,
         GenerationReference {
@@ -2837,6 +2871,7 @@ pub fn generate_population_snvs_from_reference_with_tolerance(
         },
         root_seed,
         normalization_tolerance,
+        excluded,
     )
 }
 
@@ -2845,6 +2880,7 @@ fn generate_population_snvs_view(
     reference: GenerationReference,
     root_seed: RootSeed,
     normalization_tolerance: f64,
+    excluded: &ExcludedIntervals,
 ) -> Result<PreparedPopulationSnvs, PopulationSnvsGenerationError> {
     validate_generation_config(config)?;
     validate_generation_regions(config, &reference.sequences)?;
@@ -2869,7 +2905,7 @@ fn generate_population_snvs_view(
         .enumerate()
         .map(|(index, (id, _))| (id.as_str().to_owned(), index))
         .collect::<BTreeMap<_, _>>();
-    let available = generated_locus_available_count(config, &reference.sequences)?;
+    let available = generated_locus_available_count(config, &reference.sequences, excluded)?;
     if available == 0 {
         return Err(PopulationSnvsGenerationError::EmptyEligibleSpace);
     }
@@ -2896,6 +2932,7 @@ fn generate_population_snvs_view(
         root_seed,
         reference.id.as_str(),
         requested_usize,
+        excluded,
     )?;
     let mut loci = Vec::with_capacity(selected.len());
     for selected in selected {
@@ -3234,11 +3271,16 @@ impl PartialOrd for SelectedGeneratedLocus {
 fn generated_locus_available_count(
     config: &PopulationSnvsGenerationConfig,
     sequences: &[(SequenceId, Cow<'_, [u8]>)],
+    excluded: &ExcludedIntervals,
 ) -> Result<u64, PopulationSnvsGenerationError> {
     let mut available = 0_u64;
     for (id, bases) in sequences {
+        let excluded_here = excluded.get(id.as_str()).map_or(&[][..], Vec::as_slice);
         for (offset, base) in bases.iter().copied().enumerate() {
             if !matches!(base, b'A' | b'C' | b'G' | b'T') {
+                continue;
+            }
+            if !excluded_here.is_empty() && excluded_offset(excluded_here, offset as u64) {
                 continue;
             }
             let position =
@@ -3268,6 +3310,7 @@ fn select_generated_loci(
     root_seed: RootSeed,
     reference_id: &str,
     requested: usize,
+    excluded: &ExcludedIntervals,
 ) -> Result<Vec<SelectedGeneratedLocus>, PopulationSnvsGenerationError> {
     if requested == 0 {
         return Ok(Vec::new());
@@ -3285,13 +3328,23 @@ fn select_generated_loci(
     let mut canonical_index = 0_u64;
 
     for (sequence_index, (id, bases)) in sequences.iter().enumerate() {
+        let excluded_here = excluded.get(id.as_str()).map_or(&[][..], Vec::as_slice);
         for (offset, reference_base) in bases.iter().copied().enumerate() {
             if !matches!(reference_base, b'A' | b'C' | b'G' | b'T') {
                 continue;
             }
             let position_1based =
                 u64::try_from(offset).map_err(|_| PopulationSnvsGenerationError::InvalidCount)? + 1;
-            let weight = candidate_weight(&config.spatial, id.as_str(), position_1based)?;
+            // Dentro de un locus del catálogo, peso cero: cuenta en el índice
+            // canónico como cualquier otra posición sin peso y no consume
+            // azar (REQ-CONF-143).
+            let weight = if !excluded_here.is_empty()
+                && excluded_offset(excluded_here, position_1based - 1)
+            {
+                0.0
+            } else {
+                candidate_weight(&config.spatial, id.as_str(), position_1based)?
+            };
             let candidate_index = canonical_index;
             canonical_index = canonical_index
                 .checked_add(1)

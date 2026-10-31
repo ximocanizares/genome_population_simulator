@@ -1,26 +1,66 @@
-//! **Huella de los escenarios con muchos microsatélites, para la entrega 2
-//! («escala») del plan de detección.**
+//! **Huella de los escenarios con muchos microsatélites**, congelada para la
+//! entrega 2 («escala») del plan de detección y **reescrita para la entrega 3**
+//! («detección en el producto») sin recongelar lo que no tenía que cambiar.
 //!
 //! # Qué protege, dicho sin rodeos
 //!
-//! La entrega 2 cambia cómo se **recorren** los loci de repetición en cinco
-//! sitios —la lectura del TOML, la comprobación de solapes, el tartamudeo, la
-//! proyección del VCF y la validación física final— para que el coste crezca
-//! en línea recta con el número de loci. Son arreglos de rendimiento: **no
-//! puede cambiar un solo byte publicado**. La huella de
-//! `tests/repeat_detection_frozen_identity.rs` solo cubre escenarios **sin**
-//! microsatélites, así que no ve nada de lo que esta entrega toca. Esta sí.
+//! La entrega 2 cambió cómo se **recorren** los loci de repetición para que el
+//! coste crezca en línea recta con su número: no podía cambiar un solo byte
+//! publicado. La huella de `tests/repeat_detection_frozen_identity.rs` solo
+//! cubre escenarios **sin** microsatélites; esta cubre los que tienen muchos.
 //!
-//! # De dónde salen los literales, y por qué no es circular
+//! # Qué cambió con la entrega 3, y por qué los literales siguen siendo los de `dcae406`
 //!
-//! Se obtuvieron el 29 de octubre de 2026 ejecutando **este mismo fichero**
-//! sobre un árbol aparte extraído con `git archive deecb79` —el commit anterior
-//! a la entrega 2, sin un solo cambio en `src/`—, con su propio directorio de
-//! compilación. No se calcularon con el árbol de trabajo. Todos los escenarios
-//! ejecutan el binario `run`, no la biblioteca, y le pasan la configuración por
-//! una ruta relativa: la ruta escrita en la línea de órdenes se publica en la
-//! configuración efectiva y en el manifiesto, y con una absoluta, distinta en
-//! cada ejecución, esos ficheros no tendrían una huella estable.
+//! Desde la entrega 3 un locus declarado solo existe con la sección de
+//! microsatélites (REQ-CONF-142) y tiene que coincidir con uno detectado
+//! (REQ-REF-40). Los escenarios declaran ahora esa sección con **una región
+//! por locus que cubre exactamente su tramo**, de modo que lo detectado es lo
+//! declarado. Lo que eso cambia, y lo único:
+//!
+//! 1. **La copia del TOML** (`inputs/config/general.toml`), que ahora lleva la
+//!    sección.
+//! 2. **Lo que depende de la huella de ese TOML**: el identificador de
+//!    ejecución (en la verdad, en el VCF y en el manifiesto) y la huella de la
+//!    configuración que la verdad cita en cada fuente aleatoria.
+//! 3. **Los campos nuevos** de la configuración efectiva (`repeat_detection` y
+//!    el `origin` de cada locus) y del manifiesto (el `origin` de cada locus),
+//!    y en el manifiesto la huella y el tamaño de los ficheros que cambian.
+//!
+//! Por eso cada escenario se juzga con **dos tablas**:
+//!
+//! - **La tabla normalizada, con los literales de `dcae406`.** Todos los
+//!   ficheros publicados salvo la copia del TOML, con tres normalizaciones que
+//!   deshacen exactamente los cambios 2 y 3: en la verdad y el VCF, el
+//!   identificador de ejecución pasa a `RUN_NORMALIZED` y la huella del TOML a
+//!   ceros; de la efectiva se quitan `repeat_detection` y el `origin` de cada
+//!   locus; del manifiesto, el `origin` de cada locus, y el identificador de
+//!   ejecución y la huella y el tamaño de la copia del TOML, la efectiva, la
+//!   verdad y el VCF se normalizan igual. **Todo lo demás —los FASTQ, la
+//!   matriz, la referencia, el manifiesto de evento y cada byte de la verdad,
+//!   el VCF, la efectiva y el manifiesto que no sea uno de esos campos— tiene
+//!   que salir idéntico al de `dcae406`.** Los literales se obtuvieron el
+//!   30/10/2026 aplicando esta misma normalización (la prueba ignorada
+//!   `print_normalized_tables_of_published_trees`) a los árboles que publicó el
+//!   binario de `dcae406`, compilado aparte con `git archive` y su propio
+//!   directorio de compilación, con los TOML de antes. Antes de normalizar se
+//!   comprobó que esos árboles daban, tal cual, las huellas que `dcae406`
+//!   tenía congeladas en esta misma prueba. En `dcae406` la efectiva y el
+//!   manifiesto no tienen campos nuevos y la normalización solo toca lo que
+//!   depende del TOML.
+//! - **La tabla de los tres documentos que cambian a propósito** —efectiva,
+//!   manifiesto y copia del TOML—, con huellas medidas con el código de la
+//!   entrega 3. Congela los campos nuevos; no protege nada de lo de antes, que
+//!   ya protege la primera tabla.
+//!
+//! **El diff de la efectiva y del manifiesto entre `dcae406` y la entrega 3**,
+//! campo a campo, medido el 30/10/2026 en los escenarios 1 y 2: la efectiva
+//! gana `repeat_detection` y `"origin": "declared"` en los quince loci, y
+//! nada más; el manifiesto gana el mismo `origin` en los quince loci de
+//! `repeat_loci.loci` y cambia el identificador de ejecución, la huella de la
+//! copia del TOML, de la efectiva (en `artifacts` y en el enlace del evento
+//! técnico), de la verdad y del VCF, y el tamaño de la copia del TOML y de la
+//! efectiva (la verdad y el VCF miden lo mismo: el identificador nuevo tiene la
+//! misma longitud). Nada más.
 //!
 //! # Qué tiene cada escenario, y qué ejercita
 //!
@@ -32,55 +72,42 @@
 //!    a mano, de modo que los alelos varían entre individuos. Cuatro
 //!    individuos diploides, VCF de texto y un evento técnico con tartamudeo de
 //!    base encendido en todos los periodos y la mitad de las parejas
-//!    quiméricas (DTC-102: el sufijo puede salir de la otra secuencia). Con
-//!    cientos de moléculas sobre unas pocas decenas de tractos, muchas empiezan
-//!    o acaban **dentro** de un tracto: el tracto empieza antes del tramo de la
-//!    molécula y acaba dentro, que es justo lo que un índice mal hecho pierde.
+//!    quiméricas (DTC-102: el sufijo puede salir de la otra secuencia). La
+//!    sección de microsatélites usa los suelos por omisión: los quince loci los
+//!    alcanzan.
 //! 2. **Lo mismo con PCR y tartamudeo clonal por linaje**, que sitúa los
 //!    tractos por el mismo camino (`place_tracts`) desde la molécula original
 //!    de la familia.
 //! 3. **Los escenarios de la revisión adversarial de la fusión del VCF**
-//!    (`tests/fixtures/vcf-fusion/review`, 2 de octubre de 2026): un tracto que
-//!    una deleción cruza al alinearse, dos copias con las mismas bases y
-//!    anotaciones distintas, el límite de alineación a la izquierda, tractos
-//!    pegados a un indel... Son los casos que ejercitan cada rama de la
-//!    proyección del VCF que la entrega 2 reindexa. Cada uno se congela en un
-//!    solo literal, la huella del árbol publicado entero; si cambia, el
-//!    mensaje imprime la tabla fichero a fichero.
+//!    (`tests/fixtures/vcf-fusion/review`, 2 de octubre de 2026). Sus TOML
+//!    llevan desde la entrega 3 la sección que escribe
+//!    `tests/support/detection_section.rs` —una región por locus con seis
+//!    bases de margen y suelos bajos en las longitudes de motivo que declaran,
+//!    porque varios declaran tractos cortos a propósito—, con un retoque a
+//!    mano anotado en el propio TOML (`w-bound-0`: la región llega hasta el
+//!    final del `(CA)×40` del que el locus declarado es el principio). Cada uno
+//!    se congela con dos literales, el resumen de cada tabla.
 //!
 //! Además, en los escenarios 1 y 2 el **juez semántico del VCF**
-//! (`validate_published_vcf_semantics`), que la entrega 2 también reindexa,
-//! tiene que aceptar lo publicado.
+//! (`validate_published_vcf_semantics`) tiene que aceptar lo publicado.
 //!
-//! # Qué discrimina, comprobado el 29/10/2026
+//! # Qué discrimina
 //!
-//! Sobre una copia del árbol, fuera de git y con copia de seguridad aparte:
-//!
-//! - un salto de línea de más al final de los JSON publicados
-//!   (`json_document_bytes`) mata las tres pruebas;
-//! - el índice del tartamudeo, el del agrupador del VCF, el reparto de bases
-//!   por locus, las piezas de cada ventana de la proyección, los componentes
-//!   que atraviesa un alelo al alinearse, el recuento del
-//!   juez físico y el reparto de sorteos del manifiesto, mutados para que
-//!   pierdan lo que empieza antes de la ventana (o un sorteo), matan al menos
-//!   una de las tres.
-//!
-//! **Lo que no ve, dicho sin adornos:** el índice de tractos de la proyección
-//! y el del juez semántico mutados del mismo modo **no** la hacen fallar (los
-//! escenarios no tienen un tracto que empiece antes de un registro fundido y
-//! lo pise; el juez mutado es más permisivo, no más estricto), y la posición
-//! de un error del TOML no se publica. Esos tres los cazan sus pruebas
-//! unitarias.
-//!
-//! El detalle de las mutaciones, con sus SHA y la prueba que muere con cada
-//! una, está en el apartado 11.9 del plan
-//! `design/plan-implementacion-deteccion-microsatelites-0.1.md`.
+//! Comprobado el 29/10/2026 para la entrega 2 (apartado 11.9 del plan): un
+//! salto de línea de más al final de los JSON publicados mata las tres pruebas,
+//! y los índices de la entrega 2 mutados para que pierdan lo que empieza antes
+//! de la ventana matan al menos una. Para la entrega 3, comprobado el
+//! 30/10/2026 mutando una copia aparte: un locus declarado con alelos escritos
+//! a mano que perdiera sus alelos y heredara el deslizamiento común mata las
+//! tres pruebas **en la tabla normalizada** (cambian la verdad, el VCF y los
+//! FASTQ); uno que cediera su sitio al detectado que coincide mata las tres
+//! antes, en el control de los orígenes o en la ejecución.
 //!
 //! # Qué hacer cuando esta prueba falle
 //!
-//! El mensaje imprime la tabla observada. **No se copia sin más**: la entrega 2
-//! no puede cambiar bytes; una huella que cambia es un defecto del índice, o
-//! una decisión que hay que escribir antes de tocar el literal.
+//! El mensaje imprime las tablas observadas. **No se copian sin más**: si
+//! cambia la tabla normalizada, ha cambiado algo que la entrega 3 no podía
+//! tocar.
 //!
 //! # Honestidad sobre el compresor
 //!
@@ -96,15 +123,18 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use genome_population_simulator::results::json_document_bytes;
 use genome_population_simulator::vcf_semantic_validation::validate_published_vcf_semantics;
 use noodles_bgzf as bgzf;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 const SEED: &str = "5e2a9c7b1d3f4068a2c4e6f8091b3d5f7a9c1e3f5072b4d6f8a0c2e4f6a8b0c2";
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 // ---------------------------------------------------------------------------
-// Los literales congelados, obtenidos con el commit `deecb79` compilado aparte.
+// Las tablas normalizadas, con los literales de `dcae406`, y las de los tres
+// documentos que cambian a propósito, medidas con el código de la entrega 3.
 // ---------------------------------------------------------------------------
 
 const MANY_LOCI_BASE_STUTTER: &[(&str, &str)] = &[
@@ -117,12 +147,8 @@ const MANY_LOCI_BASE_STUTTER: &[(&str, &str)] = &[
         "b1694d258e89195fd398206c55c3a235769ec68cef96d01816320e6a98ff1320",
     ),
     (
-        "inputs/config/general.toml",
-        "5ffffc5c827e0eb01993c5feedbd47cdcf376a683135f948b7b3b1399d2d7532",
-    ),
-    (
         "manifest.json",
-        "342c6ad4df354f6597743b65515e1f6d5ce826e332fd8d6b660741566d203e0d",
+        "a3612ef43e8cbbad30e02030030886b0f406c4ac72041a2c9227c07a9f48b2d2",
     ),
     (
         "outputs/fastq/reads-main/S1_R1.fastq.gz",
@@ -190,11 +216,11 @@ const MANY_LOCI_BASE_STUTTER: &[(&str, &str)] = &[
     ),
     (
         "outputs/truth.jsonl",
-        "1fd07c26434c4894bad6c91faf6a6d08e866a3c272401562676cae32cddae284",
+        "cb56facbd9f8cc06ed9b027717b159346b2f01f60066606ad630c16cb6bcaa62",
     ),
     (
         "outputs/truth.vcf",
-        "8c351edd706e3c17cef11c77c811ad1bc1da6b2b845f32935ee6e57b0bef6c3f",
+        "1abd7975c81243361f2c5991851a7a6e6f3dc262d8784cc2bd236a5cc37c9f0d",
     ),
     (
         "population_snvs.metadata.json",
@@ -210,6 +236,21 @@ const MANY_LOCI_BASE_STUTTER: &[(&str, &str)] = &[
     ),
 ];
 
+const MANY_LOCI_BASE_STUTTER_DOCUMENTS: &[(&str, &str)] = &[
+    (
+        "effective-config.json",
+        "8a0f7c8024e74300c539f45197df431ffcb93133610c0c2f87beaeb146991878",
+    ),
+    (
+        "inputs/config/general.toml",
+        "403cd6073aa4eea45942d9a45723745852652e1d4e6cc2bbb4444c9113ed3a3d",
+    ),
+    (
+        "manifest.json",
+        "dbc826875f8b2be6cd98debd6efc2c7674d26aa163badfb0a3a8a941f4cc1e74",
+    ),
+];
+
 const MANY_LOCI_PCR_CLONAL: &[(&str, &str)] = &[
     (
         "effective-config.json",
@@ -220,12 +261,8 @@ const MANY_LOCI_PCR_CLONAL: &[(&str, &str)] = &[
         "7cdfba62478ec28a8b184123c270a5ebec4815455aac5f7280fe3fd2f0f16b02",
     ),
     (
-        "inputs/config/general.toml",
-        "4f5ea87401d4c0741d8d79efd9a5884093fc11c8bb39d52f12cef707100ee42c",
-    ),
-    (
         "manifest.json",
-        "1b8c98b3fef19d9819ffddb50caad768e0e3ca8770bfcae19be06806098adcb4",
+        "107b44966888ffed875036275bb793a7e34c4805ce3ea02e2e9a4041e9f64b79",
     ),
     (
         "outputs/fastq/reads-main/S1_R1.fastq.gz",
@@ -293,11 +330,11 @@ const MANY_LOCI_PCR_CLONAL: &[(&str, &str)] = &[
     ),
     (
         "outputs/truth.jsonl",
-        "e0bd428e1bceefa578cc8c2c481d9bcbdfa8528f46c770719bacba540e097932",
+        "cb56facbd9f8cc06ed9b027717b159346b2f01f60066606ad630c16cb6bcaa62",
     ),
     (
         "outputs/truth.vcf",
-        "ae87ca404aa578a0306dac753490a7f4ab6cba60288a84709928e945549cb04b",
+        "1abd7975c81243361f2c5991851a7a6e6f3dc262d8784cc2bd236a5cc37c9f0d",
     ),
     (
         "population_snvs.metadata.json",
@@ -313,92 +350,197 @@ const MANY_LOCI_PCR_CLONAL: &[(&str, &str)] = &[
     ),
 ];
 
-/// Huella del árbol publicado entero por cada escenario de la revisión de la
-/// fusión del VCF: SHA-256 de la tabla `ruta\tSHA-256\n` ordenada.
+const MANY_LOCI_PCR_CLONAL_DOCUMENTS: &[(&str, &str)] = &[
+    (
+        "effective-config.json",
+        "b04e9211e904aafea35eeb0023e66690fe6cf54a3a8922f79b74144ed89b9177",
+    ),
+    (
+        "inputs/config/general.toml",
+        "027cb66eecf74e61660fb04c37ad0d28b99f452f422f94b307305e01f1e4fd05",
+    ),
+    (
+        "manifest.json",
+        "f87a280b16df9906f6329a48f0d420ff5a2a5e97eb530ba7460ea03d5a88d240",
+    ),
+];
+
+/// Resumen de la tabla normalizada de cada escenario de la revisión de la
+/// fusión del VCF: SHA-256 de `ruta\tSHA-256\n` ordenada. Literales de
+/// `dcae406`.
 const REVIEW_FIXTURES: &[(&str, &str)] = &[
     (
         "20248",
-        "6486008233c50898e07af4fd2f24376ffb6455d5367767a61ae2ef6c3f77c46c",
+        "7793fa1fdfaf6bcbecb2cf250d5fb0a46e3244217234f259bf1bbd02074991d4",
     ),
     (
         "40045",
-        "d38070fb298471833e3119038d44679b522dabec38f226943276172de5eb8abc",
+        "b393aa500f566c6a7c2387238c9a3b96dd6e2886d50848d82512bcdd78b74263",
     ),
     (
         "impure-tract",
-        "ef9a2fe435f51a30f535f48758b2d212bf4a4e68944d53303285a958d48d5680",
+        "412a668efe858cb6b8135c020aa87420622e4fb2e8f4b9a8eeeea11a5b34b651",
     ),
     (
         "r03",
-        "4e8570ba5e27e0240d8c45d06b4d73f7d2221b27020de7131668f69af0dd5c7b",
+        "e9af72876afa8bad10d72b08dcd805f3d4ae62a156e0e7df56504ecdf62de4b9",
     ),
     (
         "rb-over-alt-1831",
-        "9d3e8c09c2e918ebc2e6546330d49f283c1fda23d3e36c5264adad416a0d7377",
+        "9b477ba46a984344a6808858508b8aa24b90550626b20ceb809677a41c92b43a",
     ),
     (
         "v-136",
-        "b9683f646112a97b3e8a29b0080145ec726b71bce3ad0b7737774f03a17af019",
+        "0f7ba17e7770cb74fe7a1b93d953d234e10c07a828a2a2d34859b7a4a6f89d6a",
     ),
     (
         "v-163",
-        "e8c14b6d019bf49c2fc656f0ad7204adcb91e4da7ba037a559a5e673a8cec957",
+        "57a029dffc4e7e0064f1adf50309fa7619d5e5502bdd34509b40434b16d43801",
     ),
     (
         "v-175",
-        "768b2186ed733670d1afad3c12424f7195df63da0c4b631b7e0db25962b520d6",
+        "b4bdfe2f92b3fb869867654ee706f2161fe57be3e1319fcd443b5bc9803307ee",
     ),
     (
         "w-atreg-4",
-        "899bbd3dcdc3614894b046d118bedb0bb18e606950ef5928959881c1c1f4da3f",
+        "975a0c02fc6d60ecdb81320beb69d6200da79a5e23e22c39655e830087e7586c",
     ),
     (
         "w-bound-0",
-        "22c7ff52af59b688022115baf37ffd045eb846fa43724e53d82c30a9835ea803",
+        "1d8e0cc8fde4a0c63933546be353586befa62a6ac53bc79c953d1a8f4040623c",
     ),
     (
         "w-cap-2090",
-        "2501b193aded0026aed289fe8519325ff878380009039931ac14853f8aa76714",
+        "c5642507fe7f8aa323d04bf39fde03ceb3af19a1064c49f18585848257bb6477",
     ),
     (
         "w-flankdel-5",
-        "df21a7c71d3cbd6908052c2d41c6e483c7567dc04ffc8520856371d588c09248",
+        "b019fbc52edc3020aa2be975b79a690b96ab7203c690f7528f7686676e994c43",
     ),
     (
         "w-min-a",
-        "45ca4b42b1b36641a0359a155492e081b10ba5e016ff6400a7d8bca6ed9fa91a",
+        "4a74a075d0c3adeb15f9332465ac584714bcaef1e23d4b189efcdc62d08cad96",
     ),
     (
         "w-plain-cross",
-        "e9aea4127b821ec891fc7bc1c0de02df072a2976fddc87fa4dce5752f82d0b56",
+        "7baad90e3130e8fbae9f7f2ca1d7c31b70a89db5544ddb44088945474bb547a9",
     ),
     (
         "x-11063",
-        "8f1cd5a272c0b370f28d41259535b9d551823b999bb826999f7198db6746e073",
+        "61a9b2a47203316422d24ba2d17469c56469b53239f72ff5051c6dd71eea4ec2",
     ),
     (
         "x-12168",
-        "16158332ec8edfc95c0c7ad01366a4f9ac1dd0a439ae4032cd0465504c02b026",
+        "9f0ca1c82076b1f980784c9415b26eb8fc2456538dd22e3d99caafca9ed07210",
     ),
     (
         "x-1392",
-        "75fba49c06f1a5159a30649882ee7dd9fa733d62cb11d80ad907217929bb0b9e",
+        "11cc7436dfd041ceda2c2f13165cfa57169cee0b7bc1d8939822ce9c5f79f7ff",
     ),
     (
         "x-14771",
-        "d4e579fa98cdd5d23a55d849b020ff4fa1f5a31344540ecd3cafb3fa31545bcb",
+        "12c20bd917ed6f1b73d6b284ba1fcc07ed513ba21e7aad9defe081312206950b",
     ),
     (
         "x3338",
-        "94f71153f11791de124b6a590ec9618e3228268e4ab71c70495ba64c53e75589",
+        "9dd80a53c12aaa8e79c0718fd49b8e90d5c160b97e36aee57af5c80ac86407da",
     ),
     (
         "y-1699",
-        "fc0dee4c43237f67f67e19b4f35d023de18fe0ea0d0c82456d412c2a304b0ef9",
+        "489b56bb17f619fd15da77f5ee814597aacd1b240d061703bf4bff98a698a1bd",
     ),
     (
         "y-2813",
-        "1d52bf254cb98f1a484e9c5b55bf4dc1b1132cd35d830ed9f7f8517f260f9a4f",
+        "7466ddcc43f3f4be053de6649f2aa67cb1a1b36ea13b37dcd5ef1b998ee59785",
+    ),
+];
+
+/// Resumen de los tres documentos que cambian a propósito en cada escenario
+/// de la revisión, medido con el código de la entrega 3.
+const REVIEW_FIXTURES_DOCUMENTS: &[(&str, &str)] = &[
+    (
+        "20248",
+        "ccda9c54f883a15a73b1f1917e105bee88062d9cfad92f5ac466016ec0e9bd3f",
+    ),
+    (
+        "40045",
+        "c9adb4bb40c06e8929e27f21426f1cca7c4a6a1f8f758f162bcd09685c8cf34e",
+    ),
+    (
+        "impure-tract",
+        "1d0156a6dcfefa26afb5d55afb9b4d66f9b68b6e66a84635ae1bc90742167fd3",
+    ),
+    (
+        "r03",
+        "a55e4ca6692dd022f24e3746c63804b4b2b92bd408757ff2737d13849aee6d61",
+    ),
+    (
+        "rb-over-alt-1831",
+        "6352f36585a3bd610aa4d45a691e694f297dce3cd6c55246fe44a43fb788f1ae",
+    ),
+    (
+        "v-136",
+        "8144f5d73a2f0556fbc009687d88908527d3061e2314292dfe32c184fbc6bfcb",
+    ),
+    (
+        "v-163",
+        "9733a101ab2404c8fd808a739ededbd4b994c5a4cd66b572ba2dbbab4bf95ea1",
+    ),
+    (
+        "v-175",
+        "11afc6dec9a18d818958dec4e1541cf903ad86058a9d04f9e59743c23733eee0",
+    ),
+    (
+        "w-atreg-4",
+        "e5272e6b2f86770f0f48864e184f5c87b32e579b82ec619f5a23a6dc9f0d5b98",
+    ),
+    (
+        "w-bound-0",
+        "aa5f980d856ce1ac0bd36a1283044b4f60d90a04f207e716ff5339950559c69e",
+    ),
+    (
+        "w-cap-2090",
+        "3b702b4701ed3e5e041fcb97565f476b3469378449d0b1ce420f3fdb294df657",
+    ),
+    (
+        "w-flankdel-5",
+        "52ed59cb2160e6f7af0ee82cd1cb2fd6efd6be7d585721ddd94316a36abab060",
+    ),
+    (
+        "w-min-a",
+        "93a71466a646763bbe5aa5e09caadba134feb3b61b1323c3249fa5f701015b17",
+    ),
+    (
+        "w-plain-cross",
+        "11caf4f99a3b09c84ff34d7dd2900919cb15a3d89655b5f4e5f7e170f6c6136a",
+    ),
+    (
+        "x-11063",
+        "f7ae02ebf767a7874679160df5bbaf17b1132f130f836c71dfb1564d17f9e609",
+    ),
+    (
+        "x-12168",
+        "09112ce26f70e7a3dd3d4b3bb94ae66462b8075817f86c1d753b508dcd7341da",
+    ),
+    (
+        "x-1392",
+        "e02e247311879aa0c9eb0a88fc5316624f46fc6bf354c379ec779d5ff8b18e90",
+    ),
+    (
+        "x-14771",
+        "0572676a56d265292a8643a6933df34d1776e3676c37fbc847d46e6e83802c72",
+    ),
+    (
+        "x3338",
+        "786f6ba6e10985dcf3e4a91ae912ed7edc8b80cfefc2099b41027ad4b7fa13bb",
+    ),
+    (
+        "y-1699",
+        "b1a4e40731ada302fb43c7100d9704b540841312f3ced526a93fc206e761773e",
+    ),
+    (
+        "y-2813",
+        "e048940ca1a97ec0a56e374a7c24f624a43e39eb900220413a94c1ddfc0f9ab0",
     ),
 ];
 
@@ -665,6 +807,22 @@ fn loci_toml() -> String {
             }
         }
     }
+    // **La sección de microsatélites** (entrega 3), con los suelos por
+    // omisión y una región por locus que cubre exactamente su tramo: lo
+    // detectado es lo declarado. El deslizamiento común no lo usa ningún locus,
+    // porque todos declaran sus alelos o su generador.
+    text.push_str(
+        "[reference.repeat_detection]\n\n[reference.repeat_detection.slippage]\n\
+         model = \"stepwise\"\nmean_events = 2.0\nexpansion_bias = 0.5\n\n",
+    );
+    for planted in PLANTED {
+        text.push_str(&format!(
+            "[[reference.repeat_detection.regions]]\nsequence = \"{}\"\nstart = {}\nend = {}\n\n",
+            planted.sequence,
+            planted.start + 1,
+            planted.end()
+        ));
+    }
     text
 }
 
@@ -802,16 +960,106 @@ fn decompressed(path: &Path) -> Option<Vec<u8>> {
     Some(text)
 }
 
-/// Huella de **todos** los ficheros publicados: la del fichero y, para los
-/// comprimidos, la de su contenido.
-fn fingerprint(destination: &Path) -> BTreeMap<String, String> {
+/// Los tres documentos que cambian a propósito con la entrega 3.
+const DOCUMENTS: [&str; 3] = [
+    "effective-config.json",
+    "inputs/config/general.toml",
+    "manifest.json",
+];
+
+/// Ficheros del manifiesto cuya huella y tamaño dependen de la copia del TOML.
+const TOML_DEPENDENT: [&str; 4] = [
+    "effective-config.json",
+    "inputs/config/general.toml",
+    "outputs/truth.jsonl",
+    "outputs/truth.vcf",
+];
+
+/// Quita el `origin` de cada locus de una lista de loci publicada.
+fn strip_origins(loci: Option<&mut Value>) {
+    for locus in loci.and_then(Value::as_array_mut).into_iter().flatten() {
+        if let Some(object) = locus.as_object_mut() {
+            object.remove("origin");
+        }
+    }
+}
+
+/// Pone a cero la huella y el tamaño de todo enlace del manifiesto a un
+/// fichero que depende de la copia del TOML, esté donde esté: la efectiva, por
+/// ejemplo, se cita en el catálogo y en cada evento técnico.
+fn normalize_toml_dependent_links(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if object
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| TOML_DEPENDENT.contains(&path))
+                && object.contains_key("checksum")
+            {
+                object["checksum"]["digest"] = Value::from("0".repeat(64));
+                object.insert("size_bytes".to_owned(), Value::from(0));
+            }
+            for child in object.values_mut() {
+                normalize_toml_dependent_links(child);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(normalize_toml_dependent_links),
+        _ => {}
+    }
+}
+
+/// **La tabla normalizada**: todos los ficheros publicados salvo la copia del
+/// TOML, con la verdad y el VCF sin el identificador de ejecución ni la huella
+/// del TOML, la efectiva sin sus campos nuevos y el manifiesto sin los suyos ni
+/// lo que depende del TOML. Ver la cabecera.
+fn normalized_table(destination: &Path) -> BTreeMap<String, String> {
     let mut paths = Vec::new();
     walk(destination, destination, &mut paths);
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(destination.join("manifest.json")).expect("manifiesto"))
+            .expect("JSON");
+    let execution_id = manifest["execution_id"]
+        .as_str()
+        .expect("identificador de ejecución")
+        .to_owned();
+    let toml_digest =
+        digest(&fs::read(destination.join("inputs/config/general.toml")).expect("copia del TOML"));
     let mut table = BTreeMap::new();
     for relative in paths {
         let full = destination.join(&relative);
         let name = relative.to_string_lossy().into_owned();
-        table.insert(name.clone(), digest(&fs::read(&full).expect("fichero")));
+        if name == "inputs/config/general.toml" {
+            continue;
+        }
+        let bytes = fs::read(&full).expect("fichero");
+        let normalized = match name.as_str() {
+            "outputs/truth.jsonl" | "outputs/truth.vcf" => String::from_utf8(bytes)
+                .expect("texto")
+                .replace(&execution_id, "RUN_NORMALIZED")
+                .replace(&toml_digest, &"0".repeat(64))
+                .into_bytes(),
+            "effective-config.json" => {
+                let mut document: Value = serde_json::from_slice(&bytes).expect("JSON");
+                if let Some(object) = document.as_object_mut() {
+                    object.remove("repeat_detection");
+                }
+                strip_origins(document.get_mut("repeat_loci"));
+                json_document_bytes(&document).expect("JSON")
+            }
+            "manifest.json" => {
+                let mut document: Value = serde_json::from_slice(&bytes).expect("JSON");
+                document["execution_id"] = Value::from("RUN_NORMALIZED");
+                normalize_toml_dependent_links(&mut document);
+                strip_origins(
+                    document
+                        .get_mut("repeat_loci")
+                        .and_then(|section| section.get_mut("loci")),
+                );
+                json_document_bytes(&document).expect("JSON")
+            }
+            _ => bytes,
+        };
+        table.insert(name.clone(), digest(&normalized));
         if name.ends_with(".gz") {
             let content =
                 decompressed(&full).unwrap_or_else(|| panic!("{name}: no es un BGZF legible"));
@@ -819,6 +1067,36 @@ fn fingerprint(destination: &Path) -> BTreeMap<String, String> {
         }
     }
     table
+}
+
+/// Huellas tal cual de los tres documentos que cambian a propósito.
+fn documents_table(destination: &Path) -> BTreeMap<String, String> {
+    DOCUMENTS
+        .iter()
+        .map(|name| {
+            (
+                (*name).to_owned(),
+                digest(&fs::read(destination.join(name)).expect("documento")),
+            )
+        })
+        .collect()
+}
+
+fn summary(table: &BTreeMap<String, String>) -> String {
+    digest(
+        table
+            .iter()
+            .map(|(path, sha)| format!("{path}\t{sha}\n"))
+            .collect::<String>()
+            .as_bytes(),
+    )
+}
+
+fn expected(frozen: &[(&str, &str)]) -> BTreeMap<String, String> {
+    frozen
+        .iter()
+        .map(|(path, sha)| ((*path).to_owned(), (*sha).to_owned()))
+        .collect()
 }
 
 fn render(table: &BTreeMap<String, String>) -> String {
@@ -838,13 +1116,18 @@ fn assert_vcf_judge_accepts(destination: &Path) {
     .unwrap_or_else(|error| panic!("el juez semántico rechaza el VCF publicado: {error:?}"));
 }
 
-fn check_many_loci(name: &str, frozen: &[(&str, &str)], preparation: &str) {
+fn check_many_loci(
+    name: &str,
+    frozen: &[(&str, &str)],
+    documents: &[(&str, &str)],
+    preparation: &str,
+) {
     let root = temporary();
     fs::create_dir_all(&root).expect("raíz del escenario");
     let _cleanup = TemporaryRoot(root.clone());
     many_loci_scenario(&root, preparation);
     let destination = run_binary(&root, "general.toml");
-    let observed = fingerprint(&destination);
+    let observed = normalized_table(&destination);
     // Control positivo: el escenario publica de verdad el VCF, la verdad y los
     // FASTQ de las cuatro individuas, y el VCF tiene registros de repetición
     // de las dos secuencias.
@@ -872,17 +1155,34 @@ fn check_many_loci(name: &str, frozen: &[(&str, &str)], preparation: &str) {
         manifest.contains("stutter"),
         "{name}: el evento técnico tiene que tartamudear"
     );
-    assert_vcf_judge_accepts(&destination);
-    let expected: BTreeMap<String, String> = frozen
+    // Control positivo de la entrega 3: los quince loci se publican con su
+    // origen, todos declarados, y la sección de detección está.
+    let effective: Value = serde_json::from_slice(
+        &fs::read(destination.join("effective-config.json")).expect("efectiva"),
+    )
+    .expect("JSON");
+    let origins: Vec<&str> = effective["repeat_loci"]
+        .as_array()
+        .expect("loci")
         .iter()
-        .map(|(path, sha)| ((*path).to_owned(), (*sha).to_owned()))
+        .map(|locus| locus["origin"].as_str().expect("origen"))
         .collect();
+    assert_eq!(origins, vec!["declared"; PLANTED.len()], "{name}");
+    assert!(effective.get("repeat_detection").is_some(), "{name}");
+    assert_vcf_judge_accepts(&destination);
     assert_eq!(
         observed,
-        expected,
-        "{name}: los bytes publicados han cambiado. La entrega 2 no puede cambiarlos. Tabla \
-         observada:\n{}",
+        expected(frozen),
+        "{name}: la tabla normalizada no es la de dcae406. La entrega 3 solo podía cambiar la \
+         copia del TOML, lo que depende de su huella y los campos nuevos. Tabla observada:\n{}",
         render(&observed)
+    );
+    let observed_documents = documents_table(&destination);
+    assert_eq!(
+        observed_documents,
+        expected(documents),
+        "{name}: los tres documentos que cambian a propósito han cambiado. Tabla observada:\n{}",
+        render(&observed_documents)
     );
 }
 
@@ -890,14 +1190,24 @@ fn check_many_loci(name: &str, frozen: &[(&str, &str)], preparation: &str) {
 /// bytes son los congelados.**
 #[test]
 fn many_loci_with_base_stutter_and_chimeras_keep_their_frozen_bytes() {
-    check_many_loci("tartamudeo de base", MANY_LOCI_BASE_STUTTER, "");
+    check_many_loci(
+        "tartamudeo de base",
+        MANY_LOCI_BASE_STUTTER,
+        MANY_LOCI_BASE_STUTTER_DOCUMENTS,
+        "",
+    );
 }
 
 /// **Lo mismo con PCR y tartamudeo clonal por linaje: los bytes son los
 /// congelados.**
 #[test]
 fn many_loci_with_pcr_clonal_stutter_and_chimeras_keep_their_frozen_bytes() {
-    check_many_loci("PCR con tartamudeo clonal", MANY_LOCI_PCR_CLONAL, PCR);
+    check_many_loci(
+        "PCR con tartamudeo clonal",
+        MANY_LOCI_PCR_CLONAL,
+        MANY_LOCI_PCR_CLONAL_DOCUMENTS,
+        PCR,
+    );
 }
 
 /// **Cada escenario de la revisión de la fusión del VCF publica los bytes
@@ -917,6 +1227,7 @@ fn the_vcf_fusion_review_scenarios_keep_their_frozen_bytes() {
         .collect::<Vec<_>>();
     names.sort();
     let mut observed = BTreeMap::new();
+    let mut observed_documents = BTreeMap::new();
     let mut tables = String::new();
     for name in &names {
         let root = temporary();
@@ -927,27 +1238,63 @@ fn the_vcf_fusion_review_scenarios_keep_their_frozen_bytes() {
                 .expect("fichero del escenario");
         }
         let destination = run_binary(&root, "general.toml");
-        let table = fingerprint(&destination);
+        let table = normalized_table(&destination);
         assert!(
             table.contains_key("outputs/truth.vcf"),
             "{name}: el escenario tiene que publicar el VCF"
         );
-        let summary: String = table
-            .iter()
-            .map(|(path, sha)| format!("{path}\t{sha}\n"))
-            .collect();
-        tables.push_str(&format!("{name}:\n{}", render(&table)));
-        observed.insert(name.clone(), digest(summary.as_bytes()));
+        let documents = documents_table(&destination);
+        tables.push_str(&format!(
+            "{name}:\n{}{}",
+            render(&table),
+            render(&documents)
+        ));
+        observed.insert(name.clone(), summary(&table));
+        observed_documents.insert(name.clone(), summary(&documents));
     }
-    let expected: BTreeMap<String, String> = REVIEW_FIXTURES
-        .iter()
-        .map(|(name, sha)| ((*name).to_owned(), (*sha).to_owned()))
-        .collect();
     assert_eq!(
         observed,
-        expected,
-        "los bytes publicados por los escenarios de la revisión han cambiado. La entrega 2 no \
-         puede cambiarlos. Huellas observadas:\n{}\nTablas:\n{tables}",
+        expected(REVIEW_FIXTURES),
+        "las tablas normalizadas de los escenarios de la revisión no son las de dcae406. \
+         Resúmenes observados:\n{}\nTablas:\n{tables}",
         render(&observed)
     );
+    assert_eq!(
+        observed_documents,
+        expected(REVIEW_FIXTURES_DOCUMENTS),
+        "los documentos que cambian a propósito en los escenarios de la revisión han cambiado. \
+         Resúmenes observados:\n{}\nTablas:\n{tables}",
+        render(&observed_documents)
+    );
+}
+
+/// **De dónde salen los literales normalizados.** Imprime, para cada árbol
+/// publicado que haya bajo `GPS_NORMALIZE_TREES`, su tabla normalizada, el
+/// resumen de esa tabla y la tabla de los tres documentos. Los literales de
+/// `dcae406` se obtuvieron el 30/10/2026 lanzándola sobre los árboles que
+/// publicó el binario de ese commit con los TOML de antes. No forma parte de
+/// la batería: se lanza a mano con `--ignored`.
+#[test]
+#[ignore = "herramienta para obtener literales; se lanza a mano"]
+fn print_normalized_tables_of_published_trees() {
+    let Ok(trees) = std::env::var("GPS_NORMALIZE_TREES") else {
+        return;
+    };
+    let mut names = fs::read_dir(&trees)
+        .expect("árboles")
+        .map(|entry| entry.expect("entrada").path())
+        .collect::<Vec<_>>();
+    names.sort();
+    for tree in names {
+        let table = normalized_table(&tree);
+        let documents = documents_table(&tree);
+        println!(
+            "== {}\nresumen\t{}\ndocumentos\t{}\n{}--\n{}",
+            tree.display(),
+            summary(&table),
+            summary(&documents),
+            render(&table),
+            render(&documents)
+        );
+    }
 }

@@ -38,6 +38,9 @@ use genome_population_simulator::results::{
 };
 use serde_json::Value;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -121,7 +124,7 @@ max_alt_af = 0.8
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -158,7 +161,7 @@ length = {}
 {loci}
 {populations}"#,
             bases.len()
-        ),
+        )),
     )
     .expect("configuración");
     let effective_config = load_and_validate_config(&config).expect("configuración válida");
@@ -599,6 +602,22 @@ max_units = 90
 model = "stepwise"
 mean_events = 6.0
 expansion_bias = 0.0
+
+# El locus son las cinco primeras unidades del `(GT)×25` de la referencia, que
+# el detector da entero (bases 52 a 100): la región lo contiene, y mandan las
+# fronteras declaradas (REQ-REF-40). Suelo de una copia solo para los motivos
+# de dos bases, que son los de la prueba.
+[reference.repeat_detection]
+min_copies = [1000, 1, 1000, 1000, 1000, 1000]
+
+[reference.repeat_detection.slippage]
+model = "stepwise"
+mean_events = 1.0
+
+[[reference.repeat_detection.regions]]
+sequence = "chr1"
+start = 51
+end = 100
 "#,
         30,
     );
@@ -793,7 +812,7 @@ fn rejection(loci: &str) -> String {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -816,7 +835,7 @@ ploidy = 2
 genotype_model = "hwe"
 "#,
             bases.len()
-        ),
+        )),
     )
     .expect("configuración");
     let rendered = load_and_validate_config(&config)
@@ -1180,7 +1199,7 @@ fn publish_with_cap(
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -1225,7 +1244,7 @@ ploidy = 2
 genotype_model = "hwe"
 "#,
             length = bases.len()
-        ),
+        )),
     )
     .expect("configuración");
     let effective = load_and_validate_config(&config)?;
@@ -1291,7 +1310,7 @@ fn publish_amplified(cycles: u32) -> Published {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -1383,7 +1402,7 @@ i7 = "ACGTACGT"
 i5 = "TGCATGCA"
 "#,
             length = bases.len()
-        ),
+        )),
     )
     .expect("configuración");
     let effective_config = load_and_validate_config(&config).expect("configuración válida");

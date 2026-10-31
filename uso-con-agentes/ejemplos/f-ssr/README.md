@@ -16,3 +16,9 @@ ejecutarlo sale cerca de 0, el binario es anterior al arreglo y hay que
 recompilarlo.
 
 F se aplica locus a locus e independientemente (ver `GUIA.md`).
+
+Desde el 30/10/2026 el TOML lleva la sección `[reference.repeat_detection]`,
+obligatoria para declarar un microsatélite: el simulador detecta los de la
+referencia y el declarado coincide con el único que hay. Los resultados son los
+de antes (comprobado comparando con el binario anterior: mismos FASTQ y misma
+verdad salvo el identificador de ejecución).

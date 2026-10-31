@@ -284,6 +284,39 @@ pub struct DeclaredReference {
     /// hay y que no repita el de la suministrada es la resolución de la
     /// configuración efectiva.
     pub inserted_reference_id: Option<Located<String>>,
+    /// La sección de microsatélites, `[reference.repeat_detection]`
+    /// (REQ-CONF-142). **Su presencia activa la detección** sobre la
+    /// referencia final (REQ-REF-38); sin ella no hay microsatélites, y el
+    /// lector rechaza todo locus declarado.
+    pub repeat_detection: Option<DeclaredRepeatDetection>,
+}
+
+/// La sección de microsatélites tal y como se escribe (REQ-CONF-142).
+///
+/// Aquí solo se lee: los rangos de cada valor, las regiones contra el
+/// catálogo y el deslizamiento común los comprueba la resolución de la
+/// configuración efectiva, que nombra el campo.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredRepeatDetection {
+    /// Mínimo de copias completas por longitud de motivo, de 1 a 6 pb.
+    /// Ausente, `[8, 6, 6, 6, 5, 4]`.
+    pub min_copies: Option<Located<Vec<u64>>>,
+    /// Tope de unidades de un locus detectado. Ausente, 200.
+    pub max_units: Option<Located<u64>>,
+    /// El deslizamiento común, **obligatorio**: lo reciben todos los loci
+    /// detectados y los declarados que no declaran ni alelos ni el suyo.
+    pub slippage: DeclaredRepeatSlippage,
+    /// Regiones a las que se limita la detección, en coordenadas de la
+    /// referencia **final** (DP-SSR-18). Ausente, la referencia entera.
+    pub regions: Option<Vec<DeclaredDetectionRegion>>,
+}
+
+/// Una región de detección: base uno, cerrada, en la referencia final.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredDetectionRegion {
+    pub sequence: Located<String>,
+    pub start: Located<u64>,
+    pub end: Located<u64>,
 }
 
 /// Un locus de repetición tal y como lo escribe el usuario.

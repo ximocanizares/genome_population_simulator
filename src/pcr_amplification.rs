@@ -784,6 +784,17 @@ impl PcrSettings {
         self
     }
 
+    /// Desconecta el tartamudeo clonal: con la sección de microsatélites se
+    /// conecta al resolver la configuración, antes de saber si el catálogo
+    /// final tendrá algún locus, y si se queda vacío la amplificación vuelve a
+    /// ser la de una biblioteca sin microsatélites (DTC-092: el catálogo de
+    /// azar v5, byte a byte).
+    #[must_use]
+    pub fn without_clonal_stutter(mut self) -> Self {
+        self.clonal = None;
+        self
+    }
+
     /// Parámetros del tartamudeo clonal de este evento, si los hay.
     #[must_use]
     pub const fn clonal_stutter(&self) -> Option<&crate::clonal_stutter::ClonalStutterSettings> {
@@ -1521,8 +1532,9 @@ pub fn manifest_document(
             serde_json::json!(unique_molecule_coverage_x),
         );
         // Los dos recuentos del linaje solo aparecen cuando hay linaje. Una
-        // biblioteca amplificada sin loci de repetición publica el mismo
-        // documento que antes de F4.10, byte a byte.
+        // biblioteca amplificada sin loci en el catálogo final —sin la sección
+        // de microsatélites, o con ella y sin nada detectado ni declarado—
+        // publica el mismo documento que antes de F4.10, byte a byte.
         if settings.clonal_stutter().is_some() {
             object.insert(
                 "lineage_slips_by_locus".to_owned(),

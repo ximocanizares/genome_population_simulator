@@ -22,12 +22,15 @@
 //! pasaría.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::diagnostics::Diagnostic;
 use genome_population_simulator::execution::execute_validated_config;
+
+#[path = "support/detection_section.rs"]
+mod detection_section;
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -89,6 +92,18 @@ motif = "CA"
 /// Ejecuta el escenario entero: si algo se rechaza, se rechaza antes de
 /// publicar nada.
 fn run(seed: &str, matrix: &str, loci: &str, events: &str) -> Result<(), Diagnostic> {
+    run_inspecting(seed, matrix, loci, events, |_| ())
+}
+
+/// Como [`run`], y si la ejecución publica, `inspect` lee el directorio
+/// publicado antes de borrarlo.
+fn run_inspecting<T>(
+    seed: &str,
+    matrix: &str,
+    loci: &str,
+    events: &str,
+    inspect: impl FnOnce(&Path) -> T,
+) -> Result<T, Diagnostic> {
     let root = temporary("run");
     fs::create_dir_all(&root).expect("directorio");
     fs::write(
@@ -99,7 +114,7 @@ fn run(seed: &str, matrix: &str, loci: &str, events: &str) -> Result<(), Diagnos
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{seed}"
@@ -122,11 +137,12 @@ ploidy = 2
 genotype_model = "hwe"
 {events}
 "#
-        ),
+        )),
     )
     .expect("configuración");
     let outcome = load_and_validate_config(&config).and_then(|effective| {
-        execute_validated_config(&effective, &root.join("published")).map(|_| ())
+        execute_validated_config(&effective, &root.join("published"))
+            .map(|_| inspect(&root.join("published")))
     });
     fs::remove_dir_all(&root).ok();
     outcome
@@ -310,15 +326,21 @@ fn a_supplied_matrix_row_inside_the_tract_is_rejected() {
     assert!(text.contains("de la matriz en chr1:150"), "{text}");
 }
 
-/// **Las variantes generadas tampoco pueden caer dentro de un tracto.**
+/// **Las variantes generadas nunca caen dentro de un tracto: el generador lo
+/// excluye.**
 ///
-/// El locus cubre la secuencia entera, de modo que **cualquier** posición que
-/// el generador elija cae dentro: el rechazo no depende de la suerte y la
-/// prueba no es probabilística. El control positivo es el mismo escenario sin
-/// locus declarado, que corre entero.
+/// Hasta la entrega 3 del plan de detección una variante generada dentro de
+/// un tracto declarado rechazaba el escenario, y la prueba pedía ochenta
+/// posiciones sobre trescientas bases para que alguna cayera dentro con
+/// cualquier semilla. Desde entonces el generador de la matriz **excluye** los
+/// loci del catálogo (REQ-CONF-143): el mismo escenario corre con las dos
+/// semillas y ninguna de las ochenta filas cae en el tracto, que ocupa un
+/// tercio de la secuencia. **Debe fallar contra** un generador que no
+/// excluya: con ochenta posiciones alguna cae dentro y el escenario se
+/// rechaza, como antes.
 #[test]
-fn generated_variants_inside_a_declared_tract_are_rejected() {
-    let whole_sequence = format!(
+fn generated_variants_never_fall_inside_a_declared_tract() {
+    let tract = format!(
         r#"
 [[reference.repeat_loci]]
 id = "STR-1"
@@ -329,19 +351,33 @@ motif = "CA"
 {ALLELES_INCLUDING_THE_REFERENCE_ONE}"#
     );
     for seed in SEEDS {
-        // Sin locus declarado, treinta variantes generadas corren.
-        run(seed, &generated_matrix(30), "", "")
-            .unwrap_or_else(|error| panic!("sin locus el escenario corre: {}", rendered(&error)));
-    }
-    // Con el locus y suficientes variantes, alguna cae dentro con cualquiera de
-    // las semillas: el tracto ocupa un tercio de la secuencia y se piden
-    // ochenta posiciones distintas.
-    for seed in SEEDS {
-        let error = run(seed, &generated_matrix(80), &whole_sequence, "")
-            .expect_err("con ochenta variantes sobre trescientas bases alguna cae dentro");
-        let text = rendered(&error);
-        assert!(text.contains("STR-1"), "{text}");
-        assert!(text.contains("de la matriz"), "{text}");
+        let positions = run_inspecting(seed, &generated_matrix(80), &tract, "", |published| {
+            fs::read_to_string(published.join("population_snvs.tsv"))
+                .expect("matriz publicada")
+                .lines()
+                .skip(1)
+                .map(|line| {
+                    line.split('\t')
+                        .nth(2)
+                        .expect("columna position")
+                        .parse::<u64>()
+                        .expect("posición")
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|error| {
+            panic!(
+                "con el tracto excluido el escenario corre: {}",
+                rendered(&error)
+            )
+        });
+        assert_eq!(positions.len(), 80, "las ochenta filas pedidas");
+        assert!(
+            positions
+                .iter()
+                .all(|position| !(101..=200).contains(position)),
+            "ninguna fila dentro del tracto: {positions:?}"
+        );
     }
 }
 

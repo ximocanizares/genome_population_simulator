@@ -10,6 +10,9 @@ use genome_population_simulator::results::{
 };
 use serde_json::{Value, json};
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
@@ -514,7 +517,8 @@ fn replace_configuration_text(root: &Path, manifest: &mut Value, old: &str, new:
         changed, original,
         "configuration mutation must be effective"
     );
-    fs::write(&path, changed).expect("mutated configuration copy");
+    fs::write(&path, detection_section::with_detection_section(&changed))
+        .expect("mutated configuration copy");
     refresh_artifact(root, manifest, &id);
 }
 
@@ -565,14 +569,14 @@ fn write_percentage_fixture(root: &Path) -> PathBuf {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
              [reference]\nkind = \"supplied\"\nid = \"reference-main\"\nfasta = \"source.fa\"\n\
              [[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\
              [[reduced_references]]\nid = \"reference-small\"\nsource_reference_id = \"reference-main\"\n\
              region_size_bases = 10\nreduction_percent = 25\n",
             "1".repeat(64)
-        ),
+        )),
     )
     .expect("percent fixture config");
     config
@@ -590,7 +594,7 @@ fn write_direct_events_fixture(root: &Path) -> PathBuf {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
              [population_snvs]\nmode = \"supplied\"\ninput_path = \"{}\"\n\
              [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"I1\"]\nploidy = 2\ngenotype_model = \"hwe\"\n\
@@ -600,7 +604,7 @@ fn write_direct_events_fixture(root: &Path) -> PathBuf {
             "0".repeat(64),
             matrix.display(),
             fasta.display(),
-        ),
+        )),
     )
     .expect("direct events config");
     config
@@ -618,7 +622,7 @@ fn write_founder_keys_fixture(root: &Path) -> PathBuf {
     let config = root.join("founder-keys.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
              [population_snvs]\nmode = \"supplied\"\ninput_path = \"{}\"\n\
              [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nfounder_keys = [\"founder-I1\"]\nploidy = 2\ngenotype_model = \"hwe\"\n\
@@ -627,7 +631,7 @@ fn write_founder_keys_fixture(root: &Path) -> PathBuf {
             "0".repeat(64),
             matrix.display(),
             fasta.display(),
-        ),
+        )),
     )
     .expect("founder keys config");
     config
@@ -906,7 +910,7 @@ fn write_truth_judge_fixture(root: &Path) -> PathBuf {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
              [population_snvs]\nmode = \"supplied\"\ninput_path = \"{}\"\n\
              [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 2\nindividual_ids = [\"I1\", \"I2\"]\nploidy = 2\ngenotype_model = \"hwe\"\n\
@@ -919,7 +923,7 @@ fn write_truth_judge_fixture(root: &Path) -> PathBuf {
             "0".repeat(64),
             matrix.display(),
             fasta.display(),
-        ),
+        )),
     )
     .expect("truth judge config");
     config
@@ -949,7 +953,7 @@ fn repeat_loci_at_the_same_coordinates_on_two_sequences_publish() {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             "config_kind = \"general\"\nschema_version = \"4\"\nseed = \"{}\"\n\
              [population_snvs]\nmode = \"supplied\"\ninput_path = \"matrix.tsv\"\n\
              [reference]\nkind = \"supplied\"\nid = \"ref-main\"\nfasta = \"reference.fa\"\n\
@@ -961,7 +965,7 @@ fn repeat_loci_at_the_same_coordinates_on_two_sequences_publish() {
              [[reference.repeat_loci.alleles]]\nunits = 6\nfrequency = 1.0\n\
              [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"I1\"]\nploidy = 2\ngenotype_model = \"hwe\"\n",
             "0".repeat(64),
-        ),
+        )),
     )
     .expect("config");
     let destination = root.join("result");

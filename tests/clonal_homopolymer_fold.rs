@@ -32,6 +32,9 @@ use genome_population_simulator::results::validate_published_resources;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 /// El escenario es **el mismo fichero** que la evidencia de la comparación
@@ -84,9 +87,15 @@ const FROZEN: [(&str, &str); 6] = [
         "outputs/fastq/reads-main/sample-B_R2.fastq.gz",
         "a29364c401393696809b92c23ab1ca3089f478b0122baf0ebf7d63c3ccd67c5f",
     ),
+    // Cambia a propósito el 30/10/2026 (entrega 3 del plan de detección): era
+    // 0ee74f98b072b70e88ed344656e250b3a978def3ac97aa04e20f8a3de2e2d7ae. El TOML
+    // de la evidencia lleva desde entonces la sección de microsatélites, y la
+    // verdad cita el identificador de ejecución y la huella del TOML; quitados
+    // esos dos, es la misma verdad que publica el binario de `dcae406` con el
+    // TOML de antes (ver `tests/technical_catalog_contract.rs`).
     (
         "outputs/truth.jsonl",
-        "0ee74f98b072b70e88ed344656e250b3a978def3ac97aa04e20f8a3de2e2d7ae",
+        "fa398a3d952478bc4318fb37e3ac0c0246475cb91ed90c2b2c84e47d2ec11154",
     ),
     (
         "events/reads-main/manifest.json",
@@ -164,7 +173,11 @@ fn scenario(clonal: &str) -> String {
 fn publish(toml: &str) -> Published {
     let root = temporary();
     fs::create_dir_all(&root).expect("directorio");
-    fs::write(root.join("general.toml"), toml).expect("TOML");
+    fs::write(
+        root.join("general.toml"),
+        detection_section::with_detection_section(toml),
+    )
+    .expect("TOML");
     fs::write(root.join("reference.fa"), SCENARIO_FASTA).expect("FASTA");
     fs::write(root.join("population-snvs.tsv"), SCENARIO_SNVS).expect("matriz");
     let destination = root.join("published");

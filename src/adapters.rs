@@ -6,18 +6,19 @@ use std::sync::Arc;
 use toml::de::{DeTable, DeValue};
 
 use crate::configuration::{
-    AdmittedToml, ConfigKind, DeclaredCompositionValue, DeclaredDirectEvent,
-    DeclaredEfficiencyClass, DeclaredF5GeneralConfig, DeclaredF5SamplingOverride,
-    DeclaredF5Scenario, DeclaredF5Subpopulation, DeclaredF5Target, DeclaredGcCurveKnot,
-    DeclaredGeneralConfig, DeclaredInitialPopulation, DeclaredNumber, DeclaredPcr,
-    DeclaredPcrStutter, DeclaredPerCycleSlip, DeclaredPopulationSnvs,
+    AdmittedToml, ConfigKind, DeclaredCompositionValue, DeclaredDetectionRegion,
+    DeclaredDirectEvent, DeclaredEfficiencyClass, DeclaredF5GeneralConfig,
+    DeclaredF5SamplingOverride, DeclaredF5Scenario, DeclaredF5Subpopulation, DeclaredF5Target,
+    DeclaredGcCurveKnot, DeclaredGeneralConfig, DeclaredInitialPopulation, DeclaredNumber,
+    DeclaredPcr, DeclaredPcrStutter, DeclaredPerCycleSlip, DeclaredPopulationSnvs,
     DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
     DeclaredPopulationSnvsRegion, DeclaredReducedReference, DeclaredReductionTarget,
     DeclaredReference, DeclaredReferenceSource, DeclaredRepeatAdmission, DeclaredRepeatAllele,
-    DeclaredRepeatInterruption, DeclaredRepeatLocus, DeclaredRepeatSlippage, DeclaredSequence,
-    DeclaredStutter, DeclaredStutterLocusRate, DeclaredStutterMotifRate, DeclaredStutterStep,
-    DeclaredTechnicalEvent, DeclaredTechnicalEventTarget, DeclaredTechnicalLibrary,
-    DeclaredVcfOutput, ExpectedConfigKind, Located, SequenceClass, SourceLocation, semantic_error,
+    DeclaredRepeatDetection, DeclaredRepeatInterruption, DeclaredRepeatLocus,
+    DeclaredRepeatSlippage, DeclaredSequence, DeclaredStutter, DeclaredStutterLocusRate,
+    DeclaredStutterMotifRate, DeclaredStutterStep, DeclaredTechnicalEvent,
+    DeclaredTechnicalEventTarget, DeclaredTechnicalLibrary, DeclaredVcfOutput, ExpectedConfigKind,
+    Located, SequenceClass, SourceLocation, semantic_error,
 };
 use crate::diagnostics::Diagnostic;
 use crate::f5_preflight::{
@@ -1877,6 +1878,7 @@ fn parse_reference(
             "repeat_admission",
             "max_tract_output_bases",
             "inserted_reference_id",
+            "repeat_detection",
         ]
     } else {
         &["kind", "id", "fasta", "sequences", "composition"]
@@ -1981,8 +1983,28 @@ fn parse_reference(
             length: required_u64(admitted, sequence, "length")?,
         });
     }
+    let repeat_detection = if declares_repeats {
+        parse_repeat_detection(admitted, table)?
+    } else {
+        None
+    };
+    // **Sin la sección de microsatélites no hay microsatélites** (REQ-CONF-142,
+    // decisión del responsable del 28/10/2026): el régimen de loci declarados
+    // sin detección se retiró. Se rechaza antes de leer los loci, para que el
+    // diagnóstico sea este y no el de un campo del locus.
+    if repeat_detection.is_none() && table.contains_key("repeat_loci") {
+        return Err(semantic_error(
+            admitted,
+            "reference.repeat_loci,reference.repeat_detection",
+            "los loci de repetición, los tractos insertados y los plantados solo existen con la \
+             sección de microsatélites: declare [reference.repeat_detection] con su deslizamiento \
+             común ([reference.repeat_detection.slippage], por ejemplo model = \"stepwise\" y \
+             mean_events = 1.0); con ella la referencia final se barre y cada locus declarado \
+             ajusta uno detectado",
+        ));
+    }
     let repeat_loci = if declares_repeats {
-        parse_repeat_loci(admitted, table)?
+        parse_repeat_loci(admitted, table, repeat_detection.is_some())?
     } else {
         Vec::new()
     };
@@ -2009,7 +2031,124 @@ fn parse_reference(
         repeat_admission,
         max_tract_output_bases,
         inserted_reference_id,
+        repeat_detection,
     })
+}
+
+/// Lee la sección de microsatélites (REQ-CONF-142).
+///
+/// El deslizamiento común es **obligatorio y sin valores ocultos**: el modelo
+/// y la media de pasos se exigen aquí, con un ejemplo en el mensaje, igual que
+/// los pesos del tartamudeo. El sesgo y el paso siguen la regla de un locus
+/// (REQ-CONF-139): simétrico y una unidad si faltan.
+fn parse_repeat_detection(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+) -> Result<Option<DeclaredRepeatDetection>, Diagnostic> {
+    let Some(section) = optional_table(admitted, table, "repeat_detection")? else {
+        return Ok(None);
+    };
+    check_unknown(
+        admitted,
+        section,
+        &["min_copies", "max_units", "slippage", "regions"],
+    )?;
+    const SLIPPAGE_EXAMPLE: &str = "por ejemplo:\n[reference.repeat_detection.slippage]\n\
+         model = \"stepwise\"\nmean_events = 1.0";
+    let Some(slippage) = optional_table(admitted, section, "slippage")? else {
+        return Err(semantic_error(
+            admitted,
+            "reference.repeat_detection.slippage",
+            format!(
+                "la sección de microsatélites exige su deslizamiento común, sin valor por omisión: \
+                 lo reciben todos los loci detectados; {SLIPPAGE_EXAMPLE}"
+            ),
+        ));
+    };
+    check_unknown(
+        admitted,
+        slippage,
+        &["model", "mean_events", "expansion_bias", "step_units"],
+    )?;
+    for field in ["model", "mean_events"] {
+        if !slippage.contains_key(field) {
+            return Err(semantic_error(
+                admitted,
+                format!("reference.repeat_detection.slippage.{field}"),
+                format!(
+                    "el deslizamiento común exige {field}, sin valor por omisión; \
+                     {SLIPPAGE_EXAMPLE}"
+                ),
+            ));
+        }
+    }
+    let slippage = DeclaredRepeatSlippage {
+        model: required_string(admitted, slippage, "model")?,
+        mean_events: required_number(admitted, slippage, "mean_events")?,
+        expansion_bias: optional_number(admitted, slippage, "expansion_bias")?,
+        step_units: optional_located_u64(admitted, slippage, "step_units")?,
+    };
+    let min_copies = match section.get("min_copies") {
+        None => None,
+        Some(value) => {
+            let items = value.get_ref().as_array().ok_or_else(|| {
+                wrong_type(
+                    admitted,
+                    "reference.repeat_detection.min_copies",
+                    value,
+                    "array",
+                )
+            })?;
+            let mut parsed = Vec::with_capacity(items.len());
+            for item in items {
+                parsed.push(
+                    item.get_ref()
+                        .as_integer()
+                        .and_then(|integer| {
+                            u64::from_str_radix(integer.as_str(), integer.radix()).ok()
+                        })
+                        .ok_or_else(|| {
+                            wrong_type(
+                                admitted,
+                                "reference.repeat_detection.min_copies",
+                                item,
+                                "non-negative integer",
+                            )
+                        })?,
+                );
+            }
+            Some(Located::new(parsed, location(admitted, value.span())))
+        }
+    };
+    let regions = match optional_array(admitted, section, "regions")? {
+        None => None,
+        Some(values) => {
+            let mut parsed = Vec::with_capacity(values.len());
+            for value in values {
+                let region = value.get_ref().as_table().ok_or_else(|| {
+                    wrong_type(
+                        admitted,
+                        "reference.repeat_detection.regions",
+                        value,
+                        "table",
+                    )
+                })?;
+                check_unknown(admitted, region, &["sequence", "start", "end"])?;
+                parsed.push(DeclaredDetectionRegion {
+                    sequence: required_string(admitted, region, "sequence")?,
+                    start: required_u64(admitted, region, "start")?,
+                    end: required_u64(admitted, region, "end")?,
+                });
+            }
+            Some(parsed)
+        }
+    };
+    Ok(Some(DeclaredRepeatDetection {
+        min_copies,
+        max_units: optional_located_u64(admitted, section, "max_units")?,
+        slippage,
+        regions,
+    }))
 }
 
 /// Mínimos de admisión declarados **dentro** de la tabla del locus.
@@ -2198,6 +2337,7 @@ fn reject_declared_purity(admitted: &AdmittedToml, locus: &DeTable<'_>) -> Resul
 fn parse_repeat_loci(
     admitted: &AdmittedToml,
     table: &DeTable<'_>,
+    detection: bool,
 ) -> Result<Vec<DeclaredRepeatLocus>, Diagnostic> {
     let Some(values) = optional_array(admitted, table, "repeat_loci")? else {
         return Ok(Vec::new());
@@ -2318,12 +2458,16 @@ fn parse_repeat_loci(
                 ),
             ));
         }
+        // **Con la sección de microsatélites, un locus sin alelos ni generador
+        // hereda el deslizamiento común** (REQ-CONF-139): declararlo sirve
+        // entonces solo para ajustar su tope o sus mínimos. Una lista de
+        // alelos vacía, en cambio, sigue sin decir de dónde salen.
         let alleles_values = match declared_alleles {
             Some(values) => values,
-            None if slippage.is_some() => &[],
+            None if slippage.is_some() || detection => &[],
             None => required_array(admitted, locus, "alleles")?,
         };
-        if alleles_values.is_empty() && slippage.is_none() {
+        if alleles_values.is_empty() && slippage.is_none() && declared_alleles.is_some() {
             return Err(semantic_error(
                 admitted,
                 "reference.repeat_loci.alleles",

@@ -250,8 +250,26 @@
           "type": "integer",
           "minimum": 1,
           "description": "Tope OPCIONAL de bases de secuencia de tracto publicadas, sumando las de la verdad y las del VCF. Si la cota calculada sobre lo declarado lo supera, el escenario se rechaza antes de simular, nombrando el tope, la cota y el locus que más aporta. Quien no lo declara no nota nada."
+        },
+        "repeat_detection": {
+          "$ref": "#/$defs/repeat_detection"
         }
-      }
+      },
+      "allOf": [
+        {
+          "description": "Sin la sección de microsatélites no hay loci: repeat_loci exige repeat_detection (REQ-CONF-142).",
+          "if": {
+            "required": [
+              "repeat_loci"
+            ]
+          },
+          "then": {
+            "required": [
+              "repeat_detection"
+            ]
+          }
+        }
+      ]
     },
     "supplied_reference": {
       "type": "object",
@@ -322,6 +340,9 @@
           "type": "integer",
           "minimum": 1,
           "description": "Tope OPCIONAL de bases de secuencia de tracto publicadas, sumando las de la verdad y las del VCF. Si la cota calculada sobre lo declarado lo supera, el escenario se rechaza antes de simular, nombrando el tope, la cota y el locus que más aporta. Quien no lo declara no nota nada."
+        },
+        "repeat_detection": {
+          "$ref": "#/$defs/repeat_detection"
         }
       },
       "allOf": [
@@ -352,6 +373,19 @@
                 "inserted_reference_id"
               ]
             }
+          }
+        },
+        {
+          "description": "Sin la sección de microsatélites no hay loci: repeat_loci exige repeat_detection (REQ-CONF-142).",
+          "if": {
+            "required": [
+              "repeat_loci"
+            ]
+          },
+          "then": {
+            "required": [
+              "repeat_detection"
+            ]
           }
         }
       ]
@@ -1894,29 +1928,13 @@
       ],
       "allOf": [
         {
-          "description": "O el locus declara sus alelos, o declara el generador de deslizamiento. Ni las dos cosas ni ninguna.",
-          "oneOf": [
-            {
-              "required": [
-                "alleles"
-              ],
-              "not": {
-                "required": [
-                  "slippage"
-                ]
-              }
-            },
-            {
-              "required": [
-                "slippage"
-              ],
-              "not": {
-                "required": [
-                  "alleles"
-                ]
-              }
-            }
-          ]
+          "description": "O el locus declara sus alelos, o su propio generador de deslizamiento, o ninguno de los dos y hereda el deslizamiento común de la sección de microsatélites (REQ-CONF-139). Nunca las dos cosas.",
+          "not": {
+            "required": [
+              "alleles",
+              "slippage"
+            ]
+          }
         },
         {
           "description": "Un locus de un solo motivo con tramo no declara reference_units: el tramo ya fija el tracto.",
@@ -2023,6 +2041,63 @@
             1
           ],
           "description": "Unidades por paso. Solo se admite una unidad completa."
+        }
+      }
+    },
+    "repeat_detection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slippage"
+      ],
+      "description": "Sección de microsatélites (REQ-CONF-142). Su PRESENCIA activa la detección sobre la referencia final (REQ-REF-38): sin ella no hay microsatélites y todo locus declarado se rechaza. Con ella, la referencia final se barre y cada locus declarado solo ajusta los parámetros de uno detectado (REQ-REF-40).",
+      "properties": {
+        "min_copies": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Mínimo de copias completas por longitud de motivo, de 1 a 6 pb. Si falta, [8, 6, 6, 6, 5, 4]."
+        },
+        "max_units": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Tope de unidades de un locus detectado: un tramo con más es un satélite y se descarta. Si falta, 200."
+        },
+        "slippage": {
+          "$ref": "#/$defs/repeat_slippage",
+          "description": "Deslizamiento común, OBLIGATORIO y sin valores ocultos: model y mean_events no tienen valor por omisión. Lo reciben todos los loci detectados y los declarados que no declaran ni alelos ni el suyo."
+        },
+        "regions": {
+          "type": "array",
+          "minItems": 1,
+          "x-gps-control": "table",
+          "description": "Regiones OPCIONALES a las que se limita la detección, en coordenadas de la referencia FINAL, base uno y cerradas (DP-SSR-18). Un tramo se detecta solo si cabe entero en una región. Si falta, la referencia entera. Dos regiones de la misma secuencia no se solapan; lo comprueba el lector.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sequence",
+              "start",
+              "end"
+            ],
+            "properties": {
+              "sequence": {
+                "$ref": "#/$defs/identifier"
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
         }
       }
     }

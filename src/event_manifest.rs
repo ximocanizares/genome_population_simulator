@@ -677,7 +677,8 @@ fn validate_event_manifest_document(path: &Path, bytes: &[u8]) -> Result<(), Dia
     let expects_pcr = pcr_object.and_then(|pcr| pcr.get("applicable")) == Some(&Value::Bool(true));
     // La amplificación abre las decisiones de linaje **solo** cuando publica
     // su bloque de tartamudeo clonal, que es lo mismo que decir cuando el
-    // escenario declara loci de repetición.
+    // catálogo final de microsatélites tiene algún locus (con la sección de
+    // detección, el tartamudeo clonal se desconecta si se queda vacío).
     let expects_lineage = expects_pcr && pcr_object.is_some_and(|pcr| pcr.contains_key("stutter"));
     if (expects_stutter || expects_pcr) != opens_new_stage {
         return Err(event_error(

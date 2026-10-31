@@ -23,6 +23,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::load_and_validate_config;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -94,7 +97,7 @@ fn validate(locus_extra: &str, stutter: &str, motif: &str, tract: &str) -> Attem
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -137,7 +140,7 @@ individual_id = "sample-A"
 i7 = "ACGTACGT"
 i5 = "TGCATGCA"
 "#
-        ),
+        )),
     )
     .expect("configuración");
     let result = load_and_validate_config(&config).map(|_| ());

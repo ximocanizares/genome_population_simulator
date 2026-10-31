@@ -1645,6 +1645,7 @@
       "additionalProperties": false,
       "required": [
         "id",
+        "origin",
         "sequence_id",
         "start",
         "end",
@@ -1658,6 +1659,13 @@
       "properties": {
         "id": {
           "$ref": "#/$defs/non_empty_id"
+        },
+        "origin": {
+          "enum": [
+            "declared",
+            "detected"
+          ],
+          "description": "Declarado por el usuario o detectado en la referencia final."
         },
         "sequence_id": {
           "$ref": "#/$defs/non_empty_id"

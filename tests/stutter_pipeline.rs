@@ -38,6 +38,9 @@ use genome_population_simulator::execution::execute_validated_config;
 use noodles_bgzf as bgzf;
 use serde_json::Value;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -275,6 +278,20 @@ fn saturated_scenario(tract: &str, tract_offset: usize, stutter: &str, coverage:
     scenario_with_length(tract, tract_offset, stutter, coverage, COPY_LENGTH)
 }
 
+/// La matriz de una fila en la base 20, del flanco, con la base que la
+/// referencia lleva ahí y la otra del fondo como alternativa.
+fn write_flank_matrix(root: &Path, bases: &str) {
+    let reference = &bases[19..20];
+    let alternate = if reference == "G" { "T" } else { "G" };
+    fs::write(
+        root.join("population-snvs.tsv"),
+        format!(
+            "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t20\t{reference}\t{alternate}\tP1\t0.5\n"
+        ),
+    )
+    .expect("matriz");
+}
+
 fn scenario_with_length(
     tract: &str,
     tract_offset: usize,
@@ -284,27 +301,30 @@ fn scenario_with_length(
 ) -> Scenario {
     let root = temporary("run");
     fs::create_dir_all(&root).expect("directorio");
+    // Los flancos son de `G` y `T` al azar, no una tira de `G`: entre dos tiras
+    // largas de una sola base el detector no ve un tracto corto, y el locus no
+    // coincidiría con nada (ver `gt_background`). Sin `A` ni `C`, las copias de
+    // `CA` de una lectura siguen siendo solo las del tracto.
     let bases = format!(
         "{}{tract}{}",
-        "G".repeat(tract_offset),
-        "G".repeat(copy_length - tract_offset - tract.len())
+        detection_section::gt_background(0x9E37_79B9_7F4A_7C15, tract_offset),
+        detection_section::gt_background(
+            0xD1B5_4A32_D192_ED03,
+            copy_length - tract_offset - tract.len()
+        )
     );
     assert_eq!(bases.len(), copy_length);
     fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
     // La matriz es obligatoria en cuanto hay población inicial. Su único sitio
     // cae **fuera del tracto**, en el flanco: dentro invadiría el locus y la
     // admisión lo rechazaría por un motivo ajeno al tartamudeo.
-    fs::write(
-        root.join("population-snvs.tsv"),
-        "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t20\tG\tT\tP1\t0.5\n",
-    )
-    .expect("matriz");
+    write_flank_matrix(root.as_path(), &bases);
     let config = root.join("general.toml");
     let start = tract_offset + 1;
     let end = tract_offset + tract.len();
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -355,7 +375,7 @@ individual_id = "sample-A"
 i7 = "ACGTACGT"
 i5 = "TGCATGCA"
 "#
-        ),
+        )),
     )
     .expect("configuración");
     let destination = root.join("published");
@@ -878,23 +898,21 @@ fn two_loci_config(stutter: &str) -> (Scenario, PathBuf) {
 fn write_two_loci(root: &Path, stutter: &str) -> PathBuf {
     fs::create_dir_all(root).expect("directorio");
     let tract = "CA".repeat(5);
+    // Flancos de `G` y `T` al azar en vez de tiras de `G` (ver
+    // `scenario_with_length`).
     let bases = format!(
         "{}TTTT{tract}{}AAAA{tract}{}",
-        "G".repeat(36),
-        "G".repeat(46),
-        "G".repeat(170)
+        detection_section::gt_background(0x9E37_79B9_7F4A_7C15, 36),
+        detection_section::gt_background(0xD1B5_4A32_D192_ED03, 46),
+        detection_section::gt_background(0x2545_F491_4F6C_DD1D, 170)
     );
     assert_eq!(bases.len(), COPY_LENGTH);
     fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
-    fs::write(
-        root.join("population-snvs.tsv"),
-        "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t20\tG\tT\tP1\t0.5\n",
-    )
-    .expect("matriz");
+    write_flank_matrix(root, &bases);
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -956,7 +974,7 @@ individual_id = "sample-A"
 i7 = "ACGTACGT"
 i5 = "TGCATGCA"
 "#
-        ),
+        )),
     )
     .expect("configuración");
     config

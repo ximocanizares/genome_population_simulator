@@ -25,6 +25,9 @@ use genome_population_simulator::integrity::identify_file;
 use genome_population_simulator::results::validate_published_resources;
 use serde_json::Value;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 const SEED: &str = "00000000000000000000000000000000000000000000000000000000000000aa";
@@ -200,7 +203,7 @@ fn write_config(body: &str) -> (PathBuf, PathBuf) {
     let root = temporary("config");
     write_fasta(&root.join("reference.fa"), &source_bases());
     let config = root.join("general.toml");
-    fs::write(&config, body).expect("configuración");
+    fs::write(&config, detection_section::with_detection_section(body)).expect("configuración");
     (root, config)
 }
 
@@ -897,7 +900,7 @@ fn publish_two_sequences(body: &str) -> Scenario {
     );
     fs::write(root.join("reference.fa"), fasta).expect("FASTA de dos secuencias");
     let config = root.join("general.toml");
-    fs::write(&config, body).expect("configuración");
+    fs::write(&config, detection_section::with_detection_section(body)).expect("configuración");
     let destination = root.join("published");
     execute_validated_config(
         &load_and_validate_config(&config).expect("configuración válida"),
@@ -1125,7 +1128,9 @@ fn each_unsupported_declaration_is_rejected_naming_what_collides() {
             "junto a una reducción",
             with_insertion(INSERT_AT_1000)
                 + "\n[[reduced_references]]\nid = \"ref-small\"\nsource_reference_id = \"ref-main\"\nregion_size_bases = 100\ntarget_bases = 1000\n",
-            "junto a una reducción de referencia",
+            // El diagnóstico da el camino en dos ejecuciones y el campo de la
+            // segunda (REQ-REF-37, paso F6.4.a.13 del plan de detección).
+            "en dos ejecuciones: en la primera, solo la reducción, que publica el FASTA reducido; en la segunda, ese FASTA como reference.fasta",
         ),
         (
             "junto a cambios directos",
@@ -1217,6 +1222,8 @@ fn the_general_schema_accepts_an_insertion_and_rejects_its_malformed_forms() {
             "id": "ref-main",
             "fasta": "reference.fa",
             "sequences": [{"id": "chr1", "class": "chromosome", "length": 4000}],
+            // La sección de microsatélites: sin ella, repeat_loci no se admite.
+            "repeat_detection": {"slippage": {"model": "stepwise", "mean_events": 1.0}},
             "repeat_loci": [locus]
         });
         for (key, value) in reference_extra.as_object().expect("objeto") {

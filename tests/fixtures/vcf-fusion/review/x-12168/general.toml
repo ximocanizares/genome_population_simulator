@@ -58,3 +58,16 @@ phase = 0
 kind = "insertion"
 point = 119
 bases = "TT"
+
+[reference.repeat_detection]
+min_copies = [1000, 4, 1000, 1000, 1000, 1000]
+
+[reference.repeat_detection.slippage]
+model = "stepwise"
+mean_events = 1.0
+
+[[reference.repeat_detection.regions]]
+sequence = "chr1"
+start = 95
+end = 122
+

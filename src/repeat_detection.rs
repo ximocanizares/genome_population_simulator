@@ -5,10 +5,23 @@
 //!
 //! El **núcleo** de este módulo —[`PeriodRange`], [`ScanParams`],
 //! [`RepeatInterval`], la tabla `CANONICAL`, `is_primitive_motif`, el pase de
-//! Ruzzo y Tompa y [`find_tandem_repeats`], con sus pruebas— está **copiado**
-//! del fichero `src/tandem_repeat.rs` del proyecto `pop_var_caller`
-//! (repositorio `join_per_sample_vcfs`), commit de origen
-//! `950909f9962f463ca157264fa36193703ed2b467`.
+//! Ruzzo y Tompa, el corte por cambio de motivo (`split_at_motif_changes`),
+//! [`find_tandem_repeats`] y [`find_tandem_repeats_for_copy_floor`], con sus
+//! pruebas— está **copiado** del fichero `src/tandem_repeat.rs` del proyecto
+//! `pop_var_caller` (repositorio `join_per_sample_vcfs`), commit de origen
+//! `fa215c2365ca05ed15fac056285b63b9771c6c49` (30/10/2026).
+//!
+//! La primera copia (28/10/2026) se hizo de
+//! `950909f9962f463ca157264fa36193703ed2b467`. Aquel núcleo fundía en un solo
+//! intervalo dos repeticiones pegadas de motivos distintos (`A×12 T×12`, o
+//! `(CA)×10 (GT)×10`), con el motivo de la primera, y el tramo fundido no
+//! pasaba la pureza: se perdían las dos. El 30/10/2026 se sustituyó por el de
+//! `fa215c23`, que trae del original cuatro cambios: el corte por cambio de
+//! motivo (`ccd57ea2` y sus correcciones de revisión, `306e3bd3`), la emisión
+//! de un tramo unido junto con los trozos de los que se unió (`c237378b`) y
+//! la revisión de rendimiento (`cdce162c`: la pila de Ruzzo y Tompa emite los
+//! segmentos en cuanto son definitivos, los segmentos cortos no se parten y
+//! el barrido con suelo de copias).
 //!
 //! - **Licencia del original:** MIT, «Copyright (c) 2026 Jose Blanca & Joaquin
 //!   Cañizares», los mismos autores que este proyecto. Se copia sin depender del
@@ -27,32 +40,45 @@
 //!   [`PeriodRange`] escribe su `Display` a mano), el lector de FASTA del otro
 //!   proyecto (`crate::fasta`) y su error de lectura (`ScanError`), toda la
 //!   parte de regiones y ventanas (`SegmentOptions`, `Region`,
-//!   `RegionScanner`, `scan_windowed` y compañía) y la función muerta
-//!   `bases_match`. Los comentarios se han traducido y las pruebas copiadas
-//!   no se han tocado.
+//!   `RegionScanner`, `scan_windowed` y compañía, con el tipo `RegionSpan`:
+//!   el pase de periodos múltiplos guarda aquí el tramo como una tupla
+//!   `(inicio, fin)`) y la función muerta `bases_match`. Tampoco se trae
+//!   quien elige, en el original, entre un tramo unido y sus trozos
+//!   (`segment_criteria::choose_readings`, que no es del buscador): aquí las
+//!   dos lecturas entran en [`detect_repeat_candidates`] como intervalos
+//!   corrientes, cada una se juzga sola y la regla de solapes se queda con
+//!   una. Los comentarios se han traducido y las pruebas copiadas no se han
+//!   tocado.
 //! - **Única desviación del algoritmo (decisión del responsable, 29/10/2026):
-//!   el inicio del tramo se avanza hasta la primera fase primitiva.** En el
-//!   original, si el motivo leído al inicio del segmento no es primitivo, el
-//!   intervalo **entero** se descarta. Eso pierde un microsatélite pegado a un
-//!   homopolímero de su misma base: en `A×8 (GA)×10` el segmento de periodo 2
-//!   empieza dentro del poli-A (allí también coinciden las bases a distancia
-//!   2), lee `AA`, que no es primitivo, y el `(GA)n` desaparece sin contarse.
-//!   Aquí, en vez de descartarlo, el inicio avanza base a base hasta la primera
-//!   fase cuyo motivo de periodo `p` sea primitivo **y cuya base sea distinta
-//!   de la anterior**; solo se descarta si no queda ninguna antes de que el
-//!   tramo baje del mínimo de copias. La segunda condición (decisión del
-//!   responsable, 29/10/2026) saca el inicio de la tira de una sola base que
-//!   precede al microsatélite: `A×8 (GA)×10` da `[8, 28)` con motivo `GA`, que
-//!   solo toca al poli-A `[0, 8)`, y se conservan los dos; con solo la primera
-//!   condición empezaría en `[7, 28)`, dentro del poli-A, y la regla de
-//!   solapes dejaría uno. La
-//!   puntuación del intervalo recortado **se recalcula** restando la del
-//!   prefijo quitado, de modo que siempre es la suma de las comparaciones del
-//!   propio tramo (la usa el desempate de solapes). Un tramo cuyo motivo al
-//!   inicio ya es primitivo sale exactamente igual que en el original, y uno
-//!   puro de un motivo no primitivo (un alias de un homopolímero o de un
-//!   dinucleótido) no tiene ninguna fase primitiva y se sigue descartando.
-//!   Ver `find_tandem_repeats`.
+//!   un tramo recortado empieza en la primera fase primitiva fuera de la tira
+//!   que lo precede.** Nació con el núcleo de `950909f`: allí, si el motivo
+//!   leído al inicio del segmento no era primitivo, el intervalo **entero** se
+//!   descartaba, y eso perdía un microsatélite pegado a un homopolímero de su
+//!   misma base (en `A×8 (GA)×10` el segmento de periodo 2 empieza dentro del
+//!   poli-A, lee `AA` y el `(GA)n` desaparecía). La regla: el inicio avanza
+//!   base a base hasta la primera fase cuyo motivo de periodo `p` sea
+//!   primitivo **y cuya base sea distinta de la anterior**; solo se descarta
+//!   si no queda ninguna antes de que el tramo baje del mínimo de copias. La
+//!   segunda condición saca el inicio de la tira de una sola base que precede
+//!   al microsatélite: `A×8 (GA)×10` da `[8, 28)` con motivo `GA`, que solo
+//!   toca al poli-A `[0, 8)`, y se conservan los dos.
+//!
+//!   **Con el núcleo de `fa215c23` sigue haciendo falta, y cambia dónde se
+//!   aplica.** El corte por cambio de motivo ya separa el poli-A del `(GA)n`,
+//!   pero el trozo nuevo empieza en la primera coincidencia tras la unión,
+//!   que es la **última base de la tira**: sin la desviación, `A×8 (GA)×10`
+//!   da `[7, 28)` con motivo `AG`, `A×6 (GA)×10 C` da `[5, 26)` y `T×12
+//!   (CTT)×7` da `[10, 33)` con `TTC`, y la regla de solapes deja uno de los
+//!   dos. Así que la regla se aplica a todo tramo **recortado**, que ahora
+//!   son dos: el que empieza con un motivo no primitivo, como antes, y el
+//!   trozo nacido de un corte, que no empieza donde su segmento. Un tramo que
+//!   empieza donde su segmento y con motivo primitivo sale exactamente igual
+//!   que en el original, y uno puro de un motivo no primitivo (un alias de un
+//!   homopolímero o de un dinucleótido) no tiene ninguna fase primitiva y se
+//!   sigue descartando. La puntuación del tramo recortado **se recalcula**
+//!   restando la del prefijo quitado, de modo que siempre es la suma de las
+//!   comparaciones del propio tramo (la usa el desempate de solapes). Ver el
+//!   cierre `emit` de [`find_tandem_repeats_for_copy_floor`].
 //!
 //! # La conversión en candidatos (propia de este proyecto)
 //!
@@ -63,9 +89,14 @@
 //! pausa de decisión de la entrega 1, con las cifras medidas. Por eso los
 //! umbrales son parámetros ([`DetectionCriteria`]) y no constantes.
 //!
-//! Este módulo **no está conectado** a ninguna ejecución: lo usa solo la
-//! medición de la entrega 1 (`tests/repeat_detection_measurement.rs`).
+//! Desde la entrega 3 (29/10/2026) la usa la ejecución:
+//! `EffectiveConfig::with_detected_repeat_loci` barre cada secuencia de la
+//! referencia final con [`detect_repeat_candidates_in_regions`] cuando el
+//! documento declara la sección `[reference.repeat_detection]`. Los criterios
+//! son los del apartado 11.7 del plan, decididos por el responsable; siguen
+//! siendo parámetros porque la sección los declara.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -296,8 +327,10 @@ struct RtSeg {
 ///
 /// Es el pase fuera de línea de manual: una pila de segmentos abiertos que se
 /// vacía al final. Su corrección la fija una prueba de propiedad contra fuerza
-/// bruta (`ruzzo_tompa_matches_brute_force_on_pseudo_random`). La pila puede
-/// crecer hasta O(n) sobre una entrada patológica de una secuencia entera.
+/// bruta (`ruzzo_tompa_matches_brute_force_on_pseudo_random`). La pila guarda
+/// solo los segmentos abiertos desde el último apilado por la regla 2, que es
+/// cuando todos los de debajo pasan a ser definitivos y se emiten (ver esa
+/// rama).
 fn maximal_scoring_subsequences(
     scores: impl Iterator<Item = i64>,
     mut emit: impl FnMut(usize, usize, i64),
@@ -349,8 +382,23 @@ fn maximal_scoring_subsequences(
             }
             match found {
                 None => {
+                    // Regla 2: sin segmento menor a la izquierda → `cur` va
+                    // aparte. **Y todo lo que hay debajo es definitivo**: todo
+                    // `l` apilado es al menos `cur.l`, así que una búsqueda
+                    // posterior que fuera a dar con uno de ellos da antes con
+                    // `cur`, que está encima, y que `cur` se encuentre o se
+                    // absorba no los toca. Emitirlos ya deja la pila en los
+                    // segmentos desde el último apilado así, en vez de los de
+                    // una secuencia entera (en el original, 1,34 GB en el
+                    // cromosoma 1 del tomate a periodo 1 cuando esperaban al
+                    // final). Salen en el orden en que los habría emitido el
+                    // vaciado final.
+                    for seg in &stack {
+                        emit(seg.start, seg.end, seg.r - seg.l);
+                    }
+                    stack.clear();
                     cur.prev_smaller = 0;
-                    break; // Regla 2: sin segmento menor a la izquierda → `cur` va aparte.
+                    break;
                 }
                 Some(j) => {
                     if stack[j].r >= cur.r {
@@ -377,13 +425,222 @@ fn maximal_scoring_subsequences(
     }
 }
 
+/// Parte un segmento de puntuación máxima allí donde **cambia el motivo** y
+/// emite cada trozo como `(k0, k1, score)`, en la misma forma de índices de
+/// puntuación que emite [`maximal_scoring_subsequences`].
+///
+/// La comparación a distancia `p` solo pregunta «¿es esta base la de `p`
+/// atrás?», lo que es igual de cierto dentro de una tira de `A` que dentro de
+/// una de `T`. Así, `A×12 T×12` puntúa 11 coincidencias, una discrepancia y 11
+/// coincidencias en periodo 1, y el segmento cruza la unión: un solo tramo, de
+/// motivo `A`, con la mitad de `T`. La pureza lo rechaza después y se pierden
+/// **las dos** repeticiones. Lo mismo pasa con `(CA)×10 (GT)×10` en periodo 2
+/// o con `(GA)×12` pegado a `C×12`.
+///
+/// La prueba que separa un cambio de motivo de las interrupciones que deben
+/// quedar dentro es esta. Un **bloque sólido** es una tirada de coincidencias
+/// consecutivas a distancia `p` lo bastante larga para ser una repetición según
+/// el propio suelo del detector —al menos `min_copies` copias, y nunca menos
+/// de dos, para que su motivo quede determinado del todo—. Su motivo se
+/// compara salvo rotación:
+///
+/// - una sustitución deja menos de `p` coincidencias entre sus dos
+///   discrepancias, así que nunca forma un bloque sólido, y los bloques de los
+///   dos lados comparten motivo;
+/// - un indel desplaza la fase, así que el bloque de después lleva una
+///   **rotación** del motivo de antes: el mismo motivo;
+/// - una repetición distinta pegada a esta lleva un motivo que no es rotación
+///   suya: un corte.
+///
+/// Los bloques sólidos consecutivos del mismo motivo forman un trozo; las
+/// bases entre dos trozos (las discrepancias de la unión) no son de ninguno.
+///
+/// **Una tira corta de otro motivo dentro de una repetición es una
+/// interrupción, no una segunda repetición.** `ATATATATACACATATATAT` es un
+/// `AT` con dos copias cambiadas a `AC`; la pareja `AC` es un bloque sólido,
+/// pero cortar ahí deja trozos demasiado cortos para un suelo de copias y la
+/// repetición se pierde (en el original, 876 segmentos de esta forma en el
+/// tomate). Por eso, cuando el motivo de un trozo vuelve, los trozos de en
+/// medio se **absorben**: el trozo anterior más cercano del mismo motivo, todo
+/// lo que le sigue y el nuevo trozo pasan a ser uno, siempre que el tramo
+/// unido, comparado base a base con ese motivo repetido en fase, sea al menos
+/// tan puro como la puntuación exige a un tramo (un cociente `r` sostiene un
+/// tramo hasta una pureza de `r / (1 + r)`: 7/9 ≈ 0,78 con los pesos por
+/// omisión). Ese ejemplo coincide con `AT` en 18 de 20 bases, 0,9, y queda
+/// entero; también `(TAC)×2 (TGC)×4 (TAC)×3`, 0,85, cuyo motivo interior
+/// difiere del exterior en una base, y `(AAT)×4 (GAT)×3 (GGT)×2 (AAT)×4`,
+/// 0,82, con dos interrupciones distintas seguidas. Base a base y no trozo a
+/// trozo, porque así mide la pureza quien lo lee después. Ninguna perilla
+/// nueva: la tolerancia es la que ya fija la puntuación.
+///
+/// La fase es la del **último** bloque sólido del trozo exterior, de modo que
+/// un indel anterior en ese trozo hace que las bases de antes cuenten como
+/// impuras, y la interrupción siguiente puede no absorberse. Es deliberado: la
+/// pureza se mide en una sola fase desde el inicio del tramo, así que un tramo
+/// unido con un indel dentro se rechazaría entero, como antes de que existiera
+/// este corte; cortar al menos conserva los trozos puros.
+///
+/// **Un trozo de cualquiera de los dos extremos nunca se absorbe**, por corto
+/// que sea: no le sigue nada del primer motivo, así que es donde una
+/// repetición acaba y empieza otra. `G×60 A×15` es `G` en más de 0,8 de sus
+/// bases, y siguen siendo dos repeticiones.
+///
+/// Un segmento de un solo motivo —todo segmento que no sea una unión— y uno
+/// cuyos trozos se absorbieron todos se emiten sin cambios, puntuación
+/// incluida. Quien llama solo envía segmentos con alguna discrepancia (uno sin
+/// ninguna no puede cambiar de motivo) y lo bastante largos para quedarse.
+///
+/// **Un tramo unido se emite con los trozos de los que se unió**, anidados
+/// dentro de él en el mismo periodo: las dos lecturas, para que quien lo lea
+/// elija por su propia pureza mínima. En este proyecto elige la cadena de
+/// [`detect_repeat_candidates`]: cada lectura se juzga sola y la regla de
+/// solapes se queda con una.
+///
+/// **Fuera de línea a propósito**: en línea dentro del cierre por segmento del
+/// barrido, ese cierre crecía demasiado para meterse en el bucle del barrido y
+/// toda la construcción pagaba una llamada por segmento (medido en el
+/// original sobre el cromosoma 1 del tomate).
+#[inline(never)]
+fn split_at_motif_changes(
+    canonical: &[u8],
+    p: usize,
+    k0: usize,
+    k1: usize,
+    score: i64,
+    params: &ScanParams,
+    emit: &mut impl FnMut(usize, usize, i64),
+) {
+    let is_match = |k: usize| {
+        let h = canonical[k + p];
+        h != 0 && h == canonical[k]
+    };
+    // Un bloque de `len` coincidencias consecutivas cubre `len + p` bases, así
+    // que `min_copies` copias necesitan `(min_copies - 1) · p` coincidencias;
+    // al menos `p`, para que el bloque tenga dos copias enteras.
+    let solid_len = p * (params.min_copies.max(2) as usize - 1);
+    let same_motif = |a: usize, b: usize| {
+        let (x, y) = (&canonical[a..a + p], &canonical[b..b + p]);
+        (0..p).any(|r| (0..p).all(|i| x[i] == y[(i + r) % p]))
+    };
+
+    let reward = i64::from(params.match_reward);
+    let penalty = i64::from(params.mismatch_penalty);
+    // Cuántas bases de `from..to` coinciden con el motivo leído en `motif_at`,
+    // repetido en la fase de ese bloque —antes y después de él—, de modo que un
+    // trozo que empieza con un fragmento más corto que un bloque sólido se mide
+    // contra el motivo que de verdad repite.
+    let in_phase = |motif_at: usize, from: usize, to: usize| {
+        (from..to)
+            .filter(|&x| canonical[x] == canonical[motif_at + (x % p + p - motif_at % p) % p])
+            .count() as i64
+    };
+    // Todos los trozos tal como se cortaron, `(primer índice de puntuación,
+    // último)`: la segunda lectura de un tramo unido. Vacío —y nunca reservado—
+    // para un segmento de un solo motivo.
+    let mut split: Vec<(usize, usize)> = Vec::new();
+    // Los trozos tras la absorción, de izquierda a derecha, como `(primer
+    // índice de puntuación, último, dónde se lee su motivo, bases de su tramo
+    // que coinciden con ese motivo en fase, el primero de `split` que
+    // contiene)`. El tramo de un trozo son sus índices ensanchados en `p + 1`,
+    // igual que el del segmento.
+    let mut pieces: Vec<(usize, usize, usize, i64, usize)> = Vec::new();
+    // Apila un trozo y absorbe toda interrupción que cierre: el trozo anterior
+    // más cercano del mismo motivo, con todo lo de en medio, cuando el tramo
+    // unido coincide con ese motivo en fase con la tolerancia de la
+    // puntuación —coincidencias / bases >= penalización / (recompensa +
+    // penalización), en enteros—. Solo se comparan las bases nuevas, así que
+    // una tirada larga de interrupciones absorbidas cuesta un pase y no uno por
+    // unión.
+    let push = |pieces: &mut Vec<(usize, usize, usize, i64, usize)>,
+                split: &mut Vec<(usize, usize)>,
+                (a, b, m): (usize, usize, usize)| {
+        pieces.push((a, b, m, in_phase(m, a, b + p + 1), split.len()));
+        split.push((a, b));
+        loop {
+            let right = pieces[pieces.len() - 1];
+            let Some(j) = (0..pieces.len() - 1)
+                .rev()
+                .find(|&j| same_motif(pieces[j].2, right.2))
+            else {
+                return;
+            };
+            let left = pieces[j];
+            let (left_end, right_end) = (left.1 + p + 1, right.1 + p + 1);
+            let matches = left.3 + in_phase(left.2, left_end, right_end.max(left_end));
+            if matches * (reward + penalty) < penalty * (right_end - left.0) as i64 {
+                return;
+            }
+            pieces.truncate(j);
+            pieces.push((left.0, right.1, left.2, matches, left.4));
+        }
+    };
+    // El trozo abierto: dónde empieza, el final de su último bloque sólido y el
+    // inicio de ese bloque (cuyas `p` primeras bases son el motivo actual del
+    // trozo).
+    let mut piece_start = k0;
+    let mut motif_at: Option<usize> = None;
+    let mut last_solid_end = k0;
+    let mut k = k0;
+    while k <= k1 {
+        if !is_match(k) {
+            k += 1;
+            continue;
+        }
+        let b0 = k;
+        while k <= k1 && is_match(k) {
+            k += 1;
+        }
+        let b1 = k - 1;
+        if b1 + 1 - b0 < solid_len {
+            continue;
+        }
+        match motif_at {
+            Some(m) if !same_motif(m, b0) => {
+                push(&mut pieces, &mut split, (piece_start, last_solid_end, m));
+                piece_start = b0;
+            }
+            _ => {}
+        }
+        motif_at = Some(b0);
+        last_solid_end = b1;
+    }
+    let (Some(last_motif), false) = (motif_at, pieces.is_empty()) else {
+        emit(k0, k1, score);
+        return;
+    };
+    push(&mut pieces, &mut split, (piece_start, k1, last_motif));
+    // La puntuación propia de cada trozo, sobre sus propios índices, como la
+    // del segmento; la del segmento para un trozo que es el segmento entero.
+    let score_of = |a: usize, b: usize| {
+        if (a, b) == (k0, k1) {
+            score
+        } else {
+            (a..=b)
+                .map(|k| if is_match(k) { reward } else { -penalty })
+                .sum()
+        }
+    };
+    // Un trozo unido se emite **con los trozos de los que se unió**: las dos
+    // lecturas, y la pureza de quien lee elige entre ellas.
+    for (i, &(a, b, _, _, first_split)) in pieces.iter().enumerate() {
+        emit(a, b, score_of(a, b));
+        let end_split = pieces.get(i + 1).map_or(split.len(), |next| next.4);
+        if end_split - first_split > 1 {
+            for &(sa, sb) in &split[first_split..end_split] {
+                emit(sa, sb, score_of(sa, sb));
+            }
+        }
+    }
+}
+
 /// Encuentra todo intervalo de repetición en tándem de `seq` cuyo periodo esté
 /// en `periods`.
 ///
 /// Para cada periodo `p` puntúa la posición `j` (`j >= p`) con `+match_reward`
 /// cuando `seq[j]` y `seq[j-p]` son la misma base ACGT y con
 /// `-mismatch_penalty` en otro caso (una base no ACGT nunca coincide), toma
-/// cada segmento de puntuación máxima de Ruzzo y Tompa, lo traduce al tramo
+/// cada segmento de puntuación máxima de Ruzzo y Tompa, lo parte donde cambia
+/// el motivo (`split_at_motif_changes`), traduce cada trozo al tramo
 /// semiabierto en base cero que certifica y lo emite si sus copias implícitas
 /// alcanzan `params.min_copies`. Pura y total sobre bytes arbitrarios;
 /// determinista.
@@ -401,12 +658,55 @@ fn maximal_scoring_subsequences(
 /// política: una repetición corta que solo *está dentro* de otra larga (la
 /// `AAA` dentro de un `(GAAA)n`) cubre una astilla y **no** se toma por
 /// re-detección; se conservan las dos.
+///
+/// La única excepción a «una vez» son las dos lecturas de un tramo unido, que
+/// salen anidadas en el mismo periodo (ver `split_at_motif_changes`).
 #[must_use]
 pub fn find_tandem_repeats(
     seq: &[u8],
     periods: PeriodRange,
     params: &ScanParams,
 ) -> Vec<RepeatInterval> {
+    find_tandem_repeats_for_copy_floor(seq, periods, params, |_| 0)
+}
+
+/// [`find_tandem_repeats`] para quien va a descartar todo tramo con menos de
+/// `copy_floor(period)` copias: todo tramo que devuelve en ese suelo o por
+/// encima es exactamente uno de los que devuelve `find_tandem_repeats`, y de
+/// los que quedan por debajo omite los demasiado cortos para importar.
+///
+/// **No es simplemente el suelo, porque un tramo por debajo puede quitar a uno
+/// por encima.** El pase de periodos múltiplos quita un tramo del que un tramo
+/// de periodo menor cubre la mitad, así que un tramo de periodo 2 de 9 bases,
+/// por debajo de un suelo de 5 copias, puede quitar a uno de periodo 4 de 16
+/// que supera un suelo de 4. Solo se omite lo que no puede hacer eso: un tramo
+/// de periodo `p` hace falta cuando supera su propio suelo, o cuando mide al
+/// menos la mitad del tramo más corto que hace falta en algún múltiplo de `p`
+/// del intervalo; esas longitudes se calculan del periodo más largo hacia
+/// abajo. Un tramo más corto no quita nada que haga falta, y los tramos a los
+/// que habría protegido son más cortos todavía, así que omitirlo no cambia
+/// nada de lo que supera el suelo.
+///
+/// En el original existe por la memoria: en el cromosoma 1 del tomate su
+/// catálogo conserva 774 585 de los 23,6 millones de tramos que devuelve
+/// `find_tandem_repeats`. Aquí la conversión en candidatos usa el barrido
+/// entero (suelo 0), porque cuenta en qué etapa cae **cada** tramo detectado.
+pub fn find_tandem_repeats_for_copy_floor(
+    seq: &[u8],
+    periods: PeriodRange,
+    params: &ScanParams,
+    copy_floor: impl Fn(u8) -> u32,
+) -> Vec<RepeatInterval> {
+    // `needed[p]`: el tramo más corto de periodo `p` que puede importar.
+    let mut needed = vec![0u64; usize::from(periods.max()) + 1];
+    for p in (periods.min()..=periods.max()).rev() {
+        let own = u64::from(copy_floor(p)) * u64::from(p);
+        needed[usize::from(p)] = (2 * usize::from(p)..=usize::from(periods.max()))
+            .step_by(usize::from(p))
+            .map(|m| needed[m].div_ceil(2))
+            .fold(own, u64::min);
+    }
+
     let mut out = Vec::new();
     let n = seq.len();
     // Se canonicaliza UNA vez, no dos por periodo.
@@ -427,8 +727,15 @@ pub fn find_tandem_repeats(
             .iter()
             .zip(here.iter())
             .map(|(&b, &h)| if h != 0 && h == b { reward } else { penalty });
-        let min_bases = u64::from(params.min_copies) * u64::from(period);
-        maximal_scoring_subsequences(scores, |k0, k1, score| {
+        // El tramo más corto que `emit` conserva en este periodo. Todo trozo de
+        // un corte cae dentro de su segmento, así que un segmento más corto no
+        // da nada, se parta como se parta.
+        let shortest = (u64::from(params.min_copies) * p as u64).max(needed[p]) as usize;
+        // Dónde empieza el segmento que se está emitiendo: un tramo que empieza
+        // ahí es el segmento o su primer trozo; uno que empieza después es un
+        // trozo nacido de un corte. Lo usa la desviación propia de `emit`.
+        let segment_start = Cell::new(0usize);
+        let mut emit = |k0: usize, k1: usize, score: i64| {
             // Segmento [k0, k1] → tramo [k0, k1 + p + 1): la primera base
             // implicada es `j0 - p = k0` y la última `j1 = k1 + p`, así que el
             // fin exclusivo es `k1 + p + 1`.
@@ -438,26 +745,29 @@ pub fn find_tandem_repeats(
             // homopolímero, no un dinucleótido, e informarlo como periodo 2
             // sería incumplir el contrato del detector.
             //
-            // **Desviación respecto al original** (ver la cabecera): si el
-            // motivo del inicio no es primitivo, el inicio avanza hasta la
-            // primera fase que sí lo sea **y cuya base sea distinta de la
-            // anterior**, mientras el tramo conserve el mínimo de copias. La
-            // segunda condición saca el inicio de la tira de una sola base que
-            // lo precede, para que tira y microsatélite solo se toquen. Sin
-            // ninguna posición así, se descarta como en el original. Con el
-            // inicio en `k0` (motivo ya primitivo) no cambia nada.
+            // **Desviación respecto al original** (ver la cabecera): el inicio
+            // avanza hasta la primera fase cuyo motivo sea primitivo **y cuya
+            // base sea distinta de la anterior**, mientras el tramo conserve el
+            // mínimo de copias, cuando el motivo del inicio no es primitivo o
+            // cuando el tramo es un trozo nacido de un corte. La segunda
+            // condición saca el inicio de la tira de una sola base que lo
+            // precede, para que tira y microsatélite solo se toquen. Sin
+            // ninguna posición así, se descarta como en el original. Un tramo
+            // que empieza donde su segmento y con motivo primitivo no cambia.
+            let at_segment_start = k0 == segment_start.get();
             let Some(start) = (k0..=k1)
-                .take_while(|&start| (tract_end - start) as u64 >= min_bases)
+                .take_while(|&start| (tract_end - start) >= shortest)
                 .find(|&start| {
                     is_primitive_motif(&seq[start..start + p])
-                        && (start == k0 || canonical[start] != canonical[start - 1])
+                        && ((at_segment_start && start == k0)
+                            || canonical[start] != canonical[start - 1])
                 })
             else {
                 return;
             };
-            // La puntuación del tramo recortado es la del segmento menos la
-            // del prefijo quitado: la suma de las comparaciones del propio
-            // tramo, igual que un tramo sin recortar.
+            // La puntuación del tramo recortado es la del trozo menos la del
+            // prefijo quitado: la suma de las comparaciones del propio tramo,
+            // igual que un tramo sin recortar.
             let removed: i64 = (k0..start)
                 .map(|k| {
                     if here[k] != 0 && here[k] == back[k] {
@@ -473,6 +783,20 @@ pub fn find_tandem_repeats(
                 period,
                 score: i32::try_from(score - removed).unwrap_or(i32::MAX),
             });
+        };
+        maximal_scoring_subsequences(scores, |k0, k1, score| {
+            if k1 + p + 1 - k0 < shortest {
+                return;
+            }
+            segment_start.set(k0);
+            // Sin discrepancia no hay cambio de motivo: la puntuación de un
+            // segmento es toda recompensas justo cuando todas sus comparaciones
+            // coincidieron, y se emite entero sin recorrerlo.
+            if score == reward * (k1 - k0 + 1) as i64 {
+                emit(k0, k1, score);
+            } else {
+                split_at_motif_changes(&canonical, p, k0, k1, score, params, &mut emit);
+            }
         });
     }
 
@@ -481,7 +805,7 @@ pub fn find_tandem_repeats(
     // la mitad** de él: «cubre la mayor parte» es lo que dice *mismo tracto* y
     // no solo *solapado*. Ninguna política de copias aquí: solo cuánto de `iv`
     // explica el menor.
-    out.sort_by_key(|iv| (iv.period, iv.start));
+    out.sort_by_key(|iv| (iv.period, iv.start, std::cmp::Reverse(iv.end)));
 
     // Supervivientes agrupados por periodo, que es lo que convierte la prueba
     // de redundancia en una búsqueda binaria. Tres hechos la hacen exacta:
@@ -490,14 +814,35 @@ pub fn find_tandem_repeats(
     //    sumo `{1, 2, 3}`, para el periodo 6.
     // 2. **Esas listas ya están completas** al llegar a `iv`: `out` está
     //    ordenado primero por periodo.
-    // 3. **Dentro de un periodo los tramos están ordenados por inicio Y por
-    //    fin**: los segmentos de Ruzzo y Tompa son disjuntos, y cada tramo
-    //    alarga su segmento en el mismo `p + 1`. Es la precondición de
-    //    `partition_point`.
+    // 3. **Dentro de un periodo los tramos buscados están ordenados por inicio
+    //    Y por fin**: los segmentos de Ruzzo y Tompa son disjuntos, y cada
+    //    tramo alarga su segmento en el mismo `p + 1`. Es la precondición de
+    //    `partition_point`. La única excepción son los trozos de un tramo
+    //    unido, emitidos junto a él y anidados dentro: se dejan fuera de las
+    //    listas buscadas, sin perder nada, porque el tramo que encierra a un
+    //    trozo solapa a cualquier otro al menos tanto como el trozo. La
+    //    ordenación pone primero al que encierra, así que un trozo se reconoce
+    //    porque no acaba más allá del alcance acumulado.
     let max_period = out.iter().map(|iv| iv.period).max().unwrap_or(0) as usize;
-    let mut by_period: Vec<Vec<RepeatInterval>> = vec![Vec::new(); max_period + 1];
-    let mut kept_len = 0usize;
-    for iv in out {
+    // Solo un periodo con algún múltiplo en el intervalo se busca (hecho 1),
+    // así que solo esos llevan lista, y la búsqueda solo lee el tramo `(inicio,
+    // fin)`. Cada lista se reserva una vez con el recuento de su periodo en
+    // `out`.
+    let mut by_period: Vec<Vec<(u64, u64)>> = (0..=max_period / 2)
+        .map(|period| {
+            let from = out.partition_point(|iv| usize::from(iv.period) < period);
+            let to = out.partition_point(|iv| usize::from(iv.period) <= period);
+            Vec::with_capacity(to - from)
+        })
+        .collect();
+    // El fin más lejano de los tramos buscados de este periodo hasta ahora, y
+    // el periodo al que pertenece. Solo lo mueve un tramo conservado: un tramo
+    // unido descartado aquí deja buscables a sus trozos.
+    let mut reach = (0u8, 0u64);
+    // Los supervivientes se compactan en su sitio: `retain` visita en orden y
+    // una vez cada uno, que es todo lo que necesita el pase.
+    out.retain(|&iv| {
+        let nested = reach.0 == iv.period && iv.end <= reach.1;
         let iv_len = iv.end - iv.start;
         let mut redundant = false;
         for shorter in 1..iv.period {
@@ -508,17 +853,17 @@ pub fn find_tandem_repeats(
             // Los tramos que solapan `iv` son una tirada contigua: se saltan los
             // que acaban antes de que empiece y se para en el primero que
             // empieza donde acaba o después.
-            let first = candidates.partition_point(|a| a.end <= iv.start);
+            let first = candidates.partition_point(|a| a.1 <= iv.start);
             for a in &candidates[first..] {
-                if a.start >= iv.end {
+                if a.0 >= iv.end {
                     break;
                 }
                 // `a` debe cubrir la mitad de `iv`; uno más corto que eso no
                 // puede, se coloque como se coloque.
-                if (a.end - a.start) * 2 < iv_len {
+                if (a.1 - a.0) * 2 < iv_len {
                     continue;
                 }
-                let overlap = a.end.min(iv.end).saturating_sub(a.start.max(iv.start));
+                let overlap = a.1.min(iv.end).saturating_sub(a.0.max(iv.start));
                 if overlap * 2 >= iv_len {
                     redundant = true;
                     break;
@@ -528,16 +873,15 @@ pub fn find_tandem_repeats(
                 break;
             }
         }
-        if !redundant {
-            kept_len += 1;
-            by_period[iv.period as usize].push(iv);
+        if !redundant && !nested {
+            reach = (iv.period, iv.end);
+            if let Some(list) = by_period.get_mut(usize::from(iv.period)) {
+                list.push((iv.start, iv.end));
+            }
         }
-    }
-    let mut kept: Vec<RepeatInterval> = Vec::with_capacity(kept_len);
-    for group in by_period {
-        kept.extend(group);
-    }
-    kept
+        !redundant
+    });
+    out
 }
 
 // ---------------------------------------------------------------------
@@ -611,19 +955,24 @@ pub enum DetectionStage {
     /// Sin una base A/C/G/T a cada lado: borde de secuencia o `N` contigua
     /// (DP-SSR-08, opción (a)).
     Edge,
+    /// No cabe **entero** en ninguna de las regiones declaradas (DP-SSR-18).
+    /// Se aplica antes de los solapes: lo que queda fuera no puede quitarle
+    /// el sitio a lo de dentro.
+    OutsideRegions,
     /// Solapa con otro candidato que gana por la regla de DP-SSR-05.
     Overlap,
 }
 
 impl DetectionStage {
     /// Todas las etapas, en orden de aplicación.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::NonCanonicalMotif,
         Self::MinCopies,
         Self::MinPurity,
         Self::MinLongestRun,
         Self::MaxUnits,
         Self::Edge,
+        Self::OutsideRegions,
         Self::Overlap,
     ];
 
@@ -637,6 +986,7 @@ impl DetectionStage {
             Self::MinLongestRun => "min_longest_run",
             Self::MaxUnits => "max_units",
             Self::Edge => "edge",
+            Self::OutsideRegions => "outside_regions",
             Self::Overlap => "overlap",
         }
     }
@@ -818,15 +1168,35 @@ impl SequenceDetection {
 /// los supervivientes con la regla de DP-SSR-05. Pura y determinista.
 #[must_use]
 pub fn detect_repeat_candidates(bases: &[u8], criteria: &DetectionCriteria) -> SequenceDetection {
-    let periods = PeriodRange::new(DEFAULT_PERIODS.0, DEFAULT_PERIODS.1)
-        .unwrap_or_else(|_| unreachable!("1..=6 es un intervalo válido"));
-    let intervals = find_tandem_repeats(bases, periods, &ScanParams::default());
+    detect_repeat_candidates_in_regions(bases, criteria, None)
+}
+
+/// Como [`detect_repeat_candidates`], pero conservando solo los tramos que
+/// caben **enteros** en alguna de las `regions` (DP-SSR-18).
+///
+/// Las regiones van en base cero y semiabiertas sobre la misma secuencia,
+/// ordenadas por inicio y sin solaparse entre sí (quien las resuelve lo
+/// garantiza). `None` es la secuencia entera. El barrido es siempre el de la
+/// secuencia entera, de modo que las fronteras de un tramo no dependen de
+/// dónde corte una región: la región solo decide qué tramos se quedan. Un
+/// tramo que se queda fuera se cuenta en [`DetectionStage::OutsideRegions`],
+/// que va **antes** de los solapes.
+#[must_use]
+pub fn detect_repeat_candidates_in_regions(
+    bases: &[u8],
+    criteria: &DetectionCriteria,
+    regions: Option<&[(u64, u64)]>,
+) -> SequenceDetection {
+    let intervals = scan_all_periods(bases);
     let mut counts = DetectionCounts::default();
     let mut survivors = Vec::new();
     for interval in &intervals {
         let motif_length = usize::from(interval.period);
         counts.detected[motif_length - 1] += 1;
         match classify_interval(bases, interval, criteria) {
+            Ok(candidate) if !inside_regions(regions, candidate.start, candidate.end) => {
+                counts.discard(DetectionStage::OutsideRegions, motif_length);
+            }
             Ok(candidate) => survivors.push(candidate),
             Err(stage) => counts.discard(stage, motif_length),
         }
@@ -839,6 +1209,97 @@ pub fn detect_repeat_candidates(bases: &[u8], criteria: &DetectionCriteria) -> S
         counts.accepted[candidate.motif.length() as usize - 1] += 1;
     }
     SequenceDetection { candidates, counts }
+}
+
+/// Los intervalos del detector con su puntuación fija (2 y 7) y periodos de
+/// 1 a 6.
+fn scan_all_periods(bases: &[u8]) -> Vec<RepeatInterval> {
+    let periods = PeriodRange::new(DEFAULT_PERIODS.0, DEFAULT_PERIODS.1)
+        .unwrap_or_else(|_| unreachable!("1..=6 es un intervalo válido"));
+    find_tandem_repeats(bases, periods, &ScanParams::default())
+}
+
+/// Si `[start, end)` cabe entero en alguna región; sin regiones, siempre.
+fn inside_regions(regions: Option<&[(u64, u64)]>, start: u64, end: u64) -> bool {
+    let Some(regions) = regions else {
+        return true;
+    };
+    // Las regiones no se solapan y van por inicio: la única que puede
+    // contener el tramo es la última que empieza en su inicio o antes.
+    let index = regions.partition_point(|(region_start, _)| *region_start <= start);
+    index > 0 && regions[index - 1].1 >= end
+}
+
+/// Si `candidate` es una rotación de `motif`: misma longitud y aparece dentro
+/// de `motif` repetido dos veces. `CA` es rotación de `AC`, y de sí mismo.
+#[must_use]
+pub fn is_rotation(candidate: &[u8], motif: &[u8]) -> bool {
+    candidate.len() == motif.len()
+        && !motif.is_empty()
+        && [motif, motif]
+            .concat()
+            .windows(candidate.len())
+            .any(|window| window == candidate)
+}
+
+/// Por qué un tramo de la secuencia que se solapa con `[start, end)` y cuyo
+/// motivo es una rotación de alguno de `motifs` **no** quedó entre los
+/// candidatos: la etapa en la que cayó y sus fronteras, del tramo más largo
+/// de los que lo solapan. `None` si el detector no ve ninguno así.
+///
+/// Solo la usa el diagnóstico de un locus declarado que no coincide con
+/// ningún detectado (REQ-REF-40): vuelve a barrer la secuencia entera, que es
+/// caro, pero ocurre una vez y justo antes de rechazar.
+#[must_use]
+pub fn explain_missing_tract(
+    bases: &[u8],
+    criteria: &DetectionCriteria,
+    regions: Option<&[(u64, u64)]>,
+    start: u64,
+    end: u64,
+    motifs: &[RepeatMotif],
+) -> Option<MissingTract> {
+    scan_all_periods(bases)
+        .into_iter()
+        .filter(|interval| interval.start < end && start < interval.end)
+        .filter(|interval| {
+            let period = usize::from(interval.period);
+            let first = &bases[interval.start as usize..interval.start as usize + period];
+            motifs.iter().any(|motif| is_rotation(first, motif.bases()))
+        })
+        .max_by_key(|interval| {
+            (
+                interval.end - interval.start,
+                std::cmp::Reverse(interval.start),
+            )
+        })
+        .map(|interval| {
+            let stage = match classify_interval(bases, &interval, criteria) {
+                Err(stage) => stage,
+                Ok(candidate) if !inside_regions(regions, candidate.start, candidate.end) => {
+                    DetectionStage::OutsideRegions
+                }
+                // Pasó todo lo que se juzga solo: si no está entre los
+                // candidatos, lo quitó un solape.
+                Ok(_) => DetectionStage::Overlap,
+            };
+            MissingTract {
+                start: interval.start,
+                end: interval.end,
+                period: interval.period,
+                stage,
+            }
+        })
+}
+
+/// Un tramo del detector que no llegó a candidato, con la etapa que no superó.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MissingTract {
+    /// Base cero, semiabierto.
+    pub start: u64,
+    pub end: u64,
+    pub period: u8,
+    pub stage: DetectionStage,
 }
 
 /// Juzga un intervalo por sí solo, sin mirar a los demás, y devuelve el
@@ -1099,6 +1560,64 @@ mod tests {
         }
     }
 
+    /// Lo que conserva quien aplica un suelo de copias es lo mismo con el
+    /// barrido que conoce el suelo que con el barrido entero: sobre secuencia
+    /// densa en repeticiones, donde las eliminaciones por periodo múltiplo son
+    /// frecuentes, y con suelos de permisivos a estrictos.
+    #[test]
+    fn the_floor_aware_scan_keeps_what_the_floor_keeps() {
+        let mut state: u64 = 0x2545F4914F6CDD1D;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        let floors: [[u32; 6]; 5] = [
+            [5, 5, 4, 4, 4, 3],
+            [2, 2, 2, 2, 2, 2],
+            [3, 7, 2, 5, 2, 2],
+            [12, 2, 6, 2, 3, 2],
+            [9, 9, 9, 9, 9, 9],
+        ];
+        let mut sub_floor_kept = 0usize;
+        for _ in 0..300 {
+            let mut seq = Vec::new();
+            while seq.len() < 3_000 {
+                let period = 1 + (next() % 6) as usize;
+                let motif: Vec<u8> = (0..period)
+                    .map(|_| b"ACGT"[(next() % 4) as usize])
+                    .collect();
+                for _ in 0..1 + next() % 10 {
+                    for &b in &motif {
+                        seq.push(if next() % 12 == 0 {
+                            b"ACGT"[(next() % 4) as usize]
+                        } else {
+                            b
+                        });
+                    }
+                }
+            }
+            let whole = find_tandem_repeats(&seq, p(1, 6), &ScanParams::default());
+            for floor in &floors {
+                let at = |period: u8| floor[usize::from(period) - 1];
+                let clears = |iv: &&RepeatInterval| {
+                    (iv.end - iv.start) / u64::from(iv.period) >= u64::from(at(iv.period))
+                };
+                let want: Vec<_> = whole.iter().filter(clears).collect();
+                let got_all =
+                    find_tandem_repeats_for_copy_floor(&seq, p(1, 6), &ScanParams::default(), at);
+                let got: Vec<_> = got_all.iter().filter(clears).collect();
+                assert_eq!(got, want, "floor {floor:?}");
+                sub_floor_kept += got_all.len().saturating_sub(got.len());
+            }
+        }
+        assert!(
+            sub_floor_kept > 0,
+            "the sequences exercise sub-floor tracts"
+        );
+    }
+
     // ---- find_tandem_repeats (copiadas) ------------------------------------
 
     fn p(min: u8, max: u8) -> PeriodRange {
@@ -1291,6 +1810,137 @@ mod tests {
         assert!(
             !got.iter().any(|r| r.period == 6),
             "la re-detección primitiva de periodo 6 se descarta por geometría: {got:?}"
+        );
+    }
+
+    // ---- Corte por cambio de motivo (copiadas de fa215c23) -----------------
+
+    /// Dos repeticiones pegadas de motivos distintos salen como **dos**
+    /// intervalos, cada uno con su motivo, y no como uno con el primer motivo
+    /// y la mitad del segundo, que la pureza rechazaría entero. Las cuatro
+    /// formas de dos repeticiones que un simulador encontró fundidas.
+    #[test]
+    fn abutting_repeats_of_different_motifs_are_split() {
+        /// Una secuencia y los intervalos `(start, end, period)` que debe dar.
+        type Case = (Vec<u8>, Vec<(u64, u64, u8)>);
+        let rep = |unit: &[u8], n: usize| unit.repeat(n);
+        let cases: Vec<Case> = vec![
+            (
+                [rep(b"A", 12), rep(b"T", 12)].concat(),
+                vec![(0, 12, 1), (12, 24, 1)],
+            ),
+            (
+                [rep(b"G", 60), rep(b"A", 15)].concat(),
+                vec![(0, 60, 1), (60, 75, 1)],
+            ),
+            (
+                [rep(b"GA", 12), rep(b"C", 12)].concat(),
+                vec![(0, 24, 2), (24, 36, 1)],
+            ),
+            (
+                [rep(b"CA", 10), rep(b"GT", 10)].concat(),
+                vec![(0, 20, 2), (20, 40, 2)],
+            ),
+        ];
+        for (seq, want) in cases {
+            let got = find_tandem_repeats(&seq, p(1, 6), &ScanParams::default());
+            let mut spans: Vec<(u64, u64, u8)> =
+                got.iter().map(|r| (r.start, r.end, r.period)).collect();
+            spans.sort_unstable();
+            for w in &want {
+                assert!(
+                    spans.contains(w),
+                    "{} lacks {w:?}: {spans:?}",
+                    String::from_utf8_lossy(&seq)
+                );
+            }
+            // Nada cruza la unión en el periodo del primer motivo.
+            let junction = want[0].1;
+            assert!(
+                !got.iter().any(|r| r.start < junction - 1
+                    && r.end > junction + 1
+                    && r.period == want[0].2),
+                "{} still has a merged interval: {spans:?}",
+                String::from_utf8_lossy(&seq)
+            );
+        }
+    }
+
+    /// Los intervalos de `got` como `(start, end)`, tras comprobar que el
+    /// primero es `joined` y que todos los demás caen dentro de él: la forma
+    /// de un tramo unido emitido con sus trozos.
+    fn joined_with_pieces(got: &[RepeatInterval], joined: (u64, u64)) -> Vec<(u64, u64)> {
+        let spans: Vec<(u64, u64)> = got.iter().map(|r| (r.start, r.end)).collect();
+        assert_eq!(spans.first(), Some(&joined), "{got:?}");
+        assert!(spans.len() > 1, "the pieces come with it: {got:?}");
+        assert!(
+            spans[1..]
+                .iter()
+                .all(|&(s, e)| s >= joined.0 && e <= joined.1),
+            "every piece lies inside the joined tract: {got:?}"
+        );
+        spans
+    }
+
+    /// Dos copias de otro motivo **dentro** de una repetición son una
+    /// interrupción, no una segunda repetición: `(AT)×4 A (CA)×2 (TA)×4 T` sale
+    /// como un intervalo `AT` sobre todo él, como antes de que existiera el
+    /// corte, y con los trozos de los que se unió, para que quien lo lea pueda
+    /// quedarse con ellos si el tramo unido no es lo bastante puro. Coincide
+    /// con `AT` en 18 de 20 bases, por encima del 7/9 que exige la puntuación
+    /// por omisión.
+    #[test]
+    fn a_short_run_of_another_motif_inside_a_repeat_is_not_split() {
+        let seq = b"ATATATATACACATATATAT";
+        let got = find_tandem_repeats(seq, p(2, 2), &ScanParams::default());
+        assert_eq!(
+            joined_with_pieces(&got, (0, 20)),
+            vec![(0, 20), (0, 9), (8, 13), (12, 20)]
+        );
+    }
+
+    /// Dos interrupciones **distintas** seguidas también se absorben cuando
+    /// vuelve el motivo exterior: `(AAT)×4 (GAT)×3 (GGT)×2 (AAT)×4` coincide
+    /// con `AAT` en 32 de 39 bases, 0,82. Una prueba que solo mirara a los
+    /// vecinos no lo veía: ningún trozo tiene ahí el mismo motivo a los dos
+    /// lados.
+    #[test]
+    fn two_different_interruptions_in_a_row_are_absorbed() {
+        let seq = [
+            b"AAT".repeat(4),
+            b"GAT".repeat(3),
+            b"GGT".repeat(2),
+            b"AAT".repeat(4),
+        ]
+        .concat();
+        let got = find_tandem_repeats(&seq, p(3, 3), &ScanParams::default());
+        joined_with_pieces(&got, (0, 39));
+    }
+
+    /// La misma interrupción, demasiado larga para la tolerancia:
+    /// `(CA)×10 (GT)×10 (CA)×10` tiene `CA` en dos tercios de sus bases, por
+    /// debajo de 7/9, así que salen las tres repeticiones.
+    #[test]
+    fn a_long_run_of_another_motif_inside_a_repeat_is_split() {
+        let seq = [b"CA".repeat(10), b"GT".repeat(10), b"CA".repeat(10)].concat();
+        let got = find_tandem_repeats(&seq, p(2, 2), &ScanParams::default());
+        assert_eq!(
+            got.iter().map(|r| (r.start, r.end)).collect::<Vec<_>>(),
+            vec![(0, 20), (20, 40), (40, 60)],
+            "{got:?}"
+        );
+    }
+
+    /// Un homopolímero solo no lo toca el corte.
+    #[test]
+    fn a_lone_homopolymer_is_one_interval() {
+        let seq = b"AAAAAAAAAAAA";
+        let got = find_tandem_repeats(seq, p(1, 6), &ScanParams::default());
+        assert_eq!(
+            got.iter()
+                .map(|r| (r.start, r.end, r.period))
+                .collect::<Vec<_>>(),
+            vec![(0, 12, 1)]
         );
     }
 
@@ -1533,6 +2183,109 @@ mod tests {
             trimmed >= 3,
             "la secuencia debe ejercitar el recorte: {got:?}"
         );
+    }
+
+    // ---- Regresiones: tramos pegados de motivos distintos (propias) --------
+    //
+    // Los seis casos que el núcleo de `950909f` fundía en un solo tramo. Lo
+    // esperado está escrito a mano: inicio y fin relativos al núcleo, motivo y
+    // puntuación (+2 por coincidencia propia del tramo, −7 por discrepancia).
+    // Todas, salvo la de control, fallan con aquel núcleo.
+
+    /// Atajo: los candidatos de `core` entre dos flancos, sin el recuento.
+    fn candidates_of(left: &[u8], core: &[u8], right: &[u8]) -> Vec<CoreCandidate> {
+        detect_core(left, core, right).0
+    }
+
+    /// **Control: `A×12` sola** sale entera, `[0, 12)`, con 11 coincidencias.
+    /// Ya salía bien con el núcleo viejo; está para que las demás comparen
+    /// contra una tira que se sabe detectar.
+    #[test]
+    fn a_lone_homopolymer_is_a_candidate() {
+        let core = b"A".repeat(12);
+        assert_eq!(
+            candidates_of(b"C", &core, b"C"),
+            vec![(0, 12, b"A".to_vec(), 22)]
+        );
+    }
+
+    /// **Regresión: `A×12 T×12`.** El núcleo viejo daba un solo tramo de
+    /// periodo 1 `[0, 24)` con motivo `A` y la mitad de `T`, que no pasaba la
+    /// pureza: ningún candidato. Ahora salen las dos tiras, que solo se tocan.
+    #[test]
+    fn two_abutting_homopolymers_are_two_candidates() {
+        let core = [b"A".repeat(12), b"T".repeat(12)].concat();
+        assert_eq!(
+            candidates_of(b"C", &core, b"G"),
+            vec![(0, 12, b"A".to_vec(), 22), (12, 24, b"T".to_vec(), 22)]
+        );
+    }
+
+    /// **Regresión: `G×60 A×15`.** El núcleo viejo daba un solo candidato
+    /// `[0, 75)` con motivo `G` (pureza 60/75 = 0,8, justo en el mínimo) y la
+    /// tira de `A` desaparecía dentro de él. Ahora, dos candidatos que solo
+    /// se tocan.
+    #[test]
+    fn a_long_homopolymer_and_a_short_one_are_two_candidates() {
+        let core = [b"G".repeat(60), b"A".repeat(15)].concat();
+        assert_eq!(
+            candidates_of(b"C", &core, b"C"),
+            vec![(0, 60, b"G".to_vec(), 118), (60, 75, b"A".to_vec(), 28)]
+        );
+    }
+
+    /// **Regresión: `(GA)×12 C×12`.** El núcleo viejo daba un tramo de periodo
+    /// 2 `[0, 36)` de pureza 24/36 y solo quedaba la tira de `C`. Ahora el
+    /// `(GA)n` sale con sus 22 coincidencias y toca a la tira.
+    #[test]
+    fn a_dinucleotide_before_a_homopolymer_is_kept() {
+        let core = [b"GA".repeat(12), b"C".repeat(12)].concat();
+        assert_eq!(
+            candidates_of(b"T", &core, b"A"),
+            vec![(0, 24, b"GA".to_vec(), 44), (24, 36, b"C".to_vec(), 22)]
+        );
+    }
+
+    /// **Regresión: `(CA)×10 (GT)×10`.** El núcleo viejo daba un tramo de
+    /// periodo 2 `[0, 40)` con motivo `CA` de pureza 0,5: ningún candidato.
+    /// Ahora, los dos dinucleótidos.
+    #[test]
+    fn two_abutting_dinucleotides_are_two_candidates() {
+        let core = [b"CA".repeat(10), b"GT".repeat(10)].concat();
+        assert_eq!(
+            candidates_of(b"T", &core, b"C"),
+            vec![(0, 20, b"CA".to_vec(), 36), (20, 40, b"GT".to_vec(), 36)]
+        );
+    }
+
+    /// **Regresión: el compuesto `(TCTA)×8 (TCTG)×8 (TCTA)×8`.** El núcleo
+    /// viejo daba un solo tramo de periodo 4 `[0, 96)`, de pureza 64/96 con
+    /// `TCTA`, y no quedaba nada. El nuevo emite ese tramo unido (el corte lo
+    /// une porque coincide con `TCTA` en fase en 88 de 96 bases, por encima de
+    /// 7/9) **y** sus tres trozos: `[0, 35)` `TCTA`, `[32, 67)` `TCTG` y
+    /// `[64, 96)` `TCTA`. El unido cae en la pureza; los trozos pasan solos.
+    ///
+    /// **Lo que no resuelve, dicho sin adornos:** cada trozo acaba con la copia
+    /// parcial `TCT` que comparte con el motivo siguiente, así que el del
+    /// centro solapa 3 bases con cada vecino. La regla de solapes (DP-SSR-05)
+    /// se queda con el primero (empate a 62 de puntuación y 35 bases; gana el
+    /// de la izquierda) y luego con el tercero, que ya no solapa a nadie
+    /// aceptado; el `(TCTG)n` se descarta por solape. Esta prueba fija ese
+    /// resultado tal cual es hoy; si se decide otra cosa (recortar la copia
+    /// parcial final, por ejemplo), es la que debe cambiar.
+    #[test]
+    fn a_compound_tract_yields_its_outer_pieces() {
+        let core = [b"TCTA".repeat(8), b"TCTG".repeat(8), b"TCTA".repeat(8)].concat();
+        let (candidates, counts) = detect_core(b"G", &core, b"G");
+        assert_eq!(
+            candidates,
+            vec![
+                (0, 35, b"TCTA".to_vec(), 62),
+                (64, 96, b"TCTA".to_vec(), 56)
+            ]
+        );
+        assert_eq!(counts.discarded(DetectionStage::MinPurity, 4), 1);
+        assert_eq!(counts.discarded(DetectionStage::Overlap, 4), 1);
     }
 
     /// El suelo `min_copies` descarta segmentos cortos (p. ej. una coincidencia

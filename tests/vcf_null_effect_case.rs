@@ -46,6 +46,9 @@ use genome_population_simulator::execution::execute_validated_config;
 use genome_population_simulator::vcf_semantic_validation::validate_published_vcf_semantics;
 use serde_json::Value;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 fn fixture(path: &str) -> PathBuf {
@@ -107,7 +110,7 @@ fn publish(label: &str, config: &str, reference: &Path, matrix: &Path) -> Publis
         config.push_str("\n[vcf_output]\nmode = \"text\"\n");
     }
     let path = root.join("general.toml");
-    fs::write(&path, config).expect("configuration");
+    fs::write(&path, detection_section::with_detection_section(&config)).expect("configuration");
     let out = root.join("published");
     let effective = load_and_validate_config(&path)
         .unwrap_or_else(|error| panic!("{label}: {}", error.render_human()));

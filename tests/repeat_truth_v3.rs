@@ -30,6 +30,9 @@ use genome_population_simulator::reference_fasta::{SequenceExpectation, validate
 use genome_population_simulator::truth_validation::validate_and_reconstruct_truth_jsonl;
 use serde_json::Value;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -69,7 +72,7 @@ fn scenario(loci: &str) -> (PathBuf, PathBuf) {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -106,7 +109,7 @@ individual_ids = ["I1", "I2"]
 ploidy = 2
 genotype_model = "hwe"
 "#
-        ),
+        )),
     )
     .expect("configuración");
     (root, config)
@@ -399,10 +402,10 @@ fn the_repeat_allele_already_reaches_the_vcf_as_an_explicit_multiallelic_record(
     let (root, config) = scenario(POLYMORPHIC);
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             "{}\n[vcf_output]\nmode = \"text\"\n",
             fs::read_to_string(&config).expect("configuración")
-        ),
+        )),
     )
     .expect("configuración con VCF");
     let effective = load_and_validate_config(&config).expect("configuración válida");
@@ -542,12 +545,17 @@ frequency = 0.5
 fn publish_composite() -> (PathBuf, PathBuf) {
     let root = temporary("run");
     fs::create_dir_all(&root).expect("directorio");
-    let bases = "G".repeat(100) + COMPOSITE_TRACT + &"G".repeat(100);
+    // Flancos de `G` y `T` al azar, no tiras de `G`: entre dos tiras largas de
+    // `G` el detector no ve el `(CAG)×7`, y el locus compuesto no coincidiría
+    // con nada (ver `gt_background`).
+    let bases = detection_section::gt_background(0x9E37_79B9_7F4A_7C15, 100)
+        + COMPOSITE_TRACT
+        + &detection_section::gt_background(0xD1B5_4A32_D192_ED03, 100);
     fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -589,7 +597,7 @@ mode = "text"
 "#,
             bases.len(),
             composite_locus()
-        ),
+        )),
     )
     .expect("configuración");
     let effective = load_and_validate_config(&config).expect("configuración válida");

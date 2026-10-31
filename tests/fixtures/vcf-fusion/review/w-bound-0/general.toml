@@ -49,3 +49,20 @@ phase = 0
 kind = "deletion"
 start = 178
 end = 180
+
+# La sección de microsatélites (entrega 3 del plan de detección). El locus
+# declarado son las diez primeras unidades de un `(CA)×40` (101..180) que el
+# detector da entero: la región lo contiene, con seis bases de margen, y mandan
+# las fronteras declaradas.
+[reference.repeat_detection]
+min_copies = [1000, 5, 1000, 1000, 1000, 1000]
+
+[reference.repeat_detection.slippage]
+model = "stepwise"
+mean_events = 1.0
+
+[[reference.repeat_detection.regions]]
+sequence = "chr1"
+start = 95
+end = 186
+

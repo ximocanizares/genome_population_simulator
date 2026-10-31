@@ -71,6 +71,9 @@ use genome_population_simulator::results::{
 };
 use serde_json::{Value, json};
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
@@ -126,7 +129,11 @@ fn publish(files: &[(&str, &str)]) -> Package {
     ));
     fs::create_dir_all(&root).expect("directorio");
     for (name, content) in files {
-        fs::write(root.join(name), content).expect("fichero de entrada");
+        fs::write(
+            root.join(name),
+            detection_section::with_detection_section(content),
+        )
+        .expect("fichero de entrada");
     }
     let destination = root.join("published");
     execute_validated_config(
@@ -2460,7 +2467,11 @@ mean_events = 3.0
 expansion_bias = 0.5
 "#
     );
-    fs::write(root.join("general.toml"), config).expect("configuración");
+    fs::write(
+        root.join("general.toml"),
+        detection_section::with_detection_section(&config),
+    )
+    .expect("configuración");
     let validated = load_and_validate_config(&root.join("general.toml")).expect("configuración");
     let error = execute_validated_config(&validated, &root.join("published"))
         .expect_err("un generador sin copias haplotípicas se rechaza al publicar");
@@ -3361,7 +3372,8 @@ fn the_fan_judge_seeds_the_fan_with_the_final_reference_when_there_is_an_inserti
 /// bases no materializadas de la referencia.**
 ///
 /// La referencia se lee con las bases solo si el documento declara matriz,
-/// poblaciones, evento técnico, VCF o eventos directos
+/// poblaciones, evento técnico, VCF, eventos directos o la sección de
+/// microsatélites, en la efectiva o en el TOML copiado
 /// (`effective_needs_reference_bases`). Quitar todo eso de un paquete
 /// publicado de verdad exige rehacer a la vez la copia del TOML, su huella y
 /// el identificador de ejecución (que depende de ella), la matriz y las
@@ -3378,14 +3390,29 @@ fn a_package_forged_without_populations_reaches_the_unmaterialized_reference() {
     let mut skip = false;
     for line in toml.lines() {
         if line.starts_with('[') {
-            skip = line.contains("population_snvs") || line.contains("initial_populations");
+            // Desde la entrega 3 del plan de detección hay que quitar también
+            // los loci y la sección de microsatélites del TOML copiado: con la
+            // sección, la reconstrucción detecta según ese TOML y el juez lee la
+            // referencia con sus bases aunque la efectiva no la publique. La
+            // efectiva conserva sus loci: lo que la ata al TOML
+            // (`validate_published_repeat_loci`) corre después del juez del
+            // abanico.
+            skip = line.contains("population_snvs")
+                || line.contains("initial_populations")
+                || line.contains("repeat_loci")
+                || line.contains("repeat_detection");
         }
         if !skip {
             forged.push_str(line);
             forged.push('\n');
         }
     }
-    assert_ne!(forged, toml, "la copia del TOML perdió las tablas");
+    assert!(
+        toml.contains("[reference.repeat_detection]")
+            && !forged.contains("repeat_detection")
+            && !forged.contains("repeat_loci"),
+        "la copia del TOML perdió los loci y la sección"
+    );
     fs::write(&toml_path, &forged).expect("TOML manipulado");
     let digest = genome_population_simulator::integrity::configuration_digest(forged.as_bytes())
         .expect("huella");
@@ -3407,6 +3434,13 @@ fn a_package_forged_without_populations_reaches_the_unmaterialized_reference() {
     }
     effective["initial_populations"] = json!([]);
     effective["population_snvs"] = Value::Null;
+    // Y la sección de microsatélites de la efectiva, que también pide las
+    // bases de la referencia.
+    effective
+        .as_object_mut()
+        .expect("objeto")
+        .remove("repeat_detection")
+        .expect("la efectiva publicaba la sección de microsatélites");
     manifest["population_snvs"] = Value::Null;
     let judge = |effective: &Value, manifest: &Value| {
         validate_published_resources(
@@ -3447,6 +3481,7 @@ fn a_package_forged_without_populations_reaches_the_unmaterialized_reference() {
 const EFFECTIVE_LOCI: &str =
     "los loci de repetición efectivos no son los que el TOML y la referencia producen";
 const EFFECTIVE_ADMISSION: &str = "los mínimos de admisión efectivos no son los del TOML";
+const EFFECTIVE_DETECTION: &str = "la sección de microsatélites efectiva no es la que el TOML, la referencia y la matriz producen";
 const MANIFEST_SECTION: &str =
     "la sección de loci del manifiesto no es la que el TOML y la referencia producen";
 const REALIZED_LEFT: &str =
@@ -3571,6 +3606,33 @@ fn the_effective_repeat_loci_are_the_ones_the_toml_produces() {
                     .expect("tirada mínima");
                 d["repeat_admission"]["min_longest_run_units"] = json!(run + 1);
             }),
+            // Entrega 3 del plan de detección: el origen de cada locus y la
+            // sección de microsatélites también son los que el TOML y la
+            // referencia producen.
+            case("locus declarado: origen", EFFECTIVE_LOCI, |d| {
+                d["repeat_loci"][0]["origin"] = json!("detected");
+            }),
+            case(
+                "sección de microsatélites: tope",
+                EFFECTIVE_DETECTION,
+                |d| {
+                    d["repeat_detection"]["max_units"] = json!(199);
+                },
+            ),
+            case(
+                "sección de microsatélites: un retirado inventado",
+                EFFECTIVE_DETECTION,
+                |d| {
+                    d["repeat_detection"]["retired_loci"] = json!([{
+                        "id": "SSR-1-5-20-CA",
+                        "sequence_id": "chr1",
+                        "start": 5,
+                        "end": 20,
+                        "motif": "CA",
+                        "cause": "inventada"
+                    }]);
+                },
+            ),
         ],
     );
 }

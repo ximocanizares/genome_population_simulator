@@ -80,6 +80,11 @@ pub mod stutter;
 pub mod tandem_repeat;
 pub mod technical_identity;
 pub mod technical_profile;
+/// Para las pruebas internas escritas antes de la detección: la misma función
+/// que usan las de `tests/` (paso F6.4.a.13b del plan de detección).
+#[cfg(test)]
+#[path = "../tests/support/detection_section.rs"]
+pub(crate) mod test_detection_section;
 pub mod truth_projection;
 pub mod truth_schema;
 pub mod truth_validation;

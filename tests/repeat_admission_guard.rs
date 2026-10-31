@@ -28,6 +28,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::diagnostics::Diagnostic;
 
+#[path = "support/detection_section.rs"]
+mod detection_section;
+
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 const SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -62,7 +65,7 @@ fn scenario(tract: &str, admission: &str) -> (PathBuf, String) {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -89,7 +92,7 @@ motif = "CA"
 units = 20
 frequency = 1.0
 "#
-        ),
+        )),
     )
     .expect("configuración");
     (root, config.display().to_string())
@@ -137,16 +140,23 @@ fn a_real_impure_tract_above_the_minimum_is_admitted() {
 }
 
 /// **Una región sin ninguna repetición del motivo se rechaza**, nombrando el
-/// locus, la pureza medida y el mínimo.
+/// locus.
 ///
-/// Es la comprobación que muere si la guarda desaparece del todo.
+/// Desde la entrega 3 del plan de detección el rechazo llega **antes** de esta
+/// guarda: un locus declarado tiene que coincidir con un microsatélite
+/// detectado (REQ-REF-40), y en cien bases de `G` no hay ninguno de su motivo,
+/// de modo que el diagnóstico es el de la coincidencia y no nombra la pureza.
+/// Que la guarda siga viva lo demuestran las parejas de abajo, que pasan la
+/// coincidencia y mueren si la guarda desaparece.
 #[test]
 fn a_region_without_a_single_repeat_is_rejected() {
     let error = admit(&"G".repeat(100), "").expect_err("cien bases sin ni una copia");
     let rendered = format!("{error:?}");
     assert!(rendered.contains("locus STR-R"), "{rendered}");
-    assert!(rendered.contains("pureza 0"), "{rendered}");
-    assert!(rendered.contains("el mínimo es 0.8"), "{rendered}");
+    assert!(
+        rendered.contains("no coincide con ningún microsatélite detectado"),
+        "{rendered}"
+    );
 }
 
 /// **Justo por debajo del mínimo se rechaza y justo por encima se admite**, y lo
@@ -260,7 +270,11 @@ frequency = 1.0
         )
     };
 
-    fs::write(&config, body("motifs = [\"CAG\", \"CA\"]")).expect("configuración");
+    fs::write(
+        &config,
+        detection_section::with_detection_section(&body("motifs = [\"CAG\", \"CA\"]")),
+    )
+    .expect("configuración");
     let effective = load_and_validate_config(&config).expect("locus compuesto");
     genome_population_simulator::execution::execute_validated_config(
         &effective,
@@ -270,7 +284,11 @@ frequency = 1.0
 
     // Y con un solo motivo el mismo tramo no llega al mínimo, porque las cuarenta
     // bases del segundo bloque dejan de contar.
-    fs::write(&config, body("motif = \"CAG\"")).expect("configuración");
+    fs::write(
+        &config,
+        detection_section::with_detection_section(&body("motif = \"CAG\"")),
+    )
+    .expect("configuración");
     let outcome = load_and_validate_config(&config).and_then(|effective| {
         genome_population_simulator::execution::execute_validated_config(
             &effective,
@@ -293,7 +311,7 @@ fn the_guard_does_not_apply_to_a_simulated_reference() {
     let config = root.join("general.toml");
     fs::write(
         &config,
-        format!(
+        detection_section::with_detection_section(&format!(
             r#"config_kind = "general"
 schema_version = "4"
 seed = "{SEED}"
@@ -324,7 +342,7 @@ motif = "CA"
 units = 20
 frequency = 1.0
 "#
-        ),
+        )),
     )
     .expect("configuración");
     // La referencia generada son trescientas `A`: no contiene ni una copia de
