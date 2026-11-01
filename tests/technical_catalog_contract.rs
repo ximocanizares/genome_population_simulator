@@ -87,14 +87,27 @@ const EVIDENCE: &str = "evidence/dt-009-multiplicador-congelacion/inputs";
 // manifiesto de evento, la matriz y la referencia salen byte a byte iguales, y
 // la verdad, la efectiva y el manifiesto salen iguales una vez quitados esos
 // campos. Las huellas viejas quedan en el comentario de cada una.
+//
+// **01/11/2026 (entrega 4 del plan de detección):** las dos ejecuciones con
+// loci publican además el catálogo de microsatélites aparte
+// (`repeat_catalog.tsv` y `repeat_catalog.metadata.json`), enlazado con su
+// huella desde la efectiva. Cambian a propósito la efectiva (gana
+// `repeat_detection.catalog` y pierde `repeat_detection.retired_loci`, que
+// pasa al metadato) y el manifiesto general (gana los dos artefactos en
+// `artifacts` y en `output_categories.minimum`, y cambian la huella y el
+// tamaño de la efectiva, que cita dos veces). Comprobado campo a campo contra
+// el binario de `45af26b`, compilado aparte: ningún otro fichero cambia. Las
+// huellas viejas quedan en el comentario de cada una.
 // ---------------------------------------------------------------------------
 
-const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
+const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 14] = [
     // Cambia a propósito el 30/10/2026 (entrega 3 del plan de detección): era
     // 61809c4359781e56ac0d419c77c1014a43e83c42b77a34260fbc9e3f4659b975.
+    // Y otra vez el 01/11/2026 (entrega 4 del plan de detección): era
+    // f9d7b7dd5c2bf0a0461ae8e4322d692e637df97af4275fd1125450465ea564f2.
     (
         "effective-config.json",
-        "f9d7b7dd5c2bf0a0461ae8e4322d692e637df97af4275fd1125450465ea564f2",
+        "b94d849a8c8fb66f668e67cff9140e6039d0c82294121dfca033029f361e3b6c",
     ),
     (
         "events/reads-main/manifest.json",
@@ -108,9 +121,11 @@ const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
     ),
     // Cambia a propósito el 30/10/2026 (entrega 3 del plan de detección): era
     // eaa1a6c1e9e2d2dc5db7cb9dea370951ae4a5ddad63984b0ed8b86c0635ca123.
+    // Y otra vez el 01/11/2026 (entrega 4 del plan de detección): era
+    // bb1498a051ae5363926b81fa9a055ee6a9f7273c32ded0dd070b9eb6fe4287dd.
     (
         "manifest.json",
-        "bb1498a051ae5363926b81fa9a055ee6a9f7273c32ded0dd070b9eb6fe4287dd",
+        "7bfe4e2607848cf83b933f22ad19187cec4adbd823447c8eb18845f477fc281d",
     ),
     (
         "outputs/fastq/reads-main/sample-A_R1.fastq.gz",
@@ -141,6 +156,16 @@ const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
     (
         "population_snvs.tsv",
         "ea6647904791e5af257036dcd4ae8ebe7b869e8f1c170789d907b7fd187be9ad",
+    ),
+    // Nuevos el 01/11/2026: el catálogo de microsatélites aparte (entrega 4
+    // del plan de detección, REQ-MAN-98).
+    (
+        "repeat_catalog.metadata.json",
+        "0f91d3d080249c7aa6b9ac02e06e6d84068969dce89c89faae1d45cbdbd89d26",
+    ),
+    (
+        "repeat_catalog.tsv",
+        "3b282ff10a6e39933e5c2c70456a81b08187fa852f7e0c1c12a2e47909552c29",
     ),
     (
         "resources/references/ref-main.fa",
@@ -230,14 +255,16 @@ const WITHOUT_TECHNICAL_EVENT: [(&str, &str); 7] = [
     ),
 ];
 
-const AMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
+const AMPLIFIED_WITH_LOCI: [(&str, &str); 14] = [
     // Cambia a propósito el 12/10/2026 (DT-040): era
     // 834848fea5745b4d8e7b7e0f41a329bcc4d50a7a91fc28dfb82fcf82392b6b64.
     // Y otra vez el 30/10/2026 (entrega 3 del plan de detección): era
     // b9c5280d983d94b50aa08c4cab453ba67e5a260521cd814361d6770272a0b37e.
+    // Y otra vez el 01/11/2026 (entrega 4 del plan de detección): era
+    // 44019117080453d9c9e86f31e5122c77a82a083248d797aebbbbedce9e9710eb.
     (
         "effective-config.json",
-        "44019117080453d9c9e86f31e5122c77a82a083248d797aebbbbedce9e9710eb",
+        "5b4e563c9d5181d2986e7c250c03544d6893d93bf6a1c2430c2e7597f1522d17",
     ),
     (
         "events/reads-main/manifest.json",
@@ -253,9 +280,11 @@ const AMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
     // a40a8cbb245653eacbbf04449d1db2b66a8877ac8e4ec971f80f95b91caf0de5.
     // Y otra vez el 30/10/2026 (entrega 3 del plan de detección): era
     // 679a61e0c7924f7256b049a41adeb80a5dda0aa4c1ff274c482d370acb1badf2.
+    // Y otra vez el 01/11/2026 (entrega 4 del plan de detección): era
+    // 8beaf3fcc5be556c1c78d6305dfb788fe57ccb833796f3044046816624bc962e.
     (
         "manifest.json",
-        "8beaf3fcc5be556c1c78d6305dfb788fe57ccb833796f3044046816624bc962e",
+        "9f8f6fddb5abbf2e4c8cd0dbcfc1a25d5b2fa9c0ba2d19785f603611c95b4b46",
     ),
     (
         "outputs/fastq/reads-main/sample-A_R1.fastq.gz",
@@ -286,6 +315,16 @@ const AMPLIFIED_WITH_LOCI: [(&str, &str); 12] = [
     (
         "population_snvs.tsv",
         "ea6647904791e5af257036dcd4ae8ebe7b869e8f1c170789d907b7fd187be9ad",
+    ),
+    // Nuevos el 01/11/2026: el catálogo de microsatélites aparte (entrega 4
+    // del plan de detección, REQ-MAN-98).
+    (
+        "repeat_catalog.metadata.json",
+        "0f91d3d080249c7aa6b9ac02e06e6d84068969dce89c89faae1d45cbdbd89d26",
+    ),
+    (
+        "repeat_catalog.tsv",
+        "3b282ff10a6e39933e5c2c70456a81b08187fa852f7e0c1c12a2e47909552c29",
     ),
     (
         "resources/references/ref-main.fa",

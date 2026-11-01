@@ -3,7 +3,8 @@
 # verificadores de configuración efectiva y manifiesto de evento y, desde el
 # 05/10/2026, de los nueve módulos que juzgan lo publicado o lo leído (verdad,
 # FASTQ, matriz de SNV, paquete F5, FASTA, mapa de reducción, identidad de
-# artefactos y perfil técnico). La lista autoritativa es el array `judges`.
+# artefactos y perfil técnico) y, desde el 01/11/2026, del juez del catálogo de
+# microsatélites. La lista autoritativa es el array `judges`.
 #
 # QUÉ MIDE, Y QUÉ NO. Mide **si una guarda llega a dispararse** durante la
 # batería. No mide si la prueba que la dispara **fallaría** en caso de que la
@@ -52,6 +53,7 @@ judges=(
     "src/reference_reduction_io.rs|map_error|out_of_range"
     "src/integrity.rs|rejected"
     "src/technical_profile.rs|rejected|invalid"
+    "src/repeat_catalog_validation.rs|catalog_reject"
 )
 
 echo "== batería con el barrido encendido ==" >&2

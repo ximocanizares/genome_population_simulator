@@ -282,7 +282,7 @@ las ejercitaba nadie**: comprobaciones escritas, ejecutadas y jamás probadas,
 de modo que si una estuviera mal escrita nadie lo notaría y el simulador daría
 por bueno un fichero incorrecto.
 
-Vigila **catorce módulos**. Los cinco primeros: el oráculo de aceptación de F5
+Vigila **quince módulos**. Los cinco primeros: el oráculo de aceptación de F5
 (`src/f5_oracle.rs`), el oráculo semántico del VCF
 (`src/vcf_semantic_validation.rs`), la auditoría de identidad y publicación
 (`src/f5_closure.rs`), el juez de los recursos publicados, de la configuración
@@ -296,7 +296,11 @@ final (`src/fastq_validation.rs`), la validación de la matriz de SNV
 (`src/f5_publication.rs`), la del FASTA suministrado (`src/reference_fasta.rs`),
 la del mapa de reducción (`src/reference_reduction_io.rs`), la identidad de
 artefactos (`src/integrity.rs`) y la del perfil técnico
-(`src/technical_profile.rs`). **La autoridad es el array `judges` de
+(`src/technical_profile.rs`). El decimoquinto entró el 1 de noviembre de 2026:
+el juez del catálogo de microsatélites publicado
+(`src/repeat_catalog_validation.rs`), que lo relee contra el FASTA final sin
+llamar al detector, con un solo constructor de rechazo, `catalog_reject`.
+**La autoridad es el array `judges` de
 `scripts/check-guard-coverage.sh`**, que fija cada módulo y los nombres de sus
 constructoras de error; la fila de `scripts/guard-coverage-baseline.tsv` es
 obligatoria pero no basta: una fila sin entrada en el array se ignora sin

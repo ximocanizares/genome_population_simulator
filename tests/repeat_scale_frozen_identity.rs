@@ -47,7 +47,7 @@
 //!   tenía congeladas en esta misma prueba. En `dcae406` la efectiva y el
 //!   manifiesto no tienen campos nuevos y la normalización solo toca lo que
 //!   depende del TOML.
-//! - **La tabla de los tres documentos que cambian a propósito** —efectiva,
+//! - **La tabla de los documentos que cambian a propósito** —efectiva,
 //!   manifiesto y copia del TOML—, con huellas medidas con el código de la
 //!   entrega 3. Congela los campos nuevos; no protege nada de lo de antes, que
 //!   ya protege la primera tabla.
@@ -61,6 +61,26 @@
 //! técnico), de la verdad y del VCF, y el tamaño de la copia del TOML y de la
 //! efectiva (la verdad y el VCF miden lo mismo: el identificador nuevo tiene la
 //! misma longitud). Nada más.
+//!
+//! # Qué cambió con la entrega 4 (01/11/2026), y por qué la tabla normalizada no se toca
+//!
+//! La entrega 4 publica además el **catálogo de microsatélites aparte**
+//! (`repeat_catalog.tsv` y `repeat_catalog.metadata.json`, REQ-MAN-98) y lo
+//! enlaza con su huella desde la efectiva. La tabla normalizada lo deshace
+//! igual que deshace la entrega 3: deja fuera los dos ficheros y quita sus dos
+//! artefactos de la lista y de `output_categories.minimum` del manifiesto; la
+//! efectiva ya perdía `repeat_detection` entera. **Sus literales siguen siendo
+//! los de `dcae406` y no se han tocado.** La tabla de los documentos que
+//! cambian a propósito gana los dos ficheros del catálogo y se volvió a medir
+//! con el código de la entrega 4. El diff de la efectiva y del manifiesto
+//! frente a `45af26b`, comparado campo a campo sobre dos escenarios de la
+//! revisión (`w-bound-0` y `v-136`) con el binario de `45af26b` compilado
+//! aparte: la efectiva gana `repeat_detection.catalog` y pierde
+//! `repeat_detection.retired_loci` (los retirados van al metadato); el
+//! manifiesto gana los dos artefactos del catálogo en `artifacts` y en
+//! `output_categories.minimum`, y cambian la huella y el tamaño de la
+//! efectiva. Ningún otro fichero cambia. Los escenarios de la revisión sin la
+//! sección no publican catálogo y su tabla de documentos no cambia.
 //!
 //! # Qué tiene cada escenario, y qué ejercita
 //!
@@ -239,7 +259,7 @@ const MANY_LOCI_BASE_STUTTER: &[(&str, &str)] = &[
 const MANY_LOCI_BASE_STUTTER_DOCUMENTS: &[(&str, &str)] = &[
     (
         "effective-config.json",
-        "8a0f7c8024e74300c539f45197df431ffcb93133610c0c2f87beaeb146991878",
+        "5bb2a7ecfcd66d96d6ca2977b61c342eef0501305666c8ea6091bbf490caa618",
     ),
     (
         "inputs/config/general.toml",
@@ -247,7 +267,15 @@ const MANY_LOCI_BASE_STUTTER_DOCUMENTS: &[(&str, &str)] = &[
     ),
     (
         "manifest.json",
-        "dbc826875f8b2be6cd98debd6efc2c7674d26aa163badfb0a3a8a941f4cc1e74",
+        "467a2c0c07d3188f1fd2a2af99a7d86e88a1bc1f622d86d5225dfcaf259508a2",
+    ),
+    (
+        "repeat_catalog.metadata.json",
+        "0717a2c36e08d75b72c68b46fcf5698a93bba90ef93f796ac24dd3b3902b849b",
+    ),
+    (
+        "repeat_catalog.tsv",
+        "494ef1b9fcebf457a74da0858075a967f2ea8235ba83879f5499c6a5a9c3e56d",
     ),
 ];
 
@@ -353,7 +381,7 @@ const MANY_LOCI_PCR_CLONAL: &[(&str, &str)] = &[
 const MANY_LOCI_PCR_CLONAL_DOCUMENTS: &[(&str, &str)] = &[
     (
         "effective-config.json",
-        "b04e9211e904aafea35eeb0023e66690fe6cf54a3a8922f79b74144ed89b9177",
+        "be963753e750fb12c027bcb3d167bf3b328355457d1223039d9d4e8d7f51e049",
     ),
     (
         "inputs/config/general.toml",
@@ -361,7 +389,15 @@ const MANY_LOCI_PCR_CLONAL_DOCUMENTS: &[(&str, &str)] = &[
     ),
     (
         "manifest.json",
-        "f87a280b16df9906f6329a48f0d420ff5a2a5e97eb530ba7460ea03d5a88d240",
+        "f2ec33a6c527f255e2a89bf3ca17b69a088242cb5ebf742c2e3df4a82d01ba77",
+    ),
+    (
+        "repeat_catalog.metadata.json",
+        "0717a2c36e08d75b72c68b46fcf5698a93bba90ef93f796ac24dd3b3902b849b",
+    ),
+    (
+        "repeat_catalog.tsv",
+        "494ef1b9fcebf457a74da0858075a967f2ea8235ba83879f5499c6a5a9c3e56d",
     ),
 ];
 
@@ -455,56 +491,56 @@ const REVIEW_FIXTURES: &[(&str, &str)] = &[
     ),
 ];
 
-/// Resumen de los tres documentos que cambian a propósito en cada escenario
+/// Resumen de los documentos que cambian a propósito en cada escenario
 /// de la revisión, medido con el código de la entrega 3.
 const REVIEW_FIXTURES_DOCUMENTS: &[(&str, &str)] = &[
     (
         "20248",
-        "ccda9c54f883a15a73b1f1917e105bee88062d9cfad92f5ac466016ec0e9bd3f",
+        "70674171708c37bc0cc7335efa5273066d5327dfaec8e9fb9aaacdb7006b5c58",
     ),
     (
         "40045",
-        "c9adb4bb40c06e8929e27f21426f1cca7c4a6a1f8f758f162bcd09685c8cf34e",
+        "de999885aa6e7823ef28407eea3bc7281e373bf74b0e106f7ff53a2d4574363d",
     ),
     (
         "impure-tract",
-        "1d0156a6dcfefa26afb5d55afb9b4d66f9b68b6e66a84635ae1bc90742167fd3",
+        "86d80bd6361b7e0dae9cba42a80613f63516c8bbe61f84651142ec7990d24fa2",
     ),
     (
         "r03",
-        "a55e4ca6692dd022f24e3746c63804b4b2b92bd408757ff2737d13849aee6d61",
+        "c9169e06f01601d37bed49f728502d1b9d7f6737109ed562417b0ce3282174e1",
     ),
     (
         "rb-over-alt-1831",
-        "6352f36585a3bd610aa4d45a691e694f297dce3cd6c55246fe44a43fb788f1ae",
+        "46ea5742154a4813b639ade6adda22b788580b5d216c7eee04343ef5133e4175",
     ),
     (
         "v-136",
-        "8144f5d73a2f0556fbc009687d88908527d3061e2314292dfe32c184fbc6bfcb",
+        "e49cff13614235e867197b51a6cf46d9b2d410abbad7b086bc67679e838ccc45",
     ),
     (
         "v-163",
-        "9733a101ab2404c8fd808a739ededbd4b994c5a4cd66b572ba2dbbab4bf95ea1",
+        "f12775a98481a42129243eef653e28d358b4b57560a609f89d4f79251a512cc5",
     ),
     (
         "v-175",
-        "11afc6dec9a18d818958dec4e1541cf903ad86058a9d04f9e59743c23733eee0",
+        "8fcdb45202dd0f87df36d77c986b0bc03836a98c266ae5bc6d0c575a571fa754",
     ),
     (
         "w-atreg-4",
-        "e5272e6b2f86770f0f48864e184f5c87b32e579b82ec619f5a23a6dc9f0d5b98",
+        "a8797458a7d159ab182f368fb303a27e150a838745452cff58d8b876cf8c899f",
     ),
     (
         "w-bound-0",
-        "aa5f980d856ce1ac0bd36a1283044b4f60d90a04f207e716ff5339950559c69e",
+        "66366f9a0aac7848556d962952042a15c3e89ac817c63d1c0e167a604a08c6c3",
     ),
     (
         "w-cap-2090",
-        "3b702b4701ed3e5e041fcb97565f476b3469378449d0b1ce420f3fdb294df657",
+        "66187ddb61ccd6be50d8b3e8fb8dbe3c95fb1d927253cb240ad6dcef5f8ba5a3",
     ),
     (
         "w-flankdel-5",
-        "52ed59cb2160e6f7af0ee82cd1cb2fd6efd6be7d585721ddd94316a36abab060",
+        "23ce66dd3ce27244518b956853d9aa95cbb56f8de5ce2b236d5251086dc07b0d",
     ),
     (
         "w-min-a",
@@ -520,19 +556,19 @@ const REVIEW_FIXTURES_DOCUMENTS: &[(&str, &str)] = &[
     ),
     (
         "x-12168",
-        "09112ce26f70e7a3dd3d4b3bb94ae66462b8075817f86c1d753b508dcd7341da",
+        "b45fcfbf11b28427ccbe80719efad0b824353481cd99914f93283a9bb2bdb9c9",
     ),
     (
         "x-1392",
-        "e02e247311879aa0c9eb0a88fc5316624f46fc6bf354c379ec779d5ff8b18e90",
+        "f81f7764c792a196c0d17c18add9cb19933468e8ea38ebe14ba729081a263ae3",
     ),
     (
         "x-14771",
-        "0572676a56d265292a8643a6933df34d1776e3676c37fbc847d46e6e83802c72",
+        "d33fe352f33667eeba68b5f5d6fe78da59e231ed2ed70519087e075d8903b4bb",
     ),
     (
         "x3338",
-        "786f6ba6e10985dcf3e4a91ae912ed7edc8b80cfefc2099b41027ad4b7fa13bb",
+        "cb449f7f9a5f4e25335ca6ba440395ed40a32d09aac3dfa86bd69c0c107f6e31",
     ),
     (
         "y-1699",
@@ -960,12 +996,20 @@ fn decompressed(path: &Path) -> Option<Vec<u8>> {
     Some(text)
 }
 
-/// Los tres documentos que cambian a propósito con la entrega 3.
-const DOCUMENTS: [&str; 3] = [
+/// Los documentos que cambian a propósito: los tres de la entrega 3 y los dos
+/// del catálogo de microsatélites de la entrega 4.
+const DOCUMENTS: [&str; 5] = [
     "effective-config.json",
     "inputs/config/general.toml",
     "manifest.json",
+    "repeat_catalog.metadata.json",
+    "repeat_catalog.tsv",
 ];
+
+/// Los dos ficheros del catálogo aparte (entrega 4), que la tabla normalizada
+/// deja fuera y cuyos artefactos quita del manifiesto.
+const CATALOG_FILES: [&str; 2] = ["repeat_catalog.metadata.json", "repeat_catalog.tsv"];
+const CATALOG_ARTIFACTS: [&str; 2] = ["repeat-catalog-metadata", "repeat-catalog-tsv"];
 
 /// Ficheros del manifiesto cuya huella y tamaño dependen de la copia del TOML.
 const TOML_DEPENDENT: [&str; 4] = [
@@ -1028,7 +1072,7 @@ fn normalized_table(destination: &Path) -> BTreeMap<String, String> {
     for relative in paths {
         let full = destination.join(&relative);
         let name = relative.to_string_lossy().into_owned();
-        if name == "inputs/config/general.toml" {
+        if name == "inputs/config/general.toml" || CATALOG_FILES.contains(&name.as_str()) {
             continue;
         }
         let bytes = fs::read(&full).expect("fichero");
@@ -1050,6 +1094,15 @@ fn normalized_table(destination: &Path) -> BTreeMap<String, String> {
                 let mut document: Value = serde_json::from_slice(&bytes).expect("JSON");
                 document["execution_id"] = Value::from("RUN_NORMALIZED");
                 normalize_toml_dependent_links(&mut document);
+                for pointer in ["/artifacts", "/output_categories/minimum"] {
+                    if let Some(list) = document.pointer_mut(pointer).and_then(Value::as_array_mut)
+                    {
+                        list.retain(|entry| {
+                            let id = entry.get("id").unwrap_or(entry);
+                            !CATALOG_ARTIFACTS.iter().any(|artifact| id == artifact)
+                        });
+                    }
+                }
                 strip_origins(
                     document
                         .get_mut("repeat_loci")
@@ -1069,10 +1122,12 @@ fn normalized_table(destination: &Path) -> BTreeMap<String, String> {
     table
 }
 
-/// Huellas tal cual de los tres documentos que cambian a propósito.
+/// Huellas tal cual de los documentos que cambian a propósito. El catálogo
+/// solo existe con la sección de microsatélites: sin ella no hay entrada.
 fn documents_table(destination: &Path) -> BTreeMap<String, String> {
     DOCUMENTS
         .iter()
+        .filter(|name| !CATALOG_FILES.contains(name) || destination.join(name).exists())
         .map(|name| {
             (
                 (*name).to_owned(),
@@ -1181,7 +1236,7 @@ fn check_many_loci(
     assert_eq!(
         observed_documents,
         expected(documents),
-        "{name}: los tres documentos que cambian a propósito han cambiado. Tabla observada:\n{}",
+        "{name}: los documentos que cambian a propósito han cambiado. Tabla observada:\n{}",
         render(&observed_documents)
     );
 }

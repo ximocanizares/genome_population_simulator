@@ -1097,12 +1097,10 @@ su asignación por fase está en la matriz de trazabilidad.
   algoritmo de detección**, los **recuentos de lo descartado** por criterio y
   longitud de motivo, y los tramos retirados por una variante con su causa
   (REQ-CONF-143). Los recuentos de descarte deben sumar lo que el barrido
-  encontró. **Provisional, pendiente de la pausa de la entrega 1:** si el
-  catálogo viaja dentro de la configuración efectiva y del manifiesto general
-  o en un catálogo aparte enlazado con huella; cuál de las dos formas cabe en
-  tiempo, memoria y bytes con decenas de miles de loci es lo que mide esa
-  entrega, y nada de ello se fija antes. La verdad y el VCF no cambian de
-  formato en ninguna de las dos.
+  encontró. El catálogo viaja **aparte**, en una tabla y su metadato enlazados
+  con huella desde la configuración efectiva (DTC-104; decidido en la pausa de
+  la entrega 1 y concretado el 01/11/2026). La verdad y el VCF no cambian de
+  formato.
 - **REQ-VAL-60.** Un juez independiente debe **rehacer el abanico publicado** —
   desde la referencia publicada, los parámetros publicados y la semilla
   publicada— y contrastarlo con el escrito, alelo a alelo. No basta con
@@ -1159,9 +1157,12 @@ su asignación por fase está en la matriz de trazabilidad.
   esa variante. **Límite declarado: el juez no puede comprobar la
   exhaustividad** —que no falte ningún tramo que cumpla los criterios—,
   porque exige un detector; esa garantía la dan las pruebas del proyecto con
-  verdad plantada, y la documentación del juez lo dice. **La lista concreta de
-  comprobaciones es provisional** y sigue a los criterios definitivos de la
-  pausa de la entrega 1.
+  verdad plantada, y la documentación del juez lo dice. Con los criterios ya
+  fijados (DTC-103), el juez exige además de cada tramo detectado la tirada
+  mínima, el tope de unidades, que cabe en una región si las hay, que su
+  puntuación es la de sus propias comparaciones y que su identificador sale de
+  sus coordenadas, y que la tabla dice lo mismo que `repeat_loci` de la
+  configuración efectiva (`src/repeat_catalog_validation.rs`, 01/11/2026).
 - **REQ-UI-16.** La interfaz debe ofrecer un **control para elegir** entre
   declarar los alelos de un locus y generarlos, y **enseñar solo la tabla que
   corresponda**: con «declarar», las de alelos e interrupciones; con «generar»,

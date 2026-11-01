@@ -1535,16 +1535,19 @@ Los números F6.4.a.9 a F6.4.a.13 se conservan; lo añadido lleva sufijo.
 
 ### Entrega 4 — publicación y juez
 
-- ☐ **F6.4.a.14.** Publicación del catálogo.
+- ☑ **F6.4.a.14.** Publicación del catálogo.
   - Depende de: F6.4.a.10; DP-SSR-13 decidida.
   - Procede de: REQ-MAN-98; DTC-104.
-  - Cambia: `src/results.rs`, `schemas/` (efectiva v7, manifiesto v7 y, con
-    DP-SSR-13 b, el esquema del catálogo), `src/execution.rs`.
+  - Cambia: `src/results.rs`, `schemas/` (la efectiva v6 y el manifiesto v6
+    **retocados in situ** por la nota alfa de DTC-036 —el texto anterior
+    decía «efectiva v7, manifiesto v7», superado por esa nota y por la forma
+    en que la entrega 3 ya los retocó— y, con DP-SSR-13 b, el esquema del
+    catálogo, nuevo en su versión `"1"`), `src/execution.rs`.
   - Se comprueba con: los esquemas nuevos validados por el validador de
     esquemas en Python que ya lanzan las pruebas, y la puerta
     `check-independent-validators.sh` sobre un directorio nuevo; recuentos de
     descarte que suman los candidatos; sin detección, la huella intacta.
-- ☐ **F6.4.a.15.** Juez independiente del catálogo.
+- ☑ **F6.4.a.15.** Juez independiente del catálogo.
   - Depende de: F6.4.a.14.
   - Procede de: REQ-VAL-64; DP-SSR-14.
   - Cambia: `src/repeat_catalog_validation.rs` (nuevo), y los cuatro sitios de
@@ -1557,7 +1560,261 @@ Los números F6.4.a.9 a F6.4.a.13 se conservan; lo añadido lleva sufijo.
     una copia del árbol para que sobrestime la pureza, el productor deja pasar
     un locus de pureza real 0,79 y el juez **lo rechaza**.
 
+#### Diseño concreto de la entrega 4 (01/11/2026), antes de tocar el código
+
+**Estado:** escrito antes de tocar el código y detenido en la decisión D4-1,
+que el responsable resolvió el 01/11/2026 (abajo). Lo demás de este apartado
+está fijado por las normas o es mecánico; lo decidió el implementador y el
+responsable lo aceptó tal cual el 01/11/2026.
+
+**Lo que hay hoy (comprobado en `45af26b`).** Cada locus detectado viaja
+**entero** en `repeat_loci` de la configuración efectiva y del manifiesto
+general, como un declarado: identificador, intervalo, motivo, tope, mínimos,
+auditoría de normalización, abanico de alelos con la anotación de cada uno
+(unidades, pureza, bloques, interrupciones) y el bloque del deslizamiento con
+las **tres limitaciones palabra por palabra repetidas en cada locus**
+(`src/results.rs`, `repeat_loci_json`, `slippage_json`,
+`repeat_loci_manifest_json`). El manifiesto añade por alelo las copias y la
+frecuencia realizadas. La efectiva lleva además `repeat_detection` con la
+versión del algoritmo, los suelos, el tope, el deslizamiento común, las
+regiones y `retired_loci`. Los recuentos de descarte por etapa que calcula el
+barrido (`DetectionCounts`) **no se guardan** ni se publican, y la puntuación
+de cada tramo se pierde al convertirlo en locus. Esa forma es la que la
+entrega 3 llamó «publicación mínima» a la espera de esta entrega, y es la que
+el apartado 11.7 midió en unos 9,5 kB por locus entre los dos documentos (de
+ellos, alrededor de 1 kB por documento son el bloque del deslizamiento con las
+limitaciones).
+
+**Decidido por las normas o mecánico (lo decide el implementador):**
+
+1. **Ficheros publicados**, con la forma del par de la matriz de SNV
+   (DTC-054): `repeat_catalog.tsv` (artefacto `repeat-catalog-tsv`, clase
+   `repeat_catalog_tsv`) y `repeat_catalog.metadata.json` (artefacto
+   `repeat-catalog-metadata`, clase `repeat_catalog_metadata`), solo con la
+   sección de microsatélites. Sin ella no se escribe nada nuevo y todo byte
+   publicado queda idéntico.
+2. **Columnas del TSV**, con cabecera y en este orden:
+   `locus_id`, `sequence_id`, `start`, `end`, `motif`, `score`, `origin`.
+   Coordenadas en **base uno y cerradas**, las de los identificadores
+   `SSR-…`, las regiones y `retired_loci`. Una fila por locus del **catálogo
+   final** (después de retirar), en su orden: por secuencia en el orden de la
+   referencia y por inicio. `motif` es el motivo; un declarado compuesto lleva
+   sus motivos separados por coma, como ya hace `retired_loci`. `score` es la
+   puntuación del detector para un detectado (la de su propio tramo, +2 por
+   base igual a la de un periodo antes y −7 por distinta o no ACGT, que el juez
+   puede rehacer con aritmética propia); un declarado no tiene puntuación del
+   detector y lleva `.` (sus fronteras son las del usuario).
+3. **Metadato JSON**, `document_kind: "repeat_catalog_metadata"`,
+   `schema_version: "1"`, `coordinate_system: "base1_closed"`: la referencia
+   final (identificador y huella del FASTA final publicado), la tabla
+   (`path` y `sha256`), la versión del algoritmo (`ssr-detection-v1`), los
+   criterios completos (suelos, pureza y tirada mínimas, tope, regiones), los
+   **recuentos del barrido por etapa y longitud de motivo** (intervalos del
+   detector; descartados en cada una de las ocho etapas; aceptados), y la
+   **contabilidad del paso de aceptados a catálogo** por longitud de motivo:
+   aceptados = sustituidos por un declarado + retirados por una variante +
+   fuera por falta de copias haplotípicas (decisión 1 del 30/10) + publicados
+   como detectados. Por longitud de motivo, intervalos = descartes de las ocho
+   etapas + aceptados (lo que REQ-MAN-98 llama «sumar lo que el barrido
+   encontró»), y el juez lo exige. Los **tramos retirados** con su causa van
+   aquí, con la posición de la variante en un campo propio para que el juez
+   compruebe que cae dentro sin leer la frase.
+4. **Enlace con huella desde la efectiva**: `repeat_detection.catalog` con
+   `metadata_path` y `metadata_sha256`; el metadato lleva la huella de la
+   tabla. Los dos ficheros figuran además en la lista de artefactos del
+   manifiesto, como la matriz.
+5. **Esquemas**: `schemas/repeat-catalog-metadata-v1.schema.json` (nuevo) y la
+   efectiva v6 retocada in situ para el enlace; el TSV se juzga por el juez,
+   como el de la matriz. Validados por el validador de Python que lanzan las
+   pruebas.
+6. **Juez** `src/repeat_catalog_validation.rs`, con la lista de REQ-VAL-64 y
+   DP-SSR-14, contra el FASTA final publicado y con aritmética propia: no
+   importa nada de `src/repeat_detection.rs`, de la anotación de tractos ni de
+   la conversión. Se encadena en `validate_published_resources_v3`
+   (`src/results.rs`) después de rehacer la referencia final y antes de atar
+   los loci al TOML. **No entra en `check-independent-validators.sh`**: ese
+   script certifica herramientas externas (samtools, sha256sum, tar,
+   jsonschema, Docker) sobre fixtures, no jueces propios.
+
+**D4-1, resuelta el 01/11/2026 por decisión del responsable: opción (C).**
+**Qué sale de `repeat_loci` y dónde van los abanicos de los detectados.** El apartado 11.7 aceptó DP-SSR-13 (b) «tal como está escrita»,
+y su texto dice que la efectiva lleva los criterios, el deslizamiento común
+«con sus tres limitaciones una sola vez» y el enlace, que los abanicos van en
+un TSV propio y que los documentos JSON dejan de crecer con los loci. Pero la
+forma concreta no está en ninguna norma, y lo que hoy dicen REQ-MAN-95 («la
+configuración efectiva y el manifiesto general deben publicar, por alelo, el
+origen…»), REQ-VAL-60 y REQ-VAL-62 («en la configuración efectiva, los loci
+—con sus alelos— deben coincidir exactamente…») supone los abanicos dentro de
+los dos documentos. Opciones:
+
+| Opción | Consecuencia |
+|---|---|
+| (A) **Nada sale de `repeat_loci`**: el catálogo se publica además, como índice juzgado contra el FASTA, y `retired_loci` pasa de la efectiva al metadato | Ningún consumidor cambia y la entrega queda en su tamaño; los documentos JSON siguen creciendo unos 9,5 kB por locus (unos 540 MB con los 56 736 loci del tomate reducido), que es lo que 11.7 juzgó inviable |
+| (B) **Los detectados salen de los dos documentos**: identidad en el catálogo, abanicos y lo realizado por alelo en un TSV de alelos, contabilidad del deslizamiento por locus en una tabla, limitaciones una vez en `repeat_detection`; los declarados se quedan en `repeat_loci` | Los JSON dejan de crecer con los detectados; hay que reescribir REQ-MAN-95, REQ-MAN-96, REQ-VAL-60 y REQ-VAL-62 y las seis funciones de `src/results.rs` que leen `repeat_loci` de lo publicado (contadas con `grep`), y decidir las columnas del TSV de alelos; la entrega pasa a ser dos o tres veces mayor |
+| (C) (A) ahora y (B) en una entrega propia, después del juez | El juez del catálogo y la invariante llegan ya; la reestructuración se decide con su norma escrita; durante un tiempo el catálogo duplica lo que dice `repeat_loci` |
+| (D) (A) más quitar de cada detectado lo repetido: el bloque fijo del deslizamiento y las limitaciones, una vez en `repeat_detection` | Ahorra alrededor del 20 % por locus sin mover los abanicos; cambia la forma de cada detectado en los dos documentos y el juez de los loci |
+
+**Recomendación del implementador: (C).** Es lo más pequeño que cumple las
+normas tal como están hoy, entrega ya el juez independiente, y deja la parte
+que cambia lo que ve un consumidor (y reescribe cuatro requisitos) para cuando
+el responsable fije su forma.
+
+**Decisión del responsable (01/11/2026): (C).** En esta entrega se hace (A):
+la lista de loci de la configuración efectiva y del manifiesto general **no
+cambia**, y el catálogo aparte (tabla, metadato y enlace con huella en
+`repeat_detection.catalog`) se publica además, con el juez independiente.
+`retired_loci` pasa de la efectiva al metadato. La parte (B) es la entrega 4
+bis, inmediatamente después de esta.
+
+> **Estado, 01/11/2026: entrega 4 implementada, pendiente de la revisión
+> adversarial.** Sin *commit*.
+>
+> - **Qué se publica.** Con la sección, `repeat_catalog.tsv` y
+>   `repeat_catalog.metadata.json` en la raíz del paquete, como en el diseño de
+>   arriba; la efectiva gana `repeat_detection.catalog` y pierde
+>   `repeat_detection.retired_loci`, que pasa al metadato con la posición y el
+>   origen de la variante. Para publicarlo, el barrido guarda sus recuentos,
+>   los tramos que sustituye un declarado y los que quedan fuera por falta de
+>   copias haplotípicas (`DetectionScan` en `src/application.rs`), cada
+>   detectado guarda su puntuación y cada retirado su variante. Esquemas: el
+>   nuevo `repeat-catalog-metadata-v1.schema.json` y la efectiva v6 retocada
+>   in situ.
+> - **El juez** (`src/repeat_catalog_validation.rs`, 57 comprobaciones; 59 tras la revisión) corre
+>   dentro del juez de los recursos publicados, después de atar los loci de la
+>   efectiva al TOML y antes de una comprobación nueva de `src/results.rs` que
+>   rehace la tabla y el metadato con el productor
+>   (`validate_reconstructed_repeat_catalog`): es la que ata los descartes por
+>   etapa y la exhaustividad, que el juez independiente no puede ver. El juez
+>   compara además la tabla con `repeat_loci` de la efectiva, lo único que caza
+>   un escritor de la tabla que perdiera una fila (la reconstrucción usa el
+>   mismo escritor). No entra en `check-independent-validators.sh` (ver el
+>   diseño).
+> - **Pruebas** (`tests/repeat_catalog_validation.rs`): una referencia con
+>   tractos plantados en posiciones escritas en la prueba, incluidos los que
+>   cada criterio descarta y el tracto `GATGATGATGAC × 6` de pureza real 0,792
+>   (57/72); el catálogo publicado se compara con una tabla escrita a mano; los
+>   recuentos se suman con aritmética propia; el metadato y la efectiva pasan
+>   su esquema por el validador de Python (y una instancia alterada de cada uno
+>   no). Las 57 comprobaciones del juez las dispara un caso que altera a mano
+>   la tabla, el metadato, el enlace, el manifiesto o la efectiva publicados y
+>   exige el motivo exacto; ningún esperado sale del detector.
+> - **Prueba de independencia**, en una copia extraída con `git archive` de
+>   `45af26b` más los ficheros de esta entrega, con su propio
+>   `CARGO_TARGET_DIR`. `observe_tract` (`src/tandem_repeat.rs`, SHA-256
+>   `dbb2bb97…`) mutado para sumar un 5 % de las bases a las cubiertas
+>   (`433ce4f5…`): el productor publica `SSR-2-2000-2071-TGA`, de pureza real
+>   57/72, y **la ejecución muere en el juez** con «su pureza 57/72 no alcanza
+>   0.8» (las once pruebas que publican la plantilla fallan con ese motivo).
+>   Con, además, la pureza del juez calculada con `observe_tract`
+>   (`src/repeat_catalog_validation.rs`, `30530647…` → `bde181e7…`), la
+>   ejecución se publica con el locus dentro y mueren la comparación con la
+>   tabla escrita a mano y la guarda léxica: es el «debe fallar contra» de
+>   F6.4.a.15. Restaurados los dos ficheros, con su SHA de antes.
+> - **Mutaciones** (misma copia; cada una con SHA antes, mutado y restaurado
+>   igual al de antes): sin la comprobación de pureza, con el suelo rebajado en
+>   una copia, con el solape medido como estricto, sin la suma de los
+>   intervalos del detector, sin la de la puntuación, sin comparar el origen con
+>   la efectiva y aceptando cualquier variante de la matriz: cada una mata la
+>   prueba de su comprobación. Publicar el catálogo sin la sección mata las
+>   cuatro huellas de `tests/repeat_detection_frozen_identity.rs` y la prueba
+>   de «sin la sección»; no contar los sustituidos hace que la publicación muera
+>   en el juez; quitar la comprobación de la reconstrucción mata
+>   `the_reconstruction_ties_what_the_judge_cannot_see`.
+> - **Huellas.** Sin la sección no cambia un byte
+>   (`tests/repeat_detection_frozen_identity.rs` intacta). Con ella cambian a
+>   propósito la efectiva y el manifiesto, y aparecen los dos ficheros del
+>   catálogo: comparado campo a campo contra el binario de `45af26b` compilado
+>   aparte (dos escenarios de la revisión de la fusión del VCF y los dos de la
+>   evidencia de DT-009 con loci), no cambia nada más. La tabla normalizada de
+>   `tests/repeat_scale_frozen_identity.rs` conserva los literales de `dcae406`
+>   (la normalización deja fuera el catálogo); su tabla de documentos y las dos
+>   huellas de `tests/technical_catalog_contract.rs` se volvieron a medir, con
+>   la justificación escrita en cada prueba.
+> - **Puerta de cobertura**: el juez entra con 57 comprobaciones (59 tras la revisión) y techo 0;
+>   `src/results.rs` pasa de 725 a 726 (la reconstrucción del catálogo) y sigue
+>   en 153 sin disparar.
+> - **Puertas** (con `python3` 3.12.7 del entorno del proyecto y `bcftools` y
+>   `tabix` 1.24): formato y `clippy` limpios; batería 2237 pasan, 0 fallan,
+>   14 ignoradas; pruebas de documentación 2; compilación optimizada; cinco
+>   PASS de los validadores independientes; cobertura de los jueces dentro de
+>   su techo en los quince; Marimo limpio; 178 pruebas de Python con los 7
+>   fallos esperados (los dos antiguos y los cinco de la entrega 5).
+
+> **Revisión adversarial de la entrega 4 (01/11/2026).** Ningún defecto del
+> programa; dos hallazgos medios de pruebas que no podían fallar, aplicados:
+>
+> - **Medio: la variante de un retirado no estaba fijada a su posición.** Los
+>   casos solo usaban identificadores inexistentes. Ahora: el identificador
+>   real de otra fila de la matriz puesto en la posición del retirado; un
+>   cambio directo con ese identificador en otra posición, en otra secuencia
+>   y de otra clase; y el borde (primera y última base dentro, la anterior
+>   fuera). Mueren la búsqueda en la matriz que ignora la posición, la de los
+>   cambios directos que ignora secuencia, posición o clase, y `<`→`<=` o
+>   `>`→`>=` en el borde.
+> - **Medio: «una base A/C/G/T a cada lado» solo se probaba en el borde
+>   izquierdo de la secuencia.** La referencia de las pruebas gana un `A×12`
+>   con una `N` delante, otro con una `N` detrás y otro que acaba en la última
+>   base; mueren quitar las dos condiciones de base y quitar el límite derecho
+>   (que hace entrar en pánico al juez).
+> - **Menores aplicados**: dos aceptados que comparten una sola base (la
+>   referencia gana `(CA)×8` pegado a once `A`, retiradas por una fila de la
+>   matriz); cada campo de la cabecera del metadato y la huella de la tabla
+>   dentro de él; **el tamaño de los dos ficheros frente al manifiesto**, como
+>   en la matriz de SNV (dos comprobaciones nuevas); el comentario de la
+>   función que ata los loci al TOML, que había quedado encima de la nueva;
+>   `path` y `schema` del rechazo nombran el fichero que falla (el texto fijo
+>   del código sigue hablando de un documento JSON: cambiarlo exigiría un
+>   código nuevo); los dos recorridos sobre los declarados ya no recorren las
+>   filas; y cada caso publica su propio paquete, que se borra al acabar, en
+>   vez de dejar una plantilla en el directorio temporal.
+> - **Anotado sin tocar**: el juez completo no compara el tamaño del FASTA
+>   publicado con el manifiesto (laguna previa a esta entrega).
+> - Cada prueba nueva se vio morir contra su mutación en la copia aparte, con
+>   SHA antes, mutado y restaurado iguales. Ninguna huella congelada cambia
+>   en esta ronda.
+> - Puertas tras la ronda: formato y `clippy` limpios; batería 2240 pasan, 0
+>   fallan, 14 ignoradas; pruebas de documentación 2; compilación optimizada;
+>   cinco PASS de los validadores independientes; cobertura de los jueces
+>   dentro de su techo (el del catálogo, 59 y 0; `src/results.rs`, 726 y 153);
+>   Marimo limpio; 178 pruebas de Python con los 7 fallos esperados.
+
 > **Revisión de la entrega 4:** lo publicado se valida sin el detector.
+
+### Entrega 4 bis — los detectados salen de los documentos JSON
+
+Añadida el 01/11/2026 por la decisión D4-1 (opción C) del responsable. **No
+implementada.** Va inmediatamente después de la entrega 4.
+
+- ☐ **F6.4.a.15b.** Cambio normativo previo.
+  - Depende de: entrega 4.
+  - Procede de: DP-SSR-13 (b), aceptada en el apartado 11.7; D4-1.
+  - Cambia: `especificaciones-0.1.md` (REQ-MAN-95, REQ-MAN-96, REQ-VAL-60 y
+    REQ-VAL-62, que hoy suponen los abanicos dentro de la efectiva y del
+    manifiesto), DTC-104 y, si hace falta, la arquitectura.
+  - Fija: qué queda de cada detectado en los dos documentos (nada, según
+    DP-SSR-13 b); las columnas de la tabla de alelos (abanico, frecuencias
+    declarada y efectiva, origen por alelo, copias y frecuencia realizadas, y
+    si la anotación de cada alelo se publica o se deriva de la secuencia);
+    dónde va la contabilidad del deslizamiento por locus (linajes y pasos); y
+    las tres limitaciones una sola vez en `repeat_detection`.
+  - Se comprueba con: revisión del responsable antes de tocar el código.
+- ☐ **F6.4.a.15c.** Publicación y jueces.
+  - Depende de: F6.4.a.15b.
+  - Cambia: `src/results.rs` (escritura y las funciones que leen
+    `repeat_loci` de lo publicado: el juez de la efectiva frente al
+    manifiesto, el de la referencia simulada, el de los nombres, el de la
+    referencia final, el de los loci frente al TOML y el de la contabilidad
+    de tracto), `src/execution.rs`, `schemas/` (efectiva y manifiesto
+    retocados in situ, esquema de la tabla de alelos),
+    `src/repeat_catalog_validation.rs` si la tabla nueva entra en su alcance.
+  - Se comprueba con: sin la sección de detección, todo byte publicado
+    idéntico; con ella, los documentos JSON no crecen con los detectados
+    (medido con dos tamaños de catálogo); cada comprobación nueva disparada
+    con lo publicado alterado a mano. **Debe fallar contra:** un abanico de un
+    detectado que se quede en la efectiva.
+
+> **Revisión de la entrega 4 bis:** los JSON dejan de crecer con los loci y
+> los jueces siguen sin llamar al productor.
 
 ### Entrega 5 — Marimo
 

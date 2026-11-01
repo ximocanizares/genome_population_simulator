@@ -401,6 +401,15 @@ const NEW_JUDGES: &[Judge] = &[
         builders: &[],
         exempt: &[],
     },
+    // El juez del catálogo de microsatélites, que entró el 01/11/2026 (entrega
+    // 4 del plan de detección): un solo constructor anotado.
+    Judge {
+        path: "src/repeat_catalog_validation.rs",
+        source: include_str!("../src/repeat_catalog_validation.rs"),
+        constructors: &["catalog_reject"],
+        builders: &[],
+        exempt: &[],
+    },
 ];
 
 /// El texto sin los módulos `#[cfg(test)]`, pero **con** el código que venga

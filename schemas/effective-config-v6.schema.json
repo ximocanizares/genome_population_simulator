@@ -3181,9 +3181,9 @@
         "max_units",
         "slippage",
         "regions",
-        "retired_loci"
+        "catalog"
       ],
-      "description": "La sección de microsatélites resuelta (REQ-CONF-142), solo cuando el documento la declara. Los mínimos de pureza y tirada son los de repeat_admission. Hasta el catálogo aparte (entrega 4 del plan de detección) los loci detectados viajan en repeat_loci con origin = detected.",
+      "description": "La sección de microsatélites resuelta (REQ-CONF-142), solo cuando el documento la declara. Los mínimos de pureza y tirada son los de repeat_admission. Los loci detectados viajan además en repeat_loci con origin = detected; la tabla de loci, los recuentos del barrido y los tramos retirados por una variante van en el catálogo aparte enlazado en catalog (REQ-MAN-98).",
       "properties": {
         "algorithm_version": {
           "const": "ssr-detection-v1"
@@ -3264,45 +3264,21 @@
           ],
           "description": "Regiones en coordenadas de la referencia final, base uno y cerradas; null es la referencia entera."
         },
-        "retired_loci": {
-          "type": "array",
-          "description": "Loci detectados que un SNV suministrado o escrito a mano retiró del catálogo (REQ-CONF-143), con su causa.",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "id",
-              "sequence_id",
-              "start",
-              "end",
-              "motif",
-              "cause"
-            ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
-              },
-              "sequence_id": {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
-              },
-              "start": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "end": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "motif": {
-                "type": "string",
-                "pattern": "^[ACGT]+$"
-              },
-              "cause": {
-                "type": "string",
-                "minLength": 1
-              }
+        "catalog": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "metadata_path",
+            "metadata_sha256"
+          ],
+          "description": "Enlace con huella al metadato del catálogo de microsatélites (repeat-catalog-metadata-v1.schema.json), que a su vez lleva la huella de la tabla.",
+          "properties": {
+            "metadata_path": {
+              "const": "repeat_catalog.metadata.json"
+            },
+            "metadata_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
             }
           }
         }

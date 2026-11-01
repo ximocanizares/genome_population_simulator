@@ -2842,19 +2842,30 @@ DTC-097) ni el de tartamudeo (DTC-102).
 ## DTC-104 — Publicación y juez del catálogo de microsatélites
 
 Decisión del 28/10/2026 en lo que no depende de cifras, que concreta REQ-MAN-98
-y REQ-VAL-64. **La forma de publicar es provisional, pendiente de la pausa de la
-entrega 1.**
+y REQ-VAL-64. La forma de publicar la fijó la pausa de la entrega 1 del plan de
+detección (29/10/2026: catálogo aparte) y la concretó la entrega 4 (01/11/2026,
+decisión D4-1 del responsable).
 
-**Publicación (provisional).** Está por decidir entre dos formas: cada locus
-detectado como uno más de `repeat_loci` de la configuración efectiva y del
-manifiesto con origen `detected`, o un **catálogo aparte** —una tabla con una
-fila por locus más un metadato con criterios, versión del algoritmo, recuentos
-de descarte y huella, como el par de la matriz de SNV (DTC-054)— y la
-configuración efectiva con los criterios, el deslizamiento común y el enlace
-con huella. La propuesta del plan es el catálogo aparte, porque los documentos
-JSON dejarían de crecer con el número de loci; depende de cuánto pese cada
-parte medida y de si se limitan regiones. La verdad y el VCF no cambian de
-formato en ninguna de las dos.
+**Publicación.** Con la sección de microsatélites, la ejecución publica un
+**catálogo aparte**, con la forma del par de la matriz de SNV (DTC-054):
+`repeat_catalog.tsv`, una fila por locus del catálogo final con las columnas
+`locus_id`, `sequence_id`, `start`, `end`, `motif`, `score` y `origin`
+(`detected` o `declared`), en base uno y cerrada y en el orden del catálogo (un
+declarado compuesto lleva sus motivos separados por coma y `.` como
+puntuación); y `repeat_catalog.metadata.json`
+(`repeat-catalog-metadata-v1.schema.json`), con la referencia final y la huella
+de su FASTA, la huella de la tabla, la versión del algoritmo, los criterios, los
+recuentos del barrido por etapa y longitud de motivo, el reparto de los
+aceptados (sustituidos por un declarado, retirados por una variante, fuera por
+falta de copias haplotípicas y publicados), los tramos sustituidos y los
+retirados con su causa y la posición y el origen de la variante. La
+configuración efectiva lo enlaza con huella en `repeat_detection.catalog`; los
+dos ficheros figuran en el manifiesto general. Sin la sección no se escribe nada
+nuevo. **Por ahora los loci siguen además en `repeat_loci`** de la efectiva y
+del manifiesto, con sus abanicos: sacar los detectados de esos dos documentos y
+llevar sus abanicos a una tabla propia es la entrega 4 bis del plan, con su
+cambio normativo previo (REQ-MAN-95, REQ-MAN-96, REQ-VAL-60 y REQ-VAL-62). La
+verdad y el VCF no cambian de formato.
 
 **El juez no llama al productor ni al detector (decidido).** El juez que relee
 lo publicado trabaja contra el FASTA final publicado y con aritmética propia,
@@ -2866,9 +2877,10 @@ plantada y con un buscador de tiradas exactas por fuerza bruta escrito aparte.
 Un tracto puro de muchas copias absorbido en un segmento impuro que falle la
 pureza desaparece sin aviso, y el juez no puede verlo.
 
-**Módulo y puerta de cobertura (propuesta).** Un módulo pequeño propio, con
-cada rechazo por la constructora de trazas del proyecto, que entra en la puerta
-de cobertura de los jueces tocando los cuatro sitios que exige `CLAUDE.md`: el
-array `judges` de `scripts/check-guard-coverage.sh`, la fila de
-`scripts/guard-coverage-baseline.tsv`, la lista de `tests/guard_constructors.rs`
-y el párrafo de `CLAUDE.md`.
+**Módulo y puerta de cobertura.** `src/repeat_catalog_validation.rs`, con cada
+rechazo por su constructora anotada `catalog_reject`, en la puerta de cobertura
+de los jueces desde el 01/11/2026 (los cuatro sitios que exige `CLAUDE.md`).
+Corre dentro del juez de los recursos publicados, después de atar los loci de
+la efectiva al TOML y antes de la reconstrucción del catálogo con el productor,
+que es lo que ata los descartes por etapa y la exhaustividad que el juez
+independiente no puede ver.

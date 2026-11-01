@@ -354,12 +354,14 @@ pub fn effective_config_document_with_reductions(
     Ok(document)
 }
 
-/// Lo que la efectiva publica de la detección mientras el catálogo aparte no
-/// existe (entrega 4 del plan de detección): la versión del algoritmo, los
-/// criterios propios de la sección, el deslizamiento común, las regiones y
-/// los loci detectados que una variante retiró, con su causa (REQ-CONF-143).
+/// Lo que la efectiva publica de la detección: la versión del algoritmo, los
+/// criterios propios de la sección, el deslizamiento común y las regiones.
 /// Los mínimos de pureza y de tirada son los de `repeat_admission`, que ya se
-/// publica al lado.
+/// publica al lado. Los tramos retirados por una variante, los recuentos del
+/// barrido y la tabla de loci van en el catálogo aparte (REQ-MAN-98), que la
+/// ejecución enlaza con su huella en `catalog` al escribir la efectiva
+/// ([`repeat_catalog_link_json`]); esta función no lo incluye porque la huella
+/// solo existe cuando el catálogo ya está escrito.
 fn repeat_detection_json(detection: &crate::application::EffectiveRepeatDetection) -> Value {
     let slippage = detection.slippage();
     json!({
@@ -372,32 +374,187 @@ fn repeat_detection_json(detection: &crate::application::EffectiveRepeatDetectio
             "mean_events": slippage.mean_events(),
             "expansion_bias": slippage.expansion_bias(),
         },
-        "regions": detection.regions().map(|regions| {
-            regions
-                .iter()
-                .map(|region| {
-                    json!({
-                        "sequence_id": region.sequence_id(),
-                        "start": region.start(),
-                        "end": region.end(),
-                    })
-                })
-                .collect::<Vec<_>>()
-        }),
-        "retired_loci": detection
-            .retired()
+        "regions": detection_regions_json(detection),
+    })
+}
+
+fn detection_regions_json(detection: &crate::application::EffectiveRepeatDetection) -> Value {
+    detection.regions().map_or(Value::Null, |regions| {
+        regions
             .iter()
-            .map(|retired| {
+            .map(|region| {
                 json!({
-                    "id": retired.locus_id(),
-                    "sequence_id": retired.sequence_id(),
-                    "start": retired.start(),
-                    "end": retired.end(),
-                    "motif": retired.motif(),
-                    "cause": retired.cause(),
+                    "sequence_id": region.sequence_id(),
+                    "start": region.start(),
+                    "end": region.end(),
                 })
             })
-            .collect::<Vec<_>>(),
+            .collect::<Vec<_>>()
+            .into()
+    })
+}
+
+/// Ruta publicada de la tabla del catálogo de microsatélites (REQ-MAN-98).
+pub const REPEAT_CATALOG_TSV_PATH: &str = "repeat_catalog.tsv";
+/// Ruta publicada del metadato del catálogo de microsatélites.
+pub const REPEAT_CATALOG_METADATA_PATH: &str = "repeat_catalog.metadata.json";
+/// Cabecera de la tabla del catálogo, en su orden.
+pub const REPEAT_CATALOG_TSV_HEADER: [&str; 7] = [
+    "locus_id",
+    "sequence_id",
+    "start",
+    "end",
+    "motif",
+    "score",
+    "origin",
+];
+
+/// **La tabla del catálogo de microsatélites** (REQ-MAN-98): una fila por
+/// locus del catálogo final, en su orden (por secuencia en el orden de la
+/// referencia y por inicio), en base uno y cerrada. Un declarado compuesto
+/// lleva sus motivos separados por coma y `.` como puntuación: sus fronteras
+/// son las del usuario y el detector no le dio ninguna.
+pub fn repeat_catalog_tsv_bytes(config: &EffectiveConfig) -> Result<Vec<u8>, Diagnostic> {
+    use std::fmt::Write as _;
+    let mut text = REPEAT_CATALOG_TSV_HEADER.join("\t");
+    text.push('\n');
+    for locus in config.repeat_loci() {
+        let score = locus
+            .detector_score()
+            .map_or_else(|| ".".to_owned(), |score| score.to_string());
+        let _ = writeln!(
+            text,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            locus.id(),
+            locus.sequence_id(),
+            locus.start()?,
+            locus.end()?,
+            locus
+                .motifs()
+                .iter()
+                .map(RepeatMotif::as_text)
+                .collect::<Vec<_>>()
+                .join(","),
+            score,
+            locus.origin().as_str(),
+        );
+    }
+    Ok(text.into_bytes())
+}
+
+/// **El metadato del catálogo** (REQ-MAN-98): la referencia final y su huella,
+/// la tabla y su huella, la versión del algoritmo, los criterios completos,
+/// los recuentos del barrido por longitud de motivo y adónde fue a parar cada
+/// tramo aceptado, los tramos que sustituye un declarado y los retirados por
+/// una variante con su causa y la posición de esa variante.
+///
+/// Por longitud de motivo se cumple, y el juez lo exige: intervalos del
+/// detector = descartes de las ocho etapas + aceptados, y aceptados =
+/// sustituidos + retirados + sin copias haplotípicas + publicados.
+pub fn repeat_catalog_metadata_document(
+    config: &EffectiveConfig,
+    reference_fasta_sha256: &str,
+    table_sha256: &str,
+) -> Result<Value, Diagnostic> {
+    use crate::repeat_detection::{DETECTION_MOTIF_LENGTHS, DetectionStage};
+    let detection = config.repeat_detection().ok_or_else(|| {
+        Diagnostic::internal_invariant("results", "repeat_catalog_metadata").with(
+            "detail",
+            "el catálogo solo se publica con la sección de microsatélites",
+        )
+    })?;
+    let scan = detection.scan();
+    let admission = config.repeat_admission();
+    let counts = (1..=DETECTION_MOTIF_LENGTHS)
+        .map(|length| {
+            let discarded = DetectionStage::ALL
+                .iter()
+                .map(|stage| {
+                    (
+                        stage.name().to_owned(),
+                        json!(scan.counts().discarded(*stage, length)),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>();
+            let replaced = scan
+                .replaced()
+                .iter()
+                .filter(|tract| tract.motif().len() == length)
+                .count();
+            let retired = detection
+                .retired()
+                .iter()
+                .filter(|locus| locus.motif().len() == length)
+                .count();
+            let published = config
+                .repeat_loci()
+                .iter()
+                .filter(|locus| {
+                    locus.origin() == crate::application::RepeatLocusOrigin::Detected
+                        && locus.motifs().iter().map(RepeatMotif::length).sum::<u64>()
+                            == length as u64
+                })
+                .count();
+            json!({
+                "motif_length": length,
+                "detector_intervals": scan.counts().detected(length),
+                "discarded": discarded,
+                "accepted": scan.counts().accepted(length),
+                "replaced_by_declared": replaced,
+                "retired_by_variant": retired,
+                "without_haplotype_copies": scan.without_haplotype_copies()[length - 1],
+                "published": published,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "document_kind": "repeat_catalog_metadata",
+        "schema_version": "1",
+        "coordinate_system": "base1_closed",
+        "algorithm_version": crate::application::REPEAT_DETECTION_ALGORITHM_VERSION,
+        "reference": {
+            "reference_id": config.simulation_reference_id(),
+            "fasta_sha256": reference_fasta_sha256,
+        },
+        "table": {"path": REPEAT_CATALOG_TSV_PATH, "sha256": table_sha256},
+        "criteria": {
+            "min_copies": detection.min_copies(),
+            "min_purity": admission.min_purity(),
+            "min_longest_run_units": admission.min_longest_run_units(),
+            "max_units": detection.max_units(),
+            "regions": detection_regions_json(detection),
+        },
+        "counts_by_motif_length": counts,
+        "replaced_tracts": scan.replaced().iter().map(|tract| json!({
+            "sequence_id": tract.sequence_id(),
+            "start": tract.start(),
+            "end": tract.end(),
+            "motif": tract.motif(),
+            "score": tract.score(),
+        })).collect::<Vec<_>>(),
+        "retired_tracts": detection.retired().iter().map(|retired| json!({
+            "locus_id": retired.locus_id(),
+            "sequence_id": retired.sequence_id(),
+            "start": retired.start(),
+            "end": retired.end(),
+            "motif": retired.motif(),
+            "score": retired.score(),
+            "cause": retired.cause(),
+            "variant": {
+                "source": retired.variant().source().as_str(),
+                "id": retired.variant().id(),
+                "position": retired.variant().position(),
+            },
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// El enlace con huella que la efectiva publica en `repeat_detection.catalog`.
+#[must_use]
+pub fn repeat_catalog_link_json(metadata_sha256: &str) -> Value {
+    json!({
+        "metadata_path": REPEAT_CATALOG_METADATA_PATH,
+        "metadata_sha256": metadata_sha256,
     })
 }
 
@@ -2680,6 +2837,63 @@ fn validate_published_resources_v3(
         effective_path,
         manifest_path,
     )?;
+    // **El catálogo de microsatélites, primero contra el FASTA final y sin el
+    // productor** (REQ-VAL-64), y solo después contra la reconstrucción, que
+    // sí llama al productor y ata lo que el juez independiente no puede ver:
+    // los descartes por etapa y la exhaustividad. Va detrás de atar los loci
+    // de la efectiva al TOML para que cada comparación conserve su motivo: el
+    // juez del catálogo compara la tabla con esos loci ya atados.
+    {
+        let published_artifacts = artifacts
+            .iter()
+            .map(
+                |artifact| crate::repeat_catalog_validation::PublishedArtifact {
+                    id: &artifact.id,
+                    kind: &artifact.kind,
+                    path: &artifact.path,
+                    size_bytes: artifact.size_bytes,
+                    digest: &artifact.digest,
+                },
+            )
+            .collect::<Vec<_>>();
+        let sequences = source_reference
+            .sequences()
+            .iter()
+            .filter_map(|sequence| {
+                Some(crate::repeat_catalog_validation::PublishedSequence {
+                    id: sequence.id().as_str(),
+                    bases: sequence.sequence().as_bytes().ok()?,
+                })
+            })
+            .collect::<Vec<_>>();
+        let matrix_variants: Vec<(&str, u64, &str)> = matrix
+            .as_ref()
+            .map(|matrix| {
+                matrix
+                    .rows()
+                    .iter()
+                    .map(|row| {
+                        (
+                            row.contig().as_str(),
+                            row.position_1based(),
+                            row.variant_id().as_str(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        crate::repeat_catalog_validation::validate_published_repeat_catalog(
+            &crate::repeat_catalog_validation::PublishedCatalogInputs {
+                root,
+                effective,
+                artifacts: &published_artifacts,
+                reference_id: source_reference.id().as_str(),
+                sequences: &sequences,
+                matrix_variants: &matrix_variants,
+            },
+        )?;
+    }
+    validate_reconstructed_repeat_catalog(root, &physical_config, effective_path)?;
     // **La contabilidad de bases de tracto** (DT-052). Primero el juez que la
     // recuenta releyendo la verdad y el VCF publicados, que ata los dos
     // documentos entre sí y con lo recontado; después, con lo recontado, la
@@ -4285,6 +4499,48 @@ fn validate_physical_initial_population_statistics(
     Ok(())
 }
 
+/// **El catálogo de microsatélites es el que rehace el productor** desde el
+/// TOML copiado y la referencia y la matriz publicadas: la tabla, byte a byte,
+/// y el metadato con las huellas que ya ató el juez independiente. Es lo único
+/// que ata los descartes por etapa (que el juez independiente solo puede
+/// sumar) y lo que no falta (la exhaustividad, que el juez no puede ver).
+/// Llama al productor a propósito, y por eso va **después** del juez
+/// independiente del catálogo, que no lo hace.
+fn validate_reconstructed_repeat_catalog(
+    root: &Path,
+    physical_config: &EffectiveConfig,
+    effective_path: &Path,
+) -> Result<(), Diagnostic> {
+    if physical_config.repeat_detection().is_none() {
+        return Ok(());
+    }
+    let table = repeat_catalog_tsv_bytes(physical_config)?;
+    let published_table = fs::read(root.join(REPEAT_CATALOG_TSV_PATH)).ok();
+    // Las huellas del metadato son las que el juez independiente acaba de
+    // comprobar contra los ficheros y el manifiesto: se toman de él.
+    let published_metadata: Option<Value> = fs::read(root.join(REPEAT_CATALOG_METADATA_PATH))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    let fasta_sha256 = published_metadata
+        .as_ref()
+        .and_then(|metadata| metadata["reference"]["fasta_sha256"].as_str())
+        .unwrap_or_default();
+    let expected_metadata = repeat_catalog_metadata_document(
+        physical_config,
+        fasta_sha256,
+        &format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(&table)),
+    )?;
+    if published_table.as_deref() != Some(table.as_slice())
+        || published_metadata.as_ref() != Some(&expected_metadata)
+    {
+        return Err(effective_error(
+            effective_path,
+            "el catálogo de microsatélites publicado no es el que el TOML, la referencia y la matriz producen",
+        ));
+    }
+    Ok(())
+}
+
 /// **Ata los loci de repetición publicados al TOML copiado y a la verdad**
 /// (DT-051).
 ///
@@ -4344,14 +4600,18 @@ fn validate_published_repeat_loci(
                 "los mínimos de admisión efectivos no son los del TOML",
             ));
         }
-        // La sección de microsatélites —criterios, deslizamiento común,
-        // regiones y retirados— es la que resuelven el TOML, la referencia y
-        // la matriz publicadas.
-        if effective.get("repeat_detection")
+        // La sección de microsatélites —criterios, deslizamiento común y
+        // regiones— es la que resuelve el TOML. El enlace con el catálogo lo
+        // juzga el juez del catálogo, y el catálogo, la reconstrucción de
+        // `validate_reconstructed_repeat_catalog`.
+        let mut published_detection = effective.get("repeat_detection").cloned();
+        if let Some(Value::Object(detection)) = published_detection.as_mut() {
+            detection.remove("catalog");
+        }
+        if published_detection
             != physical_config
                 .repeat_detection()
                 .map(repeat_detection_json)
-                .as_ref()
         {
             return Err(effective_error(
                 effective_path,
@@ -7135,6 +7395,20 @@ fn parse_general_manifest_bytes_unretagged(
         expected_minimum.insert(id);
         require_artifact_kind(&catalog, "population-snvs-tsv", "population_snvs_tsv", path)?;
         expected_minimum.insert("population-snvs-tsv");
+    }
+    // El catálogo de microsatélites (REQ-MAN-98) viaja en pareja y es parte
+    // del mínimo; su presencia la ata a la sección el juez del catálogo.
+    if catalog.contains_key("repeat-catalog-metadata") || catalog.contains_key("repeat-catalog-tsv")
+    {
+        require_artifact_kind(
+            &catalog,
+            "repeat-catalog-metadata",
+            "repeat_catalog_metadata",
+            path,
+        )?;
+        require_artifact_kind(&catalog, "repeat-catalog-tsv", "repeat_catalog_tsv", path)?;
+        expected_minimum.insert("repeat-catalog-metadata");
+        expected_minimum.insert("repeat-catalog-tsv");
     }
     if truth_expected {
         expected_minimum.insert("truth-jsonl");

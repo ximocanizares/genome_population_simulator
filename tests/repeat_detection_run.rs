@@ -221,6 +221,15 @@ fn entry(
     )
 }
 
+/// El metadato del catálogo publicado (REQ-MAN-98), donde van desde la
+/// entrega 4 los tramos retirados por una variante.
+fn catalog_metadata(root: &Path) -> Value {
+    serde_json::from_slice(
+        &fs::read(root.join("published/repeat_catalog.metadata.json")).expect("metadato"),
+    )
+    .expect("JSON")
+}
+
 fn detail(diagnostic: &Diagnostic) -> String {
     diagnostic.render_human()
 }
@@ -845,9 +854,15 @@ fn a_supplied_row_inside_a_detected_tract_retires_it_and_inside_a_declared_one_i
     let mut expected = planted_catalog();
     expected.remove(1);
     assert_eq!(catalog(&effective), expected);
-    let retired = &effective["repeat_detection"]["retired_loci"];
+    let metadata = catalog_metadata(&root);
+    let retired = &metadata["retired_tracts"];
     assert_eq!(retired.as_array().map(Vec::len), Some(1), "{retired}");
-    assert_eq!(retired[0]["id"], "SSR-1-801-820-CA");
+    assert_eq!(retired[0]["locus_id"], "SSR-1-801-820-CA");
+    assert_eq!(
+        retired[0]["variant"]["source"], "population_snvs",
+        "{retired}"
+    );
+    assert_eq!(retired[0]["variant"]["position"], 810, "{retired}");
     assert_eq!(retired[0]["start"], 801);
     assert_eq!(retired[0]["end"], 820);
     assert!(
@@ -935,7 +950,7 @@ fn a_generated_matrix_never_falls_inside_a_locus_with_two_seeds() {
             assert!(loci.contains(tract), "{seed}: falta el plantado {tract:?}");
         }
         assert_eq!(
-            effective["repeat_detection"]["retired_loci"],
+            catalog_metadata(&root)["retired_tracts"],
             serde_json::json!([]),
             "{seed}"
         );
@@ -1227,7 +1242,7 @@ fn with_pcr_an_empty_final_catalog_publishes_what_a_run_without_the_section_does
         let effective = run(&with, &config)
             .unwrap_or_else(|error| panic!("{label}, con la sección: {}", detail(&error)));
         assert_eq!(catalog(&effective), vec![], "{label}");
-        let retired = effective["repeat_detection"]["retired_loci"]
+        let retired = catalog_metadata(&with)["retired_tracts"]
             .as_array()
             .expect("retirados")
             .len();
@@ -1340,6 +1355,20 @@ fn the_physical_judge_rejects_an_effective_config_without_its_detection_section(
         .expect("objeto")
         .remove("repeat_detection")
         .expect("la efectiva publicaba la sección");
+    // El catálogo aparte también se quita del manifiesto (los ficheros se
+    // quedan en disco): con él, el juez del catálogo rechazaría antes un
+    // catálogo sin sección, y esta prueba es la de la reconstrucción.
+    let mut manifest = manifest.clone();
+    for pointer in ["/artifacts", "/output_categories/minimum"] {
+        manifest
+            .pointer_mut(pointer)
+            .and_then(Value::as_array_mut)
+            .expect("lista")
+            .retain(|entry| {
+                let id = entry.get("id").unwrap_or(entry);
+                id != "repeat-catalog-metadata" && id != "repeat-catalog-tsv"
+            });
+    }
     let error = judge(&without, &manifest).expect_err("sin la sección se rechaza");
     let rendered = detail(&error);
     assert!(
@@ -1474,9 +1503,12 @@ fn a_direct_base_change_inside_a_detected_tract_retires_it() {
     let mut expected = planted_catalog();
     expected.remove(1);
     assert_eq!(catalog(&effective), expected);
-    let retired = &effective["repeat_detection"]["retired_loci"];
+    let metadata = catalog_metadata(&root);
+    let retired = &metadata["retired_tracts"];
     assert_eq!(retired.as_array().map(Vec::len), Some(1), "{retired}");
-    assert_eq!(retired[0]["id"], "SSR-1-801-820-CA", "{retired}");
+    assert_eq!(retired[0]["locus_id"], "SSR-1-801-820-CA", "{retired}");
+    assert_eq!(retired[0]["variant"]["source"], "direct_event", "{retired}");
+    assert_eq!(retired[0]["variant"]["id"], "snp-direct", "{retired}");
     assert!(
         retired[0]["cause"]
             .as_str()

@@ -356,6 +356,10 @@ fn execute_validated_config_with_effective_document(
                 })
                 .cloned(),
         );
+        // **El catálogo de microsatélites aparte** (REQ-MAN-98), solo con la
+        // sección: sin ella no se escribe nada y los bytes son los de antes.
+        let repeat_catalog_link =
+            publish_repeat_catalog(effective, simulation_artifact, &mut workspace)?;
         if let (Some(link), Some(initial_individuals)) = (
             &mut population_snvs,
             &prepared_execution.initial_individuals,
@@ -519,6 +523,9 @@ fn execute_validated_config_with_effective_document(
             &mut effective_document,
             &realized_tract_output,
         );
+        if let Some(link) = repeat_catalog_link {
+            effective_document["repeat_detection"]["catalog"] = link;
+        }
         if let Some(inserted) = &inserted_publication {
             effective_document["inserted_reference"] = crate::results::inserted_reference_json(
                 effective,
@@ -2531,6 +2538,40 @@ fn publish_population_snvs(
         normalization_audit: normalization_audit_document(prepared),
         initial_population_statistics: None,
     })
+}
+
+/// Escribe la tabla y el metadato del catálogo de microsatélites, con la
+/// huella del FASTA final y la de la tabla dentro del metadato, y devuelve el
+/// enlace con huella que la efectiva publica en `repeat_detection.catalog`.
+/// Sin la sección de microsatélites no escribe nada.
+fn publish_repeat_catalog(
+    effective: &EffectiveConfig,
+    reference_fasta: &ArtifactRecord,
+    workspace: &mut ExecutionWorkspace,
+) -> Result<Option<serde_json::Value>, Diagnostic> {
+    if effective.repeat_detection().is_none() {
+        return Ok(None);
+    }
+    let table = workspace.write_artifact(
+        "repeat-catalog-tsv",
+        "repeat_catalog_tsv",
+        Path::new(crate::results::REPEAT_CATALOG_TSV_PATH),
+        &crate::results::repeat_catalog_tsv_bytes(effective)?,
+    )?;
+    let metadata = crate::results::repeat_catalog_metadata_document(
+        effective,
+        &reference_fasta.digest,
+        &table.digest,
+    )?;
+    let metadata = workspace.write_artifact(
+        "repeat-catalog-metadata",
+        "repeat_catalog_metadata",
+        Path::new(crate::results::REPEAT_CATALOG_METADATA_PATH),
+        &json_document_bytes(&metadata)?,
+    )?;
+    Ok(Some(crate::results::repeat_catalog_link_json(
+        &metadata.digest,
+    )))
 }
 
 fn population_snvs_error(component: &str, detail: impl Into<String>) -> Diagnostic {

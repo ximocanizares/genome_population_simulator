@@ -1800,6 +1800,9 @@ fn the_inherited_schemas_are_byte_for_byte_unchanged() {
         "manifest-event-v3.schema.json",
         "manifest-general-v6.schema.json",
         "reference-coordinate-map-v2.schema.json",
+        // El metadato del catálogo de microsatélites, nuevo en la entrega 4
+        // del plan de detección (REQ-MAN-98).
+        "repeat-catalog-metadata-v1.schema.json",
         "truth-v4.schema.json",
         "truth-v5.schema.json",
     ];

@@ -22,7 +22,7 @@
 //!
 //! ## Cómo funciona
 //!
-//! Los catorce módulos vigilados (la lista autoritativa es el array `judges` de
+//! Los quince módulos vigilados (la lista autoritativa es el array `judges` de
 //! `scripts/check-guard-coverage.sh`) canalizan sus rechazos por unas pocas
 //! funciones constructoras de error; en `src/results.rs`, además, por `reason`,
 //! que anota el motivo de los validadores que devuelven texto en vez de un

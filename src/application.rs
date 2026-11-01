@@ -366,6 +366,10 @@ pub struct EffectiveRepeatLocus {
     /// De dónde sale el locus: declarado por el usuario o detectado en la
     /// referencia final (REQ-CONF-56, REQ-MAN-98).
     origin: RepeatLocusOrigin,
+    /// La puntuación del detector para un locus detectado, que publica el
+    /// catálogo aparte (REQ-MAN-98); `None` en un declarado, cuyas fronteras
+    /// son las del usuario.
+    detector_score: Option<i32>,
 }
 
 /// De dónde sale un locus del catálogo de microsatélites.
@@ -405,6 +409,81 @@ pub struct EffectiveRepeatDetection {
     /// Loci detectados que un SNV suministrado o escrito a mano retiró del
     /// catálogo (REQ-CONF-143), en el orden del catálogo.
     retired: Vec<RetiredRepeatLocus>,
+    /// Lo que dejó el barrido, para el catálogo aparte (REQ-MAN-98); vacío
+    /// hasta que se detecta (`with_detected_repeat_loci`).
+    scan: DetectionScan,
+}
+
+/// Lo que el barrido encontró y adónde fue a parar cada tramo aceptado, para
+/// publicarlo en el metadato del catálogo (REQ-MAN-98).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DetectionScan {
+    /// Intervalos del detector, descartes por etapa y aceptados, por longitud
+    /// de motivo, sumados sobre todas las secuencias barridas.
+    counts: crate::repeat_detection::DetectionCounts,
+    /// Tramos aceptados que un locus declarado sustituye (REQ-REF-40), en el
+    /// orden del catálogo.
+    replaced: Vec<CatalogTract>,
+    /// Aceptados que no entran por falta de copias haplotípicas (decisión del
+    /// 30/10/2026), por longitud de motivo.
+    without_haplotype_copies: [u64; crate::repeat_detection::DETECTION_MOTIF_LENGTHS],
+}
+
+impl DetectionScan {
+    #[must_use]
+    pub const fn counts(&self) -> &crate::repeat_detection::DetectionCounts {
+        &self.counts
+    }
+
+    #[must_use]
+    pub fn replaced(&self) -> &[CatalogTract] {
+        &self.replaced
+    }
+
+    #[must_use]
+    pub const fn without_haplotype_copies(
+        &self,
+    ) -> &[u64; crate::repeat_detection::DETECTION_MOTIF_LENGTHS] {
+        &self.without_haplotype_copies
+    }
+}
+
+/// Un tramo detectado tal y como lo publica el catálogo: base uno, cerrado,
+/// en la referencia final.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CatalogTract {
+    sequence_id: String,
+    start: u64,
+    end: u64,
+    motif: String,
+    score: i32,
+}
+
+impl CatalogTract {
+    #[must_use]
+    pub fn sequence_id(&self) -> &str {
+        &self.sequence_id
+    }
+
+    #[must_use]
+    pub const fn start(&self) -> u64 {
+        self.start
+    }
+
+    #[must_use]
+    pub const fn end(&self) -> u64 {
+        self.end
+    }
+
+    #[must_use]
+    pub fn motif(&self) -> &str {
+        &self.motif
+    }
+
+    #[must_use]
+    pub const fn score(&self) -> i32 {
+        self.score
+    }
 }
 
 impl EffectiveRepeatDetection {
@@ -434,6 +513,12 @@ impl EffectiveRepeatDetection {
     #[must_use]
     pub fn retired(&self) -> &[RetiredRepeatLocus] {
         &self.retired
+    }
+
+    /// Lo que dejó el barrido.
+    #[must_use]
+    pub const fn scan(&self) -> &DetectionScan {
+        &self.scan
     }
 
     /// Los criterios del detector: los de la sección más los mínimos
@@ -500,6 +585,54 @@ pub struct RetiredRepeatLocus {
     end: u64,
     motif: String,
     cause: String,
+    score: i32,
+    variant: RetiringVariant,
+}
+
+/// La variante que retiró un locus detectado (REQ-CONF-143): de dónde sale,
+/// su identificador y su posición en base uno en la referencia final.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetiringVariant {
+    source: RetiringVariantSource,
+    id: String,
+    position: u64,
+}
+
+impl RetiringVariant {
+    #[must_use]
+    pub const fn source(&self) -> RetiringVariantSource {
+        self.source
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Base uno, en la referencia final y en la secuencia del locus.
+    #[must_use]
+    pub const fn position(&self) -> u64 {
+        self.position
+    }
+}
+
+/// De dónde sale una variante que retira un locus.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RetiringVariantSource {
+    /// Un cambio de base escrito a mano (`direct_events`).
+    DirectEvent,
+    /// Una fila de la matriz de SNV suministrada o reutilizada.
+    PopulationSnvs,
+}
+
+impl RetiringVariantSource {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DirectEvent => "direct_event",
+            Self::PopulationSnvs => "population_snvs",
+        }
+    }
 }
 
 impl RetiredRepeatLocus {
@@ -532,6 +665,18 @@ impl RetiredRepeatLocus {
     #[must_use]
     pub fn cause(&self) -> &str {
         &self.cause
+    }
+
+    /// La puntuación del detector del tramo retirado.
+    #[must_use]
+    pub const fn score(&self) -> i32 {
+        self.score
+    }
+
+    /// La variante que lo retiró.
+    #[must_use]
+    pub const fn variant(&self) -> &RetiringVariant {
+        &self.variant
     }
 }
 
@@ -816,6 +961,12 @@ impl EffectiveRepeatLocus {
     #[must_use]
     pub const fn origin(&self) -> RepeatLocusOrigin {
         self.origin
+    }
+
+    /// La puntuación del detector, solo en un locus detectado.
+    #[must_use]
+    pub const fn detector_score(&self) -> Option<i32> {
+        self.detector_score
     }
 }
 
@@ -1824,6 +1975,7 @@ impl EffectiveConfig {
             .map(EffectiveRepeatLocus::id)
             .collect::<BTreeSet<_>>();
         let lineages = self.haplotype_copy_count()?;
+        let mut scan = DetectionScan::default();
         for (sequence_index, sequence) in reference.sequences().iter().enumerate() {
             let mut declared: Vec<&EffectiveRepeatLocus> = self
                 .repeat_loci
@@ -1846,6 +1998,7 @@ impl EffectiveConfig {
                 &criteria,
                 regions.as_deref(),
             );
+            scan.counts.add(found.counts());
             let candidates = found.candidates();
             // Los candidatos no se solapan y van por inicio: los que pisan
             // `[start, end)` empiezan en el primero que acaba después de
@@ -1882,12 +2035,6 @@ impl EffectiveConfig {
                 }
                 catalog.push((sequence_index, start, (*locus).clone()));
             }
-            // **Sin copias haplotípicas no hay alelos que generar**, y un locus
-            // detectado no tiene otros: no entra en el catálogo (decisión del
-            // responsable del 30/10/2026). Un declarado sí, con sus reglas.
-            if lineages == 0 {
-                continue;
-            }
             for candidate in candidates {
                 let first = declared.partition_point(|locus| {
                     locus.declaration.interval().end() <= candidate.start()
@@ -1896,6 +2043,21 @@ impl EffectiveConfig {
                     .get(first)
                     .is_some_and(|locus| locus.declaration.interval().start() < candidate.end())
                 {
+                    scan.replaced.push(CatalogTract {
+                        sequence_id: sequence.id().as_str().to_owned(),
+                        start: candidate.start() + 1,
+                        end: candidate.end(),
+                        motif: candidate.motif().as_text().to_owned(),
+                        score: candidate.score(),
+                    });
+                    continue;
+                }
+                // **Sin copias haplotípicas no hay alelos que generar**, y un
+                // locus detectado no tiene otros: no entra en el catálogo
+                // (decisión del responsable del 30/10/2026), y se cuenta. Un
+                // declarado sí entra, con sus reglas.
+                if lineages == 0 {
+                    scan.without_haplotype_copies[candidate.motif().length() as usize - 1] += 1;
                     continue;
                 }
                 let motif = candidate.motif().clone();
@@ -1965,6 +2127,7 @@ impl EffectiveConfig {
                             effective_delta: 0.0,
                         },
                         origin: RepeatLocusOrigin::Detected,
+                        detector_score: Some(candidate.score()),
                     },
                 ));
             }
@@ -1972,6 +2135,9 @@ impl EffectiveConfig {
         catalog.sort_by_key(|(sequence_index, start, _)| (*sequence_index, *start));
         let mut resolved = self.clone();
         resolved.repeat_loci = catalog.into_iter().map(|(_, _, locus)| locus).collect();
+        if let Some(detection) = resolved.repeat_detection.as_mut() {
+            detection.scan = scan;
+        }
         resolved.admit_detected_loci_against_stutter()?;
         Ok(Some(resolved))
     }
@@ -2202,7 +2368,7 @@ impl EffectiveConfig {
         if self.repeat_detection.is_none() {
             return Ok(None);
         }
-        let mut variants: std::collections::BTreeMap<(&str, u64), String> =
+        let mut variants: std::collections::BTreeMap<(&str, u64), (String, RetiringVariant)> =
             std::collections::BTreeMap::new();
         for event in &self.direct_events {
             if let EffectiveDirectEvent::Snp {
@@ -2215,9 +2381,16 @@ impl EffectiveConfig {
                 variants
                     .entry((sequence_id.as_str(), position_1based - 1))
                     .or_insert_with(|| {
-                        format!(
-                            "el cambio de base {} en {sequence_id}:{position_1based}",
-                            event.event_id()
+                        (
+                            format!(
+                                "el cambio de base {} en {sequence_id}:{position_1based}",
+                                event.event_id()
+                            ),
+                            RetiringVariant {
+                                source: RetiringVariantSource::DirectEvent,
+                                id: event.event_id().as_str().to_owned(),
+                                position: *position_1based,
+                            },
                         )
                     });
             }
@@ -2227,8 +2400,15 @@ impl EffectiveConfig {
                 variants
                     .entry((contig, position_1based - 1))
                     .or_insert_with(|| {
-                        format!(
-                            "la variante {variant_id} de la matriz en {contig}:{position_1based}"
+                        (
+                            format!(
+                                "la variante {variant_id} de la matriz en {contig}:{position_1based}"
+                            ),
+                            RetiringVariant {
+                                source: RetiringVariantSource::PopulationSnvs,
+                                id: (*variant_id).to_owned(),
+                                position: *position_1based,
+                            },
                         )
                     });
             }
@@ -2246,7 +2426,7 @@ impl EffectiveConfig {
                 })
                 .flatten();
             match inside {
-                Some((_, cause)) => retired.push(RetiredRepeatLocus {
+                Some((_, (cause, variant))) => retired.push(RetiredRepeatLocus {
                     locus_id: locus.id().to_owned(),
                     sequence_id: sequence_id.to_owned(),
                     start: interval.start() + 1,
@@ -2258,6 +2438,8 @@ impl EffectiveConfig {
                         .collect::<Vec<_>>()
                         .join(","),
                     cause: format!("{cause} cae dentro del tracto"),
+                    score: locus.detector_score.unwrap_or_default(),
+                    variant: variant.clone(),
                 }),
                 None => kept.push(locus.clone()),
             }
@@ -3500,6 +3682,7 @@ fn effective_repeat_detection(
         slippage: settings,
         regions,
         retired: Vec::new(),
+        scan: DetectionScan::default(),
     }))
 }
 
@@ -6088,6 +6271,7 @@ fn effective_repeat_loci(
                     effective_delta: 0.0,
                 },
                 origin: RepeatLocusOrigin::Declared,
+                detector_score: None,
             });
             continue;
         }
@@ -6141,6 +6325,7 @@ fn effective_repeat_loci(
             alleles,
             normalization,
             origin: RepeatLocusOrigin::Declared,
+            detector_score: None,
         });
     }
     Ok(resolved)

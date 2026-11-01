@@ -492,7 +492,14 @@
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	110	22
 src/f5_closure.rs	42	5
-src/results.rs	725	153
+# **El 01/11/2026 (entrega 4 del plan de detección de microsatélites) `src/results.rs`
+# pasa de 725 a 726 comprobaciones y sigue en 153 sin disparar.** Entra una: el catálogo
+# de microsatélites publicado tiene que ser el que rehace el productor desde el TOML
+# copiado y la referencia y la matriz publicadas (`validate_reconstructed_repeat_catalog`).
+# La dispara `the_reconstruction_ties_what_the_judge_cannot_see`
+# (`tests/repeat_catalog_validation.rs`), que exige el motivo exacto y muere al quitarla
+# (mutación M12 del plan, en una copia aparte).
+src/results.rs	726	153
 src/event_manifest.rs	147	8
 src/truth_validation.rs	121	32
 # **El 13/10/2026 (DT-015) `src/truth_schema.rs` pasa de 69 a 70 comprobaciones
@@ -508,3 +515,10 @@ src/reference_fasta.rs	41	7
 src/reference_reduction_io.rs	55	12
 src/integrity.rs	1	0
 src/technical_profile.rs	15	5
+# **El 01/11/2026 entra el juez del catálogo de microsatélites**
+# (`src/repeat_catalog_validation.rs`, entrega 4 del plan de detección, REQ-VAL-64):
+# 57 comprobaciones (59 tras la revisión, que añadió el tamaño de los dos ficheros
+# frente al manifiesto), todas disparadas por `tests/repeat_catalog_validation.rs`, que
+# exige el motivo exacto de cada una con el catálogo publicado alterado a mano. El techo
+# es cero: una comprobación nueva que nadie dispare rompe la puerta.
+src/repeat_catalog_validation.rs	59	0
