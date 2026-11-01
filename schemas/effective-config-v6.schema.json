@@ -3180,10 +3180,12 @@
         "min_copies",
         "max_units",
         "slippage",
+        "frequency_normalization",
         "regions",
-        "catalog"
+        "catalog",
+        "alleles_table"
       ],
-      "description": "La sección de microsatélites resuelta (REQ-CONF-142), solo cuando el documento la declara. Los mínimos de pureza y tirada son los de repeat_admission. Los loci detectados viajan además en repeat_loci con origin = detected; la tabla de loci, los recuentos del barrido y los tramos retirados por una variante van en el catálogo aparte enlazado en catalog (REQ-MAN-98).",
+      "description": "La sección de microsatélites resuelta (REQ-CONF-142), solo cuando el documento la declara. Los mínimos de pureza y tirada son los de repeat_admission. Los loci detectados NO viajan en repeat_loci ni en repeat_output_budget.per_locus (entrega 4 bis, 01/11/2026): su tabla, los recuentos del barrido y los tramos retirados por una variante van en el catálogo aparte enlazado en catalog, y sus alelos con lo realizado y la contabilidad de cada uno en la tabla de alelos enlazada en alleles_table (REQ-MAN-98, DTC-104). Lo común a todos los detectados —el deslizamiento con sus versiones, su ámbito, las tres limitaciones y los linajes, y las constantes de la normalización— va aquí una sola vez.",
       "properties": {
         "algorithm_version": {
           "const": "ssr-detection-v1"
@@ -3208,7 +3210,14 @@
             "model",
             "step_units",
             "mean_events",
-            "expansion_bias"
+            "expansion_bias",
+            "algorithm",
+            "count_algorithm",
+            "bias_algorithm",
+            "rng_scope",
+            "rng_scope_catalog_version",
+            "limitations",
+            "lineages"
           ],
           "properties": {
             "model": {
@@ -3226,6 +3235,70 @@
               "type": "number",
               "minimum": 0,
               "maximum": 1
+            },
+            "algorithm": {
+              "enum": [
+                "biological-slippage-v1"
+              ]
+            },
+            "count_algorithm": {
+              "enum": [
+                "poisson-count-v1"
+              ]
+            },
+            "bias_algorithm": {
+              "enum": [
+                "bernoulli-v1"
+              ]
+            },
+            "rng_scope": {
+              "enum": [
+                "initial_repeat_slippage"
+              ],
+              "description": "Ambito de azar PROPIO, separado del tartamudeo: uno decide la verdad y el otro las lecturas. Se identifica por el evento y el identificador de locus, nunca por posicion ni por orden."
+            },
+            "rng_scope_catalog_version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "limitations": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Las TRES limitaciones declaradas del modelo, que son decisiones biologicas y no detalles: no hay ancestria compartida, el numero de pasos no es un proceso en el tiempo, y el genoma de referencia puede llevar un alelo que ningun individuo tiene."
+            },
+            "lineages": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Copias haplotípicas de las poblaciones iniciales: los linajes de cada abanico. Cero solo sin poblaciones, y entonces no queda ningún detectado."
+            }
+          },
+          "description": "El deslizamiento común de los loci detectados, publicado una sola vez (REQ-MAN-96, DTC-097): sus parámetros, sus versiones, su ámbito de azar, las tres limitaciones palabra por palabra y los linajes, que son las copias haplotípicas de las poblaciones iniciales. La contabilidad de cada detectado (pasos sorteados, aplicados y no aplicados) va en la tabla de alelos."
+        },
+        "frequency_normalization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tolerance",
+            "sum_algorithm",
+            "canonical_order"
+          ],
+          "description": "Las constantes de la normalización de las frecuencias de los detectados (DTC-049), una sola vez. Las sumas de cada locus no se publican: salen de la columna de frecuencias de la tabla de alelos con este algoritmo.",
+          "properties": {
+            "tolerance": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1e-06
+            },
+            "sum_algorithm": {
+              "const": "neumaier_sum_v1"
+            },
+            "canonical_order": {
+              "const": "locus_id,allele_index"
             }
           }
         },
@@ -3277,6 +3350,24 @@
               "const": "repeat_catalog.metadata.json"
             },
             "metadata_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "alleles_table": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "description": "Enlace con huella a la tabla de alelos de los loci detectados (repeat_alleles.tsv), sin esquema JSON propio: sus columnas las fija DTC-104 y las juzga el código.",
+          "properties": {
+            "path": {
+              "const": "repeat_alleles.tsv"
+            },
+            "sha256": {
               "type": "string",
               "pattern": "^[0-9a-f]{64}$"
             }

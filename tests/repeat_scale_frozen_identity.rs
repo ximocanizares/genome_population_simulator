@@ -82,6 +82,27 @@
 //! efectiva. Ningún otro fichero cambia. Los escenarios de la revisión sin la
 //! sección no publican catálogo y su tabla de documentos no cambia.
 //!
+//! # Qué cambió con la entrega 4 bis (01/11/2026), y por qué la tabla normalizada tampoco se toca
+//!
+//! La entrega 4 bis saca los loci **detectados** de la efectiva y del
+//! manifiesto y publica sus alelos en `repeat_alleles.tsv`, que se escribe
+//! siempre con la sección (aquí, solo la cabecera: todos los loci de estos
+//! escenarios son declarados). La tabla normalizada deja fuera también ese
+//! fichero y su artefacto, como los del catálogo, y **sus literales siguen
+//! siendo los de `dcae406`**. La tabla de los documentos gana la tabla de
+//! alelos y se volvió a medir. Comparado campo a campo contra el binario de
+//! `afda48b` compilado aparte, en los dos escenarios de muchos loci y en los
+//! veintiuno de la revisión: en los dieciséis que llevan la sección, la
+//! efectiva gana en `repeat_detection` el enlace `alleles_table`, las
+//! constantes de `frequency_normalization` y, en `slippage`, las versiones,
+//! el ámbito, la versión de su catálogo, las tres limitaciones y los linajes;
+//! el manifiesto gana el artefacto `repeat-alleles-tsv` en `artifacts` y en
+//! `output_categories.minimum`, y cambian la huella y el tamaño de la
+//! efectiva (también en el enlace del evento técnico); aparece la tabla de
+//! alelos de 203 bytes. Ningún otro fichero cambia: ni la verdad, ni el VCF,
+//! ni los FASTQ, ni el manifiesto de evento, ni el catálogo. Los cinco
+//! escenarios de la revisión sin la sección no cambian en nada.
+//!
 //! # Qué tiene cada escenario, y qué ejercita
 //!
 //! 1. **Muchos loci con tartamudeo de base y quimeras entre secuencias.**
@@ -259,7 +280,7 @@ const MANY_LOCI_BASE_STUTTER: &[(&str, &str)] = &[
 const MANY_LOCI_BASE_STUTTER_DOCUMENTS: &[(&str, &str)] = &[
     (
         "effective-config.json",
-        "5bb2a7ecfcd66d96d6ca2977b61c342eef0501305666c8ea6091bbf490caa618",
+        "5455adb3b55ce5586b1f9e1ef10a472c7e2b556243e59d44ab09eb3cb0b186c8",
     ),
     (
         "inputs/config/general.toml",
@@ -267,7 +288,11 @@ const MANY_LOCI_BASE_STUTTER_DOCUMENTS: &[(&str, &str)] = &[
     ),
     (
         "manifest.json",
-        "467a2c0c07d3188f1fd2a2af99a7d86e88a1bc1f622d86d5225dfcaf259508a2",
+        "9068907a483632a2319ce15894d50cc35ce36721e5302fd6e5cc0df03b969ba5",
+    ),
+    (
+        "repeat_alleles.tsv",
+        "c1dc0fe32075225c7d2d2cf9352ea8543c26033feeb54c2456ecc0b01b66ef6b",
     ),
     (
         "repeat_catalog.metadata.json",
@@ -381,7 +406,7 @@ const MANY_LOCI_PCR_CLONAL: &[(&str, &str)] = &[
 const MANY_LOCI_PCR_CLONAL_DOCUMENTS: &[(&str, &str)] = &[
     (
         "effective-config.json",
-        "be963753e750fb12c027bcb3d167bf3b328355457d1223039d9d4e8d7f51e049",
+        "deb390d8f496e75858e6ff51ba9b12891b47093ee201ad2a1ee833d79f190595",
     ),
     (
         "inputs/config/general.toml",
@@ -389,7 +414,11 @@ const MANY_LOCI_PCR_CLONAL_DOCUMENTS: &[(&str, &str)] = &[
     ),
     (
         "manifest.json",
-        "f2ec33a6c527f255e2a89bf3ca17b69a088242cb5ebf742c2e3df4a82d01ba77",
+        "815dd89c2c3b8c1d4ef60b80054f29568f23d8a5bb295613e4b0e3ba9d82a87f",
+    ),
+    (
+        "repeat_alleles.tsv",
+        "c1dc0fe32075225c7d2d2cf9352ea8543c26033feeb54c2456ecc0b01b66ef6b",
     ),
     (
         "repeat_catalog.metadata.json",
@@ -496,51 +525,51 @@ const REVIEW_FIXTURES: &[(&str, &str)] = &[
 const REVIEW_FIXTURES_DOCUMENTS: &[(&str, &str)] = &[
     (
         "20248",
-        "70674171708c37bc0cc7335efa5273066d5327dfaec8e9fb9aaacdb7006b5c58",
+        "e1bdf8af95adaf2c634eb7e1948c082c4b2a1ee4041f0591e8d49b08d45415ca",
     ),
     (
         "40045",
-        "de999885aa6e7823ef28407eea3bc7281e373bf74b0e106f7ff53a2d4574363d",
+        "05346806d2250e1c78bee5499ac0117b5cf44517e34b77a01bd25b6c0408e8e3",
     ),
     (
         "impure-tract",
-        "86d80bd6361b7e0dae9cba42a80613f63516c8bbe61f84651142ec7990d24fa2",
+        "c0994d372c5b318188a81ef81db321cb2e1636eeb5cab901d6bb0a40be4352c5",
     ),
     (
         "r03",
-        "c9169e06f01601d37bed49f728502d1b9d7f6737109ed562417b0ce3282174e1",
+        "e285ca413ed522d074bb0357c6ceac520ca12ec57db81cc9644c8c7524dbe5d3",
     ),
     (
         "rb-over-alt-1831",
-        "46ea5742154a4813b639ade6adda22b788580b5d216c7eee04343ef5133e4175",
+        "7f35a77477af258a6196580385779cf8c90d69909060703b3dec11a0b6668522",
     ),
     (
         "v-136",
-        "e49cff13614235e867197b51a6cf46d9b2d410abbad7b086bc67679e838ccc45",
+        "862e3df321b1feb44e1e3ff55c789ec69ce332b65bf386458fee0c4e70af9dc1",
     ),
     (
         "v-163",
-        "f12775a98481a42129243eef653e28d358b4b57560a609f89d4f79251a512cc5",
+        "b9f20ec13651ed0babfcde92c5686f65be3224f94b10139c917cd3688f4110fe",
     ),
     (
         "v-175",
-        "8fcdb45202dd0f87df36d77c986b0bc03836a98c266ae5bc6d0c575a571fa754",
+        "ec39fc6ace4e1355b9a7a85c37c007af883c891f5a5f12de711f17cd536262a4",
     ),
     (
         "w-atreg-4",
-        "a8797458a7d159ab182f368fb303a27e150a838745452cff58d8b876cf8c899f",
+        "b7d8f7fdb963d3344b1cc9f08e5b0b7a4f5a62edc8ddd7ee4e7d489bca990a8f",
     ),
     (
         "w-bound-0",
-        "66366f9a0aac7848556d962952042a15c3e89ac817c63d1c0e167a604a08c6c3",
+        "ac2e0a590bc78c74b3f7448af49ceef5e0e1040a17dba303f3516a610afef254",
     ),
     (
         "w-cap-2090",
-        "66187ddb61ccd6be50d8b3e8fb8dbe3c95fb1d927253cb240ad6dcef5f8ba5a3",
+        "22dc19d468cc72726f984fcfa6dbafad40ce1b0a1b63b2ea04e4764591834206",
     ),
     (
         "w-flankdel-5",
-        "23ce66dd3ce27244518b956853d9aa95cbb56f8de5ce2b236d5251086dc07b0d",
+        "59492afd7ea67347ad2f55e95ce67e0fd58dd4e915dd0e22f99cb18f99744ffb",
     ),
     (
         "w-min-a",
@@ -556,19 +585,19 @@ const REVIEW_FIXTURES_DOCUMENTS: &[(&str, &str)] = &[
     ),
     (
         "x-12168",
-        "b45fcfbf11b28427ccbe80719efad0b824353481cd99914f93283a9bb2bdb9c9",
+        "802a11c63b658cd306188dedd9f231fe5f6935d0f69deb6661aa7a1f38262078",
     ),
     (
         "x-1392",
-        "f81f7764c792a196c0d17c18add9cb19933468e8ea38ebe14ba729081a263ae3",
+        "fdd525a734c03853c620f22e7a733977a4279943cd64ba9207231c41dc6fff67",
     ),
     (
         "x-14771",
-        "d33fe352f33667eeba68b5f5d6fe78da59e231ed2ed70519087e075d8903b4bb",
+        "3dcb728d2ed72c046d01d61b9e045f88d75a72ce0ac08ae1dfeaab84f1cc4935",
     ),
     (
         "x3338",
-        "cb449f7f9a5f4e25335ca6ba440395ed40a32d09aac3dfa86bd69c0c107f6e31",
+        "53ecc80bb29377c343192db8418e8461c4f439a09fddf7d9988c4ebcfc605983",
     ),
     (
         "y-1699",
@@ -996,20 +1025,31 @@ fn decompressed(path: &Path) -> Option<Vec<u8>> {
     Some(text)
 }
 
-/// Los documentos que cambian a propósito: los tres de la entrega 3 y los dos
-/// del catálogo de microsatélites de la entrega 4.
-const DOCUMENTS: [&str; 5] = [
+/// Los documentos que cambian a propósito: los tres de la entrega 3, los dos
+/// del catálogo de microsatélites de la entrega 4 y la tabla de alelos de la
+/// entrega 4 bis.
+const DOCUMENTS: [&str; 6] = [
     "effective-config.json",
     "inputs/config/general.toml",
     "manifest.json",
+    "repeat_alleles.tsv",
     "repeat_catalog.metadata.json",
     "repeat_catalog.tsv",
 ];
 
-/// Los dos ficheros del catálogo aparte (entrega 4), que la tabla normalizada
-/// deja fuera y cuyos artefactos quita del manifiesto.
-const CATALOG_FILES: [&str; 2] = ["repeat_catalog.metadata.json", "repeat_catalog.tsv"];
-const CATALOG_ARTIFACTS: [&str; 2] = ["repeat-catalog-metadata", "repeat-catalog-tsv"];
+/// Los dos ficheros del catálogo aparte (entrega 4) y la tabla de alelos de
+/// los detectados (entrega 4 bis), que la tabla normalizada deja fuera y
+/// cuyos artefactos quita del manifiesto.
+const CATALOG_FILES: [&str; 3] = [
+    "repeat_alleles.tsv",
+    "repeat_catalog.metadata.json",
+    "repeat_catalog.tsv",
+];
+const CATALOG_ARTIFACTS: [&str; 3] = [
+    "repeat-alleles-tsv",
+    "repeat-catalog-metadata",
+    "repeat-catalog-tsv",
+];
 
 /// Ficheros del manifiesto cuya huella y tamaño dependen de la copia del TOML.
 const TOML_DEPENDENT: [&str; 4] = [

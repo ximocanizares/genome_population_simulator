@@ -930,9 +930,19 @@ fn the_repeat_section_fields_are_judged() {
                 |d| section(d)["loci"] = json!(5),
             ),
             case(
-                "lista de loci vacía",
+                // Sin el catálogo de microsatélites en la lista de artefactos:
+                // con él, la lista lleva solo los declarados y puede quedar
+                // vacía (entrega 4 bis).
+                "lista de loci vacía sin catálogo listado",
                 "la sección repeat_loci no publica ningún locus",
-                |d| section(d)["loci"] = json!([]),
+                |d| {
+                    section(d)["loci"] = json!([]);
+                    for artifact in d["artifacts"].as_array_mut().expect("artefactos") {
+                        if artifact["kind"] == "repeat_catalog_tsv" {
+                            artifact["kind"] = json!("otra_clase");
+                        }
+                    }
+                },
             ),
             case(
                 "una procedencia de la referencia inventada",

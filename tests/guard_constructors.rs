@@ -128,6 +128,7 @@ fn unrecorded_diagnostic_builders_are_called_only_from_their_wrappers() {
             "effective_diagnostic",
             "effective_error_for_schema",
             "effective_error_from_reason",
+            "validate_published_detected_fans",
             "validate_published_slippage_fans",
         ]
     );

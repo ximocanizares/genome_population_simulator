@@ -1682,8 +1682,13 @@ byte escrito.
 - **Frontera con las variantes pequeñas:** hoy un cambio de base o una fila de
   la matriz que cae dentro de un tracto declarado rechaza el escenario (S-32);
   con detección esa regla cambia (REQ-CONF-143).
-- **Lo publicado:** los loci con sus alelos y su origen por alelo (REQ-MAN-95,
-  REQ-MAN-96) en la configuración efectiva y el manifiesto general; las bases de
+- **Lo publicado:** los loci declarados con sus alelos y su origen por alelo
+  (REQ-MAN-95, REQ-MAN-96) en la configuración efectiva y el manifiesto
+  general; el catálogo de todos los loci y los alelos de los detectados en
+  tablas aparte enlazadas con huella (REQ-MAN-98), de modo que los documentos
+  JSON no crecen con los detectados (01/11/2026, entrega 4 bis del plan de
+  detección; antes, todos los loci con sus alelos iban en esos dos
+  documentos); las bases de
   tracto medidas en la verdad y el VCF; los parámetros del tartamudeo en el
   manifiesto de evento. Los jueces que releen todo ello rehacen el abanico y
   recuentan sobre los propios ficheros (REQ-VAL-60, REQ-VAL-62).

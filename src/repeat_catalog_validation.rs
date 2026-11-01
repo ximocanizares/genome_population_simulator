@@ -5,8 +5,9 @@
 //!
 //! El catálogo aparte que publica una ejecución con la sección de
 //! microsatélites (REQ-MAN-98): la tabla `repeat_catalog.tsv`, su metadato
-//! `repeat_catalog.metadata.json` y el enlace con huella de la configuración
-//! efectiva (`repeat_detection.catalog`). Lo relee **contra el FASTA final
+//! `repeat_catalog.metadata.json`, la tabla de alelos de los detectados
+//! `repeat_alleles.tsv` y los enlaces con huella de la configuración efectiva
+//! (`repeat_detection.catalog` y `repeat_detection.alleles_table`). Lo relee **contra el FASTA final
 //! publicado** y exige:
 //!
 //! - **identidad**: que las huellas de la tabla, del metadato y del FASTA final
@@ -34,7 +35,21 @@
 //! - que **cada retirado contiene de verdad su variante**: la posición cae
 //!   dentro del tramo y la variante existe ahí, en la matriz de SNV o en los
 //!   cambios directos publicados;
-//! - y que la tabla dice lo mismo que `repeat_loci` de la efectiva.
+//! - que las filas declaradas de la tabla son los loci de `repeat_loci` de la
+//!   efectiva, y las detectadas, los loci de la tabla de alelos
+//!   (`repeat_alleles.tsv`), en el mismo orden (entrega 4 bis);
+//! - y de la tabla de alelos, enlazada con huella desde la efectiva
+//!   (`repeat_detection.alleles_table`) y listada en el manifiesto: su forma
+//!   (cabecera, trece columnas, enteros canónicos, proporciones en `[0, 1]`),
+//!   índices de alelo de 0 en 0, origen `generated`, secuencias de A, C, G, T
+//!   y N distintas dentro de cada locus, pasos aplicados más no aplicados
+//!   iguales a los sorteados en cada fila, copias realizadas que suman las
+//!   copias haplotípicas publicadas y cada frecuencia realizada igual, bit a
+//!   bit, a sus copias entre las del locus.
+//!
+//! El abanico de cada detectado no lo rehace este juez sino el de REQ-VAL-60
+//! (`validate_published_detected_fans`, en `src/results.rs`), que lee la tabla
+//! de alelos con el mismo lector estricto de aquí.
 //!
 //! # Por qué no es un espejo
 //!
@@ -76,6 +91,13 @@ const TABLE_ID: &str = "repeat-catalog-tsv";
 const TABLE_KIND: &str = "repeat_catalog_tsv";
 const TABLE_PATH: &str = "repeat_catalog.tsv";
 const TABLE_HEADER: &str = "locus_id\tsequence_id\tstart\tend\tmotif\tscore\torigin";
+const ALLELES_ID: &str = "repeat-alleles-tsv";
+const ALLELES_KIND: &str = "repeat_alleles_tsv";
+/// Ruta publicada de la tabla de alelos de los detectados (DTC-104).
+pub const ALLELES_PATH: &str = "repeat_alleles.tsv";
+const ALLELES_HEADER: &str = "locus_id\tallele_index\tsequence\torigin\tdeclared_frequency\t\
+effective_frequency\trealized_copies\trealized_frequency\tdrawn_events\tapplied_events\t\
+unapplied_events\ttruth_tract_bases_bound\tvcf_tract_bases_bound";
 /// Las ocho etapas de descarte del barrido, en su orden (DTC-103).
 const STAGES: [&str; 8] = [
     "non_canonical_motif",
@@ -146,10 +168,10 @@ fn catalog_reject(file: &str, detail: impl Into<String>) -> Diagnostic {
     .with("path", file)
     .with(
         "schema",
-        if file == TABLE_PATH {
-            "repeat_catalog.tsv (columnas de DTC-104)"
-        } else {
-            "repeat-catalog-metadata-v1.schema.json"
+        match file {
+            TABLE_PATH => "repeat_catalog.tsv (columnas de DTC-104)",
+            ALLELES_PATH => "repeat_alleles.tsv (columnas de DTC-104)",
+            _ => "repeat-catalog-metadata-v1.schema.json",
         },
     )
     .with("detail", detail.into())
@@ -163,7 +185,10 @@ pub fn validate_published_repeat_catalog(
 ) -> Result<(), Diagnostic> {
     let artifact = |id: &str| inputs.artifacts.iter().find(|artifact| artifact.id == id);
     let Some(detection) = inputs.effective.get("repeat_detection") else {
-        if artifact(METADATA_ID).is_some() || artifact(TABLE_ID).is_some() {
+        if artifact(METADATA_ID).is_some()
+            || artifact(TABLE_ID).is_some()
+            || artifact(ALLELES_ID).is_some()
+        {
             return Err(catalog_reject(
                 METADATA_PATH,
                 "hay un catálogo publicado y la configuración efectiva no declara la sección de microsatélites",
@@ -223,6 +248,34 @@ pub fn validate_published_repeat_catalog(
         return Err(catalog_reject(
             TABLE_PATH,
             "el tamaño de la tabla no es el del manifiesto",
+        ));
+    }
+    // La tabla de alelos de los detectados (entrega 4 bis): enlace con huella
+    // desde la efectiva y artefacto del manifiesto, como el par del catálogo.
+    let alleles_link = object(
+        detection.get("alleles_table"),
+        "repeat_detection.alleles_table",
+    )?;
+    if text(alleles_link.get("path"), "alleles_table.path")? != ALLELES_PATH {
+        return Err(catalog_reject(
+            ALLELES_PATH,
+            "repeat_detection.alleles_table.path no es la ruta de la tabla de alelos",
+        ));
+    }
+    let alleles_linked_sha = text(alleles_link.get("sha256"), "alleles_table.sha256")?;
+    let alleles_artifact = listed(ALLELES_ID, ALLELES_KIND, ALLELES_PATH)?;
+    let alleles_bytes = read(ALLELES_PATH)?;
+    let alleles_sha = sha256_hex(&alleles_bytes);
+    if alleles_sha != alleles_linked_sha || alleles_sha != alleles_artifact.digest {
+        return Err(catalog_reject(
+            ALLELES_PATH,
+            "la huella de la tabla de alelos no es la del enlace de la efectiva o la del manifiesto",
+        ));
+    }
+    if alleles_bytes.len() as u64 != alleles_artifact.size_bytes {
+        return Err(catalog_reject(
+            ALLELES_PATH,
+            "el tamaño de la tabla de alelos no es el del manifiesto",
         ));
     }
     let metadata: Value = serde_json::from_slice(&metadata_bytes)
@@ -609,19 +662,19 @@ pub fn validate_published_repeat_catalog(
         }
     }
 
-    // --- La tabla dice lo mismo que `repeat_loci` -------------------------
+    // --- Las filas declaradas son `repeat_loci` ---------------------------
     let loci = array(inputs.effective.get("repeat_loci"), "repeat_loci")?;
-    if loci.len() != rows.len() {
+    if loci.len() != declared.len() {
         return Err(catalog_reject(
             TABLE_PATH,
             format!(
-                "la tabla tiene {} loci y repeat_loci de la efectiva {}",
-                rows.len(),
+                "la tabla tiene {} loci declarados y repeat_loci de la efectiva {}",
+                declared.len(),
                 loci.len()
             ),
         ));
     }
-    for (row, locus) in rows.iter().zip(loci) {
+    for (row, locus) in declared.iter().zip(loci) {
         let expected = json!({
             "id": row.id,
             "origin": row.origin.as_str(),
@@ -652,7 +705,118 @@ pub fn validate_published_repeat_catalog(
             ));
         }
     }
+
+    // --- La tabla de alelos: los detectados, su forma y su aritmética -------
+    let alleles = parse_alleles_table(&alleles_bytes)?;
+    let detected: Vec<&str> = rows
+        .iter()
+        .filter(|row| row.origin == Origin::Detected)
+        .map(|row| row.id)
+        .collect();
+    let mut grouped: Vec<(&str, Vec<&AlleleRow<'_>>)> = Vec::new();
+    for row in &alleles {
+        match grouped.last_mut() {
+            Some((locus, rows)) if *locus == row.locus_id => rows.push(row),
+            _ => grouped.push((row.locus_id, vec![row])),
+        }
+    }
+    if grouped
+        .iter()
+        .map(|(locus, _)| *locus)
+        .ne(detected.iter().copied())
+    {
+        return Err(catalog_reject(
+            ALLELES_PATH,
+            "los loci de la tabla de alelos no son los detectados del catálogo, en su orden",
+        ));
+    }
+    let haplotype_copies = published_haplotype_copies(inputs.effective).ok_or_else(|| {
+        catalog_reject(
+            ALLELES_PATH,
+            "la efectiva no publica las copias haplotípicas de sus poblaciones iniciales",
+        )
+    })?;
+    for (locus, rows) in &grouped {
+        let mut sequences_seen = std::collections::BTreeSet::new();
+        let mut copies: u64 = 0;
+        for (index, row) in rows.iter().enumerate() {
+            if row.allele_index != index as u64 {
+                return Err(catalog_reject(
+                    ALLELES_PATH,
+                    format!("{locus}: los índices de alelo no van de 0 en 0 sin huecos"),
+                ));
+            }
+            if row.origin != "generated" {
+                return Err(catalog_reject(
+                    ALLELES_PATH,
+                    format!("{locus}: un alelo de un detectado no es generated"),
+                ));
+            }
+            // Una `N` puede estar dentro de un tramo detectado (cuenta como
+            // una base que no encaja en la pureza), y los alelos la heredan.
+            if row.sequence.is_empty()
+                || !row
+                    .sequence
+                    .bytes()
+                    .all(|base| matches!(base, b'A' | b'C' | b'G' | b'T' | b'N'))
+            {
+                return Err(catalog_reject(
+                    ALLELES_PATH,
+                    format!("{locus}: la secuencia de un alelo no es una cadena de A, C, G, T y N"),
+                ));
+            }
+            if !sequences_seen.insert(row.sequence) {
+                return Err(catalog_reject(
+                    ALLELES_PATH,
+                    format!("{locus}: dos alelos tienen la misma secuencia"),
+                ));
+            }
+            if row.applied_events.checked_add(row.unapplied_events) != Some(row.drawn_events) {
+                return Err(catalog_reject(
+                    ALLELES_PATH,
+                    format!("{locus}: los pasos aplicados y no aplicados no suman los sorteados"),
+                ));
+            }
+            copies = copies.saturating_add(row.realized_copies);
+        }
+        if copies != haplotype_copies {
+            return Err(catalog_reject(
+                ALLELES_PATH,
+                format!(
+                    "{locus}: las copias realizadas suman {copies} y las copias haplotípicas \
+                     publicadas son {haplotype_copies}"
+                ),
+            ));
+        }
+        for row in rows {
+            let expected = (copies > 0).then(|| row.realized_copies as f64 / copies as f64);
+            if row.realized_frequency.map(f64::to_bits) != expected.map(f64::to_bits) {
+                return Err(catalog_reject(
+                    ALLELES_PATH,
+                    format!(
+                        "{locus}: la frecuencia realizada de un alelo no es sus copias entre las \
+                         del locus, o «.» sin copias"
+                    ),
+                ));
+            }
+        }
+    }
     Ok(())
+}
+
+/// Las copias haplotípicas de las poblaciones iniciales **publicadas**:
+/// individuos por ploidía, con aritmética comprobada; `None` si algo falta o
+/// desborda.
+fn published_haplotype_copies(effective: &Map<String, Value>) -> Option<u64> {
+    effective
+        .get("initial_populations")?
+        .as_array()?
+        .iter()
+        .try_fold(0_u64, |total, population| {
+            let individuals = population.get("individual_count")?.as_u64()?;
+            let ploidy = population.get("ploidy")?.as_u64()?;
+            total.checked_add(individuals.checked_mul(ploidy)?)
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -840,6 +1004,166 @@ fn parse_table(bytes: &[u8]) -> Result<Vec<Row<'_>>, Diagnostic> {
         });
     }
     Ok(rows)
+}
+
+/// Una fila de la tabla de alelos de los detectados (DTC-104).
+pub(crate) struct AlleleRow<'a> {
+    pub(crate) locus_id: &'a str,
+    pub(crate) allele_index: u64,
+    pub(crate) sequence: &'a str,
+    pub(crate) origin: &'a str,
+    pub(crate) declared_frequency: f64,
+    pub(crate) realized_copies: u64,
+    /// `None` es el `.` de un locus sin copias sorteadas.
+    pub(crate) realized_frequency: Option<f64>,
+    pub(crate) drawn_events: u64,
+    pub(crate) applied_events: u64,
+    pub(crate) unapplied_events: u64,
+    pub(crate) vcf_tract_bases_bound: u64,
+}
+
+/// Una proporción escrita como decimal: finita y en `[0, 1]`.
+fn proportion(field: &str) -> Option<f64> {
+    field
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+}
+
+/// Lee la tabla de alelos con su forma estricta: cabecera exacta, trece
+/// columnas, enteros canónicos, proporciones decimales en `[0, 1]` y `.` solo
+/// en la frecuencia realizada. La usan también los jueces de `src/results.rs`
+/// que la leen, para que la tabla se lea de una sola manera.
+pub(crate) fn parse_alleles_table(bytes: &[u8]) -> Result<Vec<AlleleRow<'_>>, Diagnostic> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| catalog_reject(ALLELES_PATH, "la tabla de alelos no es UTF-8"))?;
+    let body = text.strip_suffix('\n').ok_or_else(|| {
+        catalog_reject(
+            ALLELES_PATH,
+            "la tabla de alelos no termina en un salto de línea",
+        )
+    })?;
+    let mut lines = body.split('\n');
+    if lines.next() != Some(ALLELES_HEADER) {
+        return Err(catalog_reject(
+            ALLELES_PATH,
+            "la cabecera de la tabla de alelos no es la del contrato",
+        ));
+    }
+    let mut rows = Vec::new();
+    for line in lines {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [
+            locus_id,
+            allele_index,
+            sequence,
+            origin,
+            declared_frequency,
+            effective_frequency,
+            realized_copies,
+            realized_frequency,
+            drawn_events,
+            applied_events,
+            unapplied_events,
+            truth_tract_bases_bound,
+            vcf_tract_bases_bound,
+        ] = fields.as_slice()
+        else {
+            return Err(catalog_reject(
+                ALLELES_PATH,
+                format!(
+                    "{}: una fila de la tabla de alelos no tiene trece columnas",
+                    fields[0]
+                ),
+            ));
+        };
+        let integers = [
+            allele_index,
+            realized_copies,
+            drawn_events,
+            applied_events,
+            unapplied_events,
+            truth_tract_bases_bound,
+            vcf_tract_bases_bound,
+        ]
+        .map(|field| canonical_integer(field));
+        let [
+            Some(allele_index),
+            Some(realized_copies),
+            Some(drawn_events),
+            Some(applied_events),
+            Some(unapplied_events),
+            Some(_truth_tract_bases_bound),
+            Some(vcf_tract_bases_bound),
+        ] = integers
+        else {
+            return Err(catalog_reject(
+                ALLELES_PATH,
+                format!("{locus_id}: una columna entera no es un entero canónico"),
+            ));
+        };
+        let (Some(declared_frequency), Some(_effective_frequency)) = (
+            proportion(declared_frequency),
+            proportion(effective_frequency),
+        ) else {
+            return Err(catalog_reject(
+                ALLELES_PATH,
+                format!("{locus_id}: una frecuencia no es un decimal en [0, 1]"),
+            ));
+        };
+        let realized_frequency = match *realized_frequency {
+            "." => None,
+            value => Some(proportion(value).ok_or_else(|| {
+                catalog_reject(
+                    ALLELES_PATH,
+                    format!(
+                        "{locus_id}: la frecuencia realizada no es un decimal en [0, 1] ni «.»"
+                    ),
+                )
+            })?),
+        };
+        rows.push(AlleleRow {
+            locus_id,
+            allele_index,
+            sequence,
+            origin,
+            declared_frequency,
+            realized_copies,
+            realized_frequency,
+            drawn_events,
+            applied_events,
+            unapplied_events,
+            vcf_tract_bases_bound,
+        });
+    }
+    Ok(rows)
+}
+
+/// Un locus de la tabla del catálogo publicada, como lo leen los jueces de
+/// `src/results.rs` que atribuyen registros a loci o rehacen el abanico de un
+/// detectado.
+pub(crate) struct CatalogLocus<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) sequence_id: &'a str,
+    pub(crate) start: u64,
+    pub(crate) end: u64,
+    pub(crate) motifs: Vec<&'a [u8]>,
+    pub(crate) detected: bool,
+}
+
+/// Los loci de la tabla del catálogo publicada, leídos con su forma estricta.
+pub(crate) fn published_catalog_loci(bytes: &[u8]) -> Result<Vec<CatalogLocus<'_>>, Diagnostic> {
+    Ok(parse_table(bytes)?
+        .into_iter()
+        .map(|row| CatalogLocus {
+            id: row.id,
+            sequence_id: row.sequence_id,
+            start: row.start,
+            end: row.end,
+            motifs: row.motifs,
+            detected: row.origin == Origin::Detected,
+        })
+        .collect())
 }
 
 /// Un tramo detectado: un locus detectado de la tabla, un sustituido o un

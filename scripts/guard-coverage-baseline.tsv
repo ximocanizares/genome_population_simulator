@@ -499,7 +499,7 @@ src/f5_closure.rs	42	5
 # La dispara `the_reconstruction_ties_what_the_judge_cannot_see`
 # (`tests/repeat_catalog_validation.rs`), que exige el motivo exacto y muere al quitarla
 # (mutación M12 del plan, en una copia aparte).
-src/results.rs	726	153
+src/results.rs	739	154
 src/event_manifest.rs	147	8
 src/truth_validation.rs	121	32
 # **El 13/10/2026 (DT-015) `src/truth_schema.rs` pasa de 69 a 70 comprobaciones
@@ -521,4 +521,17 @@ src/technical_profile.rs	15	5
 # frente al manifiesto), todas disparadas por `tests/repeat_catalog_validation.rs`, que
 # exige el motivo exacto de cada una con el catálogo publicado alterado a mano. El techo
 # es cero: una comprobación nueva que nadie dispare rompe la puerta.
-src/repeat_catalog_validation.rs	59	0
+# **El 01/11/2026 (entrega 4 bis del plan de detección) los detectados salen de la
+# efectiva y del manifiesto y sus alelos van en `repeat_alleles.tsv`.** El juez del
+# catálogo (`src/repeat_catalog_validation.rs`) pasa de 59 a 78 comprobaciones: el
+# enlace, la huella y el tamaño de la tabla de alelos, su lector estricto (siete) y su
+# aritmética (nueve); todas las dispara `tests/repeat_catalog_validation.rs` con la
+# tabla, la efectiva o el manifiesto alterados a mano, y el techo sigue en cero.
+# `src/results.rs` pasa de 726 a 739: el juez del abanico de los detectados (nueve),
+# la atadura de la tabla de alelos al TOML (dos) y la contabilidad de tracto (la
+# lectura de las dos tablas y la parte VCF de cada fila de cada detectado). Doce se
+# disparan; la que no es la derivación de la subsemilla del abanico de un detectado,
+# que solo falla con un componente de más de 4 GiB, **inalcanzable en la práctica**
+# como la gemela de los declarados, que ya contaba en el techo: el techo sube de 153
+# a 154 por ella.
+src/repeat_catalog_validation.rs	78	0

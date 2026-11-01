@@ -1742,16 +1742,16 @@
         },
         "loci": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "$ref": "#/$defs/repeat_locus"
-          }
+          },
+          "description": "Los loci DECLARADOS. Con la sección de microsatélites, los detectados no van aquí sino en el catálogo y en la tabla de alelos listados como artefactos (entrega 4 bis, 01/11/2026), y la lista puede quedar vacía; sin ella, tiene al menos un locus salvo en un paquete fallido, que sin unidad genotípica registra solo los declarados (DTC-045). AVISO: este esquema NO puede comprobar esa condición, que depende de la lista de artefactos; la sostiene el lector de Rust."
         },
         "tract_output": {
           "$ref": "#/$defs/repeat_tract_output"
         }
       },
-      "description": "Repeticiones en tándem de la ejecución. La PROCEDENCIA de la referencia va aquí porque de ella depende el significado de lo demás: con una referencia suministrada el tracto ya estaba en el genoma con las interrupciones que tuviera y la pureza es un valor observado; con una simulada lo puso el propio simulador. La sección existe solo en la versión 6, y la versión 6 existe solo cuando la configuración declara algún locus."
+      "description": "Repeticiones en tándem de la ejecución. La PROCEDENCIA de la referencia va aquí porque de ella depende el significado de lo demás: con una referencia suministrada el tracto ya estaba en el genoma con las interrupciones que tuviera y la pureza es un valor observado; con una simulada lo puso el propio simulador. La sección existe solo en la versión 6, y la versión 6 existe solo cuando el catálogo final tiene algún locus, declarado o detectado."
     },
     "repeat_tract_output": {
       "type": "object",

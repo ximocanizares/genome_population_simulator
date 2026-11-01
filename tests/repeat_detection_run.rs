@@ -178,29 +178,62 @@ fn validate(config: &Path) -> Result<(), Diagnostic> {
     preflight_validated_config_with_authorizations(&effective, ExecutionAuthorizations::default())
 }
 
-/// El catálogo publicado: `(id, origen, secuencia, inicio, fin, motivos)`.
-fn catalog(effective: &Value) -> Vec<(String, String, String, u64, u64, String)> {
-    effective["repeat_loci"]
-        .as_array()
-        .expect("repeat_loci")
-        .iter()
-        .map(|locus| {
+/// El paquete publicado de una ejecución de [`run`]: `published/` junto al
+/// TOML, cuya ruta la efectiva publica en `source_path`.
+fn published_dir(effective: &Value) -> PathBuf {
+    Path::new(effective["source_path"].as_str().expect("source_path"))
+        .parent()
+        .expect("raíz")
+        .join("published")
+}
+
+/// Una fila del catálogo publicado: `(id, origen, secuencia, inicio, fin,
+/// motivos)`.
+type CatalogEntry = (String, String, String, u64, u64, String);
+
+/// El catálogo publicado: `(id, origen, secuencia, inicio, fin, motivos)`,
+/// leído de `repeat_catalog.tsv`. Desde la entrega 4 bis la efectiva solo
+/// lleva los declarados; el catálogo, todos.
+fn catalog(effective: &Value) -> Vec<CatalogEntry> {
+    let Ok(table) = fs::read_to_string(published_dir(effective).join("repeat_catalog.tsv")) else {
+        assert!(
+            effective["repeat_loci"]
+                .as_array()
+                .is_none_or(Vec::is_empty),
+            "sin catálogo publicado no puede haber loci"
+        );
+        return Vec::new();
+    };
+    table
+        .lines()
+        .skip(1)
+        .map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
             (
-                locus["id"].as_str().expect("id").to_owned(),
-                locus["origin"].as_str().expect("origin").to_owned(),
-                locus["sequence_id"].as_str().expect("sequence").to_owned(),
-                locus["start"].as_u64().expect("start"),
-                locus["end"].as_u64().expect("end"),
-                locus["motifs"]
-                    .as_array()
-                    .expect("motifs")
-                    .iter()
-                    .map(|motif| motif.as_str().expect("motivo"))
-                    .collect::<Vec<_>>()
-                    .join(","),
+                fields[0].to_owned(),
+                fields[6].to_owned(),
+                fields[1].to_owned(),
+                fields[2].parse().expect("inicio"),
+                fields[3].parse().expect("fin"),
+                fields[4].to_owned(),
             )
         })
         .collect()
+}
+
+/// Las secuencias de los alelos de cada detectado, de `repeat_alleles.tsv`.
+fn detected_alleles(effective: &Value) -> std::collections::BTreeMap<String, Vec<String>> {
+    let table = fs::read_to_string(published_dir(effective).join("repeat_alleles.tsv"))
+        .expect("tabla de alelos");
+    let mut alleles = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for line in table.lines().skip(1) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        alleles
+            .entry(fields[0].to_owned())
+            .or_default()
+            .push(fields[2].to_owned());
+    }
+    alleles
 }
 
 fn entry(
@@ -293,10 +326,16 @@ fn planted_tracts_are_detected_exactly_where_they_were_written() {
         );
         let effective = run(&root, &config).expect("la ejecución con detección");
         assert_eq!(catalog(&effective), planted_catalog(), "semilla {seed}");
-        // Todos reciben alelos del deslizamiento común.
-        for locus in effective["repeat_loci"].as_array().expect("loci") {
-            assert_eq!(locus["slippage"]["mean_events"], 1.0, "{locus}");
-            assert!(!locus["alleles"].as_array().expect("alelos").is_empty());
+        // Todos reciben alelos del deslizamiento común, que la efectiva
+        // publica una vez; sus alelos van en la tabla de alelos.
+        assert_eq!(
+            effective["repeat_detection"]["slippage"]["mean_events"],
+            1.0
+        );
+        assert_eq!(effective["repeat_loci"], serde_json::json!([]));
+        let alleles = detected_alleles(&effective);
+        for (id, ..) in catalog(&effective) {
+            assert!(alleles.get(&id).is_some_and(|a| !a.is_empty()), "{id}");
         }
         assert_eq!(
             effective["repeat_detection"]["min_copies"],
@@ -1281,6 +1320,82 @@ fn with_pcr_an_empty_final_catalog_publishes_what_a_run_without_the_section_does
     }
 }
 
+/// Borra un directorio temporal al soltarlo, también si la prueba falla.
+struct TemporaryRoot(PathBuf);
+
+impl Drop for TemporaryRoot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// **Con PCR, tartamudeo clonal y solo detectados, el juez no toma el
+/// catálogo por vacío** (entrega 4 bis). Una región que contiene solo el
+/// `(CA)×10` plantado: el catálogo final tiene un locus detectado y ningún
+/// declarado, de modo que `repeat_loci` de la efectiva y la lista de loci del
+/// manifiesto están vacías. La ejecución conecta el tartamudeo clonal (el
+/// evento sale con el catálogo de azar `f4-technical-v6`) y el juez de los
+/// recursos publicados, que corre al escribir el manifiesto, lo acepta.
+///
+/// **Debe fallar contra** decidir que el catálogo está vacío mirando
+/// `repeat_loci` de la efectiva, como hasta la entrega 4: con solo detectados
+/// lo estaría siempre, el juez desconectaría el tartamudeo clonal al rehacer
+/// el evento desde el TOML y la publicación moriría con «technical_event
+/// efectivo no coincide exactamente con el TOML resuelto».
+#[test]
+fn with_pcr_clonal_stutter_and_only_detected_loci_the_catalog_is_not_empty() {
+    let sequences = planted_reference();
+    let root = TemporaryRoot(temporary("pcr-only-detected"));
+    let config = write_config(
+        &root.0,
+        SEED_A,
+        &sequences,
+        &[("chr1", 2500)],
+        &format!(
+            "[reference.repeat_detection]\n\n{SLIPPAGE}[[reference.repeat_detection.regions]]\n\
+             sequence = \"chr1\"\nstart = 790\nend = 830\n\n"
+        ),
+        &format!(
+            "{AMPLIFIED}\n[technical_event.stutter]\nenabled = true\n\n\
+             [[technical_event.stutter.steps]]\nunits = -3\nweight = 0.05\n\n\
+             [[technical_event.stutter.steps]]\nunits = -2\nweight = 0.15\n\n\
+             [[technical_event.stutter.steps]]\nunits = -1\nweight = 0.6\n\n\
+             [[technical_event.stutter.steps]]\nunits = 1\nweight = 0.2\n"
+        ),
+    );
+    let effective = run(&root.0, &config)
+        .unwrap_or_else(|error| panic!("solo detectados con PCR: {}", detail(&error)));
+    assert_eq!(
+        catalog(&effective),
+        vec![entry(
+            "SSR-1-801-820-CA",
+            "detected",
+            "chr1",
+            801,
+            820,
+            "CA"
+        )]
+    );
+    assert_eq!(effective["repeat_loci"], serde_json::json!([]));
+    let published = root.0.join("published");
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(published.join("manifest.json")).expect("manifiesto"))
+            .expect("JSON");
+    assert_eq!(manifest["repeat_loci"]["loci"], serde_json::json!([]));
+    let event: Value = serde_json::from_slice(
+        &fs::read(published.join("events/reads-main/manifest.json")).expect("evento"),
+    )
+    .expect("JSON");
+    assert_eq!(
+        event["rng_catalog"], "f4-technical-v6",
+        "el tartamudeo clonal está conectado"
+    );
+    assert_eq!(
+        effective["technical_event"]["rng_catalog"], "f4-technical-v6",
+        "la efectiva publica el tartamudeo clonal conectado"
+    );
+}
+
 /// **El juez físico rechaza una efectiva sin su sección de microsatélites por
 /// la sección, y no con un defecto interno.** Un paquete sin población (la
 /// referencia se lee entonces sin bases si nada de la efectiva las pide) al
@@ -1355,9 +1470,10 @@ fn the_physical_judge_rejects_an_effective_config_without_its_detection_section(
         .expect("objeto")
         .remove("repeat_detection")
         .expect("la efectiva publicaba la sección");
-    // El catálogo aparte también se quita del manifiesto (los ficheros se
-    // quedan en disco): con él, el juez del catálogo rechazaría antes un
-    // catálogo sin sección, y esta prueba es la de la reconstrucción.
+    // El catálogo aparte y la tabla de alelos también se quitan del
+    // manifiesto (los ficheros se quedan en disco): con ellos, el juez del
+    // catálogo rechazaría antes un catálogo sin sección, y esta prueba es la
+    // de la reconstrucción.
     let mut manifest = manifest.clone();
     for pointer in ["/artifacts", "/output_categories/minimum"] {
         manifest
@@ -1366,7 +1482,9 @@ fn the_physical_judge_rejects_an_effective_config_without_its_detection_section(
             .expect("lista")
             .retain(|entry| {
                 let id = entry.get("id").unwrap_or(entry);
-                id != "repeat-catalog-metadata" && id != "repeat-catalog-tsv"
+                id != "repeat-catalog-metadata"
+                    && id != "repeat-catalog-tsv"
+                    && id != "repeat-alleles-tsv"
             });
     }
     let error = judge(&without, &manifest).expect_err("sin la sección se rechaza");
@@ -1409,7 +1527,7 @@ fn a_declared_locus_named_like_a_remaining_detected_one_is_rejected() {
 /// Una ejecución con un `(CAG)×10` insertado tras la base 1000 (30 bases) y un
 /// `(CA)×10` plantado en 2001..2020 de partida, que en la referencia final
 /// ocupa 2031..2050, con las regiones dadas.
-fn insertion_with_regions(regions: &str) -> Result<Value, Diagnostic> {
+fn insertion_with_regions(regions: &str) -> Result<Vec<CatalogEntry>, Diagnostic> {
     let root = temporary("insertion-regions");
     let mut chr1 = background(0x1234_5678_9ABC_DEF1, 4000);
     plant(&mut chr1, 2001, "CA", 10);
@@ -1435,7 +1553,8 @@ fn insertion_with_regions(regions: &str) -> Result<Value, Diagnostic> {
         ),
     )
     .expect("configuración");
-    let outcome = run(&root, &config);
+    // El catálogo se lee antes de borrar el paquete: vive en su tabla.
+    let outcome = run(&root, &config).map(|effective| catalog(&effective));
     let _ = fs::remove_dir_all(&root);
     outcome
 }
@@ -1456,19 +1575,19 @@ fn with_insertion_the_regions_are_in_final_coordinates() {
         )
     };
     let inserted = region(990, 1040);
-    let effective = insertion_with_regions(&format!("{inserted}{}", region(2025, 4030)))
+    let found = insertion_with_regions(&format!("{inserted}{}", region(2025, 4030)))
         .unwrap_or_else(|error| panic!("regiones finales: {}", detail(&error)));
     assert_eq!(
-        catalog(&effective),
+        found,
         vec![
             entry("STR-INS", "declared", "chr1", 1001, 1030, "CAG"),
             entry("SSR-1-2031-2050-CA", "detected", "chr1", 2031, 2050, "CA"),
         ]
     );
-    let effective = insertion_with_regions(&format!("{inserted}{}", region(1995, 2025)))
+    let found = insertion_with_regions(&format!("{inserted}{}", region(1995, 2025)))
         .unwrap_or_else(|error| panic!("regiones de partida: {}", detail(&error)));
     assert_eq!(
-        catalog(&effective),
+        found,
         vec![entry("STR-INS", "declared", "chr1", 1001, 1030, "CAG")]
     );
 }

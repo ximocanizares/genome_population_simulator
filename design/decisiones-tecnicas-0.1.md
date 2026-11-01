@@ -95,7 +95,7 @@ planificación; ya no existe una discrepancia entre fuentes.
 | DTC-032 | `N` representa una base desconocida que se conserva exactamente y nunca se resuelve. Pregunta 27 del informe adversarial (RAD-007); REQ-REF-14/23, REQ-IND-58/59, REQ-DAT-72/73 y REQ-VER-47 | Evitar que operaciones distintas inventen verdades incompatibles desde una base no determinada | SNP, selección y motivos repetidos excluyen `N`; SV puede transportarla; WGS la lee con Phred 0, GC la excluye y cobertura la cuenta; VCF no emite SNP con `REF=N` y usa complemento cuando haga falta |
 | DTC-033 | Las sustituciones se resuelven por coincidencia de todos sus selectores y dominancia parcial entre ejes, sin prioridad implícita entre ejes distintos. Pregunta 3 del informe adversarial (RAD-009); REQ-CONF-116 a REQ-CONF-123 | Obtener un único valor efectivo auditable sin inventar una prioridad global que cambie según la familia | Una única regla máxima gana; máximas incomparables, duplicados exactos, regiones solapadas y selectores no autorizados se rechazan antes de simular; los eventos técnicos nunca sustituyen parámetros biológicos |
 | <a id="dtc-034"></a>DTC-034 | TOML es el único formato de configuración escrito por la persona usuaria en v1, tanto para el fichero general como para los escenarios. Resolución de DTPD-001; REQ-CONF-01 a REQ-CONF-14, REQ-CONF-51/52, REQ-CONF-101/105 y REQ-CONF-116 a REQ-CONF-123 | Mantener un único formato de autoría legible y hacer explícitas identidad, orden y procedencia sin depender de la jerarquía física del fichero | Todo fichero exige versión de esquema; se conserva una copia exacta del TOML; `DeclaredConfig` representa lo escrito con su ubicación y `EffectiveConfig`, la configuración validada, heredada y resuelta e inmutable en su ámbito. Se rechazan campos desconocidos, claves o campos duplicados y combinaciones inválidas con diagnósticos localizables. Fases, eventos y cruces son listas de tablas con identificadores explícitos; su identidad y precedencia no se deducen de la jerarquía física. DTC-036 fija la compatibilidad; DTC-035, la serialización efectiva. No selecciona crate ni versión de TOML o Rust |
-| <a id="dtc-035"></a>DTC-035 | Los manifiestos de v1 son JSON conforme a RFC 8259: existe un `manifest.json` general en la raíz y otro por evento, validados con esquemas JSON Schema Draft 2020-12 distintos que reutilizan definiciones comunes. La configuración efectiva se escribe aparte en `effective-config.json`, versionada y enlazada por el manifiesto general. Resolución de DTPD-002; REQ-MAN-01/02, REQ-MAN-72 a REQ-MAN-88 y REQ-SAL-03/04/17/18 | Separar el documento de autoría TOML de salidas de intercambio verificables y mantener completo el contrato de trazabilidad sin convertir artefactos independientes en contenido duplicado del manifiesto | Cada manifiesto exige `schema_version` y `manifest_kind`, se escribe de forma legible y contiene directamente todo lo que REQ-MAN obliga a registrar o enumerar. Los artefactos independientes exigidos se enlazan mediante identificador, ruta relativa, tipo, tamaño y suma de comprobación. Las listas con semántica de conjunto se ordenan establemente por identificador, sin prometer identidad binaria general. V1 no fragmenta manifiestos en JSONL ni tablas auxiliares; el preflight incluye su tamaño y nunca reduce contenido obligatorio. La configuración original permanece como copia TOML exacta. DTC-036 fija la compatibilidad; DTC-040, el algoritmo de suma; DTC-045, la publicación; DTC-043, la política de dependencias; y DTC-048, toolchain y lock |
+| <a id="dtc-035"></a>DTC-035 | Los manifiestos de v1 son JSON conforme a RFC 8259: existe un `manifest.json` general en la raíz y otro por evento, validados con esquemas JSON Schema Draft 2020-12 distintos que reutilizan definiciones comunes. La configuración efectiva se escribe aparte en `effective-config.json`, versionada y enlazada por el manifiesto general. Resolución de DTPD-002; REQ-MAN-01/02, REQ-MAN-72 a REQ-MAN-88 y REQ-SAL-03/04/17/18 | Separar el documento de autoría TOML de salidas de intercambio verificables y mantener completo el contrato de trazabilidad sin convertir artefactos independientes en contenido duplicado del manifiesto | Cada manifiesto exige `schema_version` y `manifest_kind`, se escribe de forma legible y contiene directamente todo lo que REQ-MAN obliga a registrar o enumerar. Los artefactos independientes exigidos se enlazan mediante identificador, ruta relativa, tipo, tamaño y suma de comprobación. Las listas con semántica de conjunto se ordenan establemente por identificador, sin prometer identidad binaria general. V1 no fragmenta manifiestos en JSONL ni tablas auxiliares; el preflight incluye su tamaño y nunca reduce contenido obligatorio. La configuración original permanece como copia TOML exacta. DTC-036 fija la compatibilidad; DTC-040, el algoritmo de suma; DTC-045, la publicación; DTC-043, la política de dependencias; y DTC-048, toolchain y lock. **Nota fechada, 01/11/2026 (detección de microsatélites).** Excepción a «V1 no fragmenta manifiestos en JSONL ni tablas auxiliares»: lo que crece con los loci **detectados** sobre el genoma —el catálogo de microsatélites y los alelos de los detectados— viaja en tablas propias, enlazadas con huella desde la configuración efectiva y listadas con tamaño y huella en el manifiesto general (REQ-MAN-98, DTC-104). Decidido por el responsable en la pausa de la entrega 1 del plan de detección (29/10/2026, DP-SSR-13 b) y aplicado a esta decisión el 01/11/2026: con 56 736 loci los dos documentos pasaban de medio gigabyte |
 | <a id="dtc-036"></a>DTC-036 | Todo documento estructurado propio declara su clase y `schema_version`: `config_kind` distingue configuración general y escenario, `manifest_kind` distingue los manifiestos, `effective-config.json` usa el discriminador equivalente de su esquema y la salida JSON de diagnósticos declara `diagnostic_kind`. La primera versión de esquema es la cadena exacta `"1"`; las posteriores se añaden por extensión (F2 la `"2"`, F3 la configuración efectiva `"3"`, F4 la `"4"` de la configuración efectiva y del manifiesto general, y las repeticiones en tándem la `"6"` de ambos). Resolución de DTPD-003; REQ-CONF-01/10/27/111 a REQ-CONF-115, REQ-MAN-02/69/73 y REQ-SAL-03/04 | Impedir que un documento se interprete con la clase o semántica de otra versión y separar la evolución del esquema de la versión del programa o del dialecto de validación | El programa solo lee versiones expresamente conocidas, y hoy son: configuración efectiva `"4"` y `"6"` (`effective_schema_version`); manifiesto general `"4"` y `"6"` (`is_supported_general_manifest_version`); manifiesto de evento `"2"` y `"3"`; TOML general `"2"` y `"4"` (el `"4"` es la extensión que puede declarar repeticiones; el despacho admite además el `"3"` de F5, y el escenario F5 el `"1"`); diagnósticos `"1"`. Los lectores de las versiones `"1"` y `"2"` de la configuración efectiva y del manifiesto general, y el de la `"3"` de la efectiva, se retiraron al cerrar F4.1 (DTC-082), antes de esta revisión; el código muerto que quedaba de la `"1"` se borró el 11/10/2026. Una versión ausente, posterior o desconocida se rechaza. No hay migración automática ni modificación silenciosa; el programa escribe siempre la versión actual de cada clase. Versión del programa, `schema_version` y JSON Schema Draft 2020-12 son conceptos distintos. Los esquemas de las versiones retiradas se conservan en `schemas/` como ficheros congelados, sin lector activo: el campo técnico F3 no era una extensión inocua del contrato cerrado de la efectiva `"2"`. DTC-044 concreta la clase y el esquema del documento de diagnósticos **Nota fechada, 28/10/2026 (etapa alfa).** La etiqueta `v0.2.0-test` es un ejecutable de pruebas y **no una publicación**: mientras el proyecto esté en esta etapa, los esquemas y formatos se **retocan en su versión actual** en vez de crear una versión nueva, aunque el cambio añada campos o secciones. Lo que dice esta decisión sobre extensión por versión nueva rige desde que el responsable declare una publicación; hasta entonces no hay obligación de compatibilidad con lo ya escrito y desaparece el riesgo de colisión de números de versión entre planes. Esto sustituye, para la detección de microsatélites, la propuesta de versiones nuevas promovidas por contenido (DP-SSR-15). El texto de arriba se conserva como historia de las versiones ya escritas |
 | <a id="dtc-037"></a>DTC-037 | La aleatoriedad de v1 usa generadores ChaCha12 nombrados y locales, nunca `StdRng` ni un flujo global. La semilla raíz y cada subsemilla tienen 256 bits y se representan en TOML, configuración efectiva y manifiestos como exactamente 64 hexadecimales minúsculos. Si falta la raíz, se obtienen 32 bytes del CSPRNG del sistema operativo antes de simular y se registran valor y origen. Resolución de DTPD-004; REQ-CONF-26/27, REQ-CONF-101/111 a REQ-CONF-115 y REQ-EVO-12/62 | Aislar biología, muestreos y eventos para que el consumo de un proceso o la planificación no alteren decisiones ajenas y permitir paralelismo reproducible sin compartir estado mutable | BLAKE3 deriva cada subsemilla con el contexto ASCII exacto `genome_population_simulator/v1/subseed`. El material binario canónico contiene, en este orden, la raíz cruda de 32 bytes, la versión de derivación como `u32` big-endian, el número de componentes como `u32` big-endian y, para cada componente en el orden normativo del catálogo de ámbitos, nombre de campo ASCII y valor UTF-8, ambos precedidos por su longitud `u32` big-endian. La identidad de flujo nunca procede de posición accidental, iteración, hilo o planificación. Se separan al menos población inicial, generaciones y procesos biológicos, muestreos y cada evento técnico, afinando por unidades independientes. Cada consumidor solo avanza su generador. Se registran raíz, origen, ChaCha12, versión de derivación y subsemillas de evento; los ámbitos internos se reconstruyen desde IDs y reglas versionadas. Ninguna fila publicada de un catálogo, sus campos/orden ni sus vectores se reescribe: añadir ámbitos exige una nueva versión de catálogo y puede conservar la versión de derivación si codificación/contexto no cambian; alterar una fila existente exige además nueva versión de derivación. Cambiar ChaCha12, BLAKE3, esta codificación o un algoritmo de muestreo cambia la reproducibilidad. DTC-038 concreta la garantía; DTC-039 separa el dominio de IDs; DTC-043 rige dependencias; DTC-048 fija el lock; DTC-040 reserva SHA-256 para integridad publicada |
 | <a id="dtc-038"></a>DTC-038 | V1 declara por separado cuatro niveles de reproducibilidad: biología; decisiones y lecturas técnicas; equivalencia semántica de salidas; e identidad binaria. Resolución de DTPD-005; REQ-CONF-26/27 y REQ-CONF-111 a REQ-CONF-115, REQ-REP-22/23 y REQ-MAN-69 | Permitir repetir y comparar cada clase de resultado sin deducir una garantía más fuerte desde otra más débil | La biología se garantiza con la misma versión del simulador, plataforma inicialmente admitida, semilla raíz, configuración efectiva, contenidos de entrada, perfiles y esquema y algoritmos aleatorios versionados. El nivel técnico exige además la misma subsemilla de evento y versiones y condiciones de las dependencias participantes. La equivalencia semántica compara contenido lógico y, ante herramientas externas, exige sus mismas versiones, parámetros y condiciones verificadas. V1 no garantiza identidad binaria por defecto para ninguna clase; solo podrá declararse por formato y condiciones tras una prueba expresa. No se promete reproducibilidad entre versiones del simulador ni entre plataformas no verificadas. El manifiesto registra por nivel `garantizado`, `no garantizado` o `no aplicable`, condiciones, versiones, perfiles, herramientas y dependencias. Toda semilla generada se registra y puede reutilizarse. Se mantienen comparadores separados para verdad lógica, contenido técnico, semántica y bytes. DTC-042 fija la plataforma oficial inicial; crates, toolchain y formatos adicionales permanecen separados |
@@ -858,11 +858,17 @@ Un paquete fallido conserva:
   metadatos, o el enlace de reutilización), el VCF con su índice **si se
   pidieron y se publicaron**, y la referencia de la simulación —la suministrada
   o, con inserción de tractos, también la final con su mapa y la sección
-  `reference_insertion`—. Exige además que se conserve la copia de la
+  `reference_insertion`— y, con la sección de microsatélites, también el par
+  del catálogo y la tabla de alelos. Exige además que se conserve la copia de la
   configuración, que la verdad cita por su huella. Si el VCF se pidió y no llegó
-  a publicarse, la unidad entera queda fuera. Con loci de repetición, `repeat_loci` publica los
-  sorteos y las bases de tracto que la verdad y el VCF conservados llevan de
-  verdad; sin unidad, cero copias sorteadas y cifras realizadas a cero;
+  a publicarse, la unidad entera queda fuera. Con loci de repetición,
+  `repeat_loci` publica los de los **declarados**, y la tabla de alelos
+  conservada los de los detectados, con los sorteos y las bases de tracto que
+  la verdad y el VCF conservados llevan de verdad; sin unidad, `repeat_loci`
+  registra los declarados con cero copias sorteadas y cifras realizadas a cero.
+  *Nota del 01/11/2026 (entrega 4 bis del plan de detección, decisión del
+  responsable): hasta esta fecha `repeat_loci` registraba todos los loci,
+  detectados incluidos, y el catálogo no formaba parte de la unidad*;
 - **el evento técnico**: completo, con sus FASTQ y su manifiesto; o, si falló
   su ensamblado, enlazado con estado `failed` y un manifiesto de evento fallido
   —la causa en `diagnostics`, las 2n salidas FASTQ `failed` sin artefacto y con
@@ -2306,8 +2312,11 @@ Quedan **provisionales**, pendientes de la pausa de decisión de la entrega 1
 del plan de detección, dos cosas: el generador sigue rechazando un tramo que
 rebase el tope de unidades del locus, de modo que el tope con que se descartan
 los satélites detectados se fija allí; y las tres limitaciones declaradas, que
-hoy viajan en cada locus generado, se publicarían **una sola vez** si el
-catálogo se publica aparte (DTC-104) y no repetidas por cada locus.
+hoy viajan en cada locus generado, se publican **una sola vez** para los
+detectados, en la sección de microsatélites de la efectiva (DTC-104); un
+declarado que genera sus alelos las sigue llevando en su bloque. *(Hasta el
+01/11/2026 esta frase decía que «se publicarían una sola vez si el catálogo se
+publica aparte»; lo fijó la entrega 4 bis del plan de detección.)*
 
 <a id="dtc-096"></a>
 
@@ -2443,6 +2452,15 @@ VCF lleva, 190. **No cambia en todos**: en la muestra de la segunda revisión
 adversarial, 109 de 474 escenarios con microsatélites publicaron la misma
 cifra que antes. Lo admite la regla S-26, porque la versión 6 aún no se ha
 publicado fuera.
+
+**Nota del 01/11/2026 (entrega 4 bis del plan de detección, decisión del
+responsable).** Para los loci detectados (DTC-104), los alelos con su origen,
+sus frecuencias y lo realizado, la contabilidad del bloque `slippage` y la
+parte de la cota de cada locus viajan en la tabla de alelos, y lo fijo del
+bloque —modelo, tamaño de paso, media, sesgo, versiones, ámbito, versión del
+catálogo de ámbitos y limitaciones— y los linajes, una vez en
+`repeat_detection.slippage`. Lo que esta decisión exige de cada locus,
+incluida la parte VCF locus a locus, vale igual en la tabla.
 
 ## DTC-098 — La referencia derivada por inserción es la de la simulación
 
@@ -2644,7 +2662,8 @@ no sea la 0 o la 1 es un error interno.
 
 **Publicación.** No cambia ningún esquema. El manifiesto sigue publicando las
 copias sorteadas y las realizadas por alelo, que se cuentan copia a copia como
-antes. Solo cambian los bytes de las ejecuciones con `f_diploid`, F > 0 y loci
+antes (desde el 01/11/2026, las de los loci detectados van en la tabla de
+alelos y no en el manifiesto; DTC-104). Solo cambian los bytes de las ejecuciones con `f_diploid`, F > 0 y loci
 de repetición.
 
 ## DTC-101 — La comparación pareja a pareja del FASTQ final es una prueba del proyecto
@@ -2844,7 +2863,8 @@ DTC-097) ni el de tartamudeo (DTC-102).
 Decisión del 28/10/2026 en lo que no depende de cifras, que concreta REQ-MAN-98
 y REQ-VAL-64. La forma de publicar la fijó la pausa de la entrega 1 del plan de
 detección (29/10/2026: catálogo aparte) y la concretó la entrega 4 (01/11/2026,
-decisión D4-1 del responsable).
+decisión D4-1 del responsable). La entrega 4 bis sacó los detectados de la
+efectiva y del manifiesto (01/11/2026, decisión del responsable).
 
 **Publicación.** Con la sección de microsatélites, la ejecución publica un
 **catálogo aparte**, con la forma del par de la matriz de SNV (DTC-054):
@@ -2861,17 +2881,37 @@ falta de copias haplotípicas y publicados), los tramos sustituidos y los
 retirados con su causa y la posición y el origen de la variante. La
 configuración efectiva lo enlaza con huella en `repeat_detection.catalog`; los
 dos ficheros figuran en el manifiesto general. Sin la sección no se escribe nada
-nuevo. **Por ahora los loci siguen además en `repeat_loci`** de la efectiva y
-del manifiesto, con sus abanicos: sacar los detectados de esos dos documentos y
-llevar sus abanicos a una tabla propia es la entrega 4 bis del plan, con su
-cambio normativo previo (REQ-MAN-95, REQ-MAN-96, REQ-VAL-60 y REQ-VAL-62). La
-verdad y el VCF no cambian de formato.
+nuevo. La verdad y el VCF no cambian de formato.
+
+**Los alelos de los detectados (entrega 4 bis, 01/11/2026)** van en
+`repeat_alleles.tsv`, una fila por alelo en el orden del catálogo y del
+abanico, con las columnas `locus_id`, `allele_index`, `sequence`, `origin`,
+`declared_frequency`, `effective_frequency`, `realized_copies`,
+`realized_frequency`, `drawn_events`, `applied_events`, `unapplied_events`,
+`truth_tract_bases_bound` y `vcf_tract_bases_bound` (las cinco últimas, del
+locus, repetidas en cada fila suya); se escribe siempre con la sección,
+después de la unidad genotípica y antes de la efectiva, que la enlaza con
+huella en `repeat_detection.alleles_table`, y figura en el manifiesto general.
+La anotación de cada alelo no se publica: se deriva de su secuencia y del
+motivo del catálogo. Lo común del deslizamiento —parámetros, versiones, ámbito,
+catálogo de ámbitos, linajes y las tres limitaciones— va una vez en
+`repeat_detection.slippage`, y las constantes de la normalización en
+`repeat_detection.frequency_normalization`. `repeat_loci` y
+`repeat_output_budget.per_locus` de la efectiva, y `repeat_loci.loci` del
+manifiesto, llevan solo los declarados. En un paquete fallido, el par del
+catálogo y la tabla de alelos forman parte de la unidad genotípica. *Hasta el
+01/11/2026 este párrafo decía: «**Por ahora los loci siguen además en
+`repeat_loci`** de la efectiva y del manifiesto, con sus abanicos: sacar los
+detectados de esos dos documentos y llevar sus abanicos a una tabla propia es
+la entrega 4 bis del plan».*
 
 **El juez no llama al productor ni al detector (decidido).** El juez que relee
 lo publicado trabaja contra el FASTA final publicado y con aritmética propia,
 sin invocar la medida de pureza ni la conversión de tramo en locus: hacerlo
 compararía el catálogo consigo mismo. Su lista de comprobaciones está en
-REQ-VAL-64. **Su límite se declara en su documentación:** no puede comprobar la
+REQ-VAL-64, que desde el 01/11/2026 incluye la forma y la aritmética de la
+tabla de alelos; el abanico de cada detectado lo rehace, desde esa tabla, el
+juez de REQ-VAL-60. **Su límite se declara en su documentación:** no puede comprobar la
 exhaustividad, porque eso exige un detector; la cubren las pruebas con verdad
 plantada y con un buscador de tiradas exactas por fuerza bruta escrito aparte.
 Un tracto puro de muchas copias absorbido en un segmento impuro que falle la

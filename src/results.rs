@@ -348,23 +348,37 @@ pub fn effective_config_document_with_reductions(
         // **La sección de microsatélites**, solo cuando el documento la declara
         // (REQ-CONF-142): sin ella no hay loci y el documento es el de antes.
         if let Some(detection) = config.repeat_detection() {
-            document["repeat_detection"] = repeat_detection_json(detection);
+            document["repeat_detection"] = repeat_detection_json(config, detection)?;
         }
     }
     Ok(document)
 }
 
 /// Lo que la efectiva publica de la detección: la versión del algoritmo, los
-/// criterios propios de la sección, el deslizamiento común y las regiones.
-/// Los mínimos de pureza y de tirada son los de `repeat_admission`, que ya se
-/// publica al lado. Los tramos retirados por una variante, los recuentos del
-/// barrido y la tabla de loci van en el catálogo aparte (REQ-MAN-98), que la
-/// ejecución enlaza con su huella en `catalog` al escribir la efectiva
-/// ([`repeat_catalog_link_json`]); esta función no lo incluye porque la huella
-/// solo existe cuando el catálogo ya está escrito.
-fn repeat_detection_json(detection: &crate::application::EffectiveRepeatDetection) -> Value {
+/// criterios propios de la sección, el deslizamiento común, las constantes de
+/// la normalización y las regiones. Los mínimos de pureza y de tirada son los
+/// de `repeat_admission`, que ya se publica al lado.
+///
+/// **Lo común a todos los detectados va aquí una sola vez** (REQ-MAN-96,
+/// DTC-104; entrega 4 bis): los parámetros del deslizamiento común, sus
+/// versiones, su ámbito de azar y la versión de su catálogo, las tres
+/// limitaciones palabra por palabra y los linajes, que son las copias
+/// haplotípicas de las poblaciones iniciales. Lo propio de cada detectado
+/// —sus alelos y la contabilidad de su generación— va en la tabla de alelos
+/// (`repeat_alleles.tsv`), y ninguno de los dos documentos JSON lo repite.
+///
+/// Los tramos retirados por una variante, los recuentos del barrido y la tabla
+/// de loci van en el catálogo aparte (REQ-MAN-98). La ejecución enlaza el
+/// catálogo y la tabla de alelos con su huella (`catalog` y `alleles_table`)
+/// al escribir la efectiva ([`repeat_catalog_link_json`],
+/// [`repeat_alleles_link_json`]); esta función no los incluye porque las
+/// huellas solo existen cuando los ficheros ya están escritos.
+fn repeat_detection_json(
+    config: &EffectiveConfig,
+    detection: &crate::application::EffectiveRepeatDetection,
+) -> Result<Value, Diagnostic> {
     let slippage = detection.slippage();
-    json!({
+    Ok(json!({
         "algorithm_version": crate::application::REPEAT_DETECTION_ALGORITHM_VERSION,
         "min_copies": detection.min_copies(),
         "max_units": detection.max_units(),
@@ -373,9 +387,43 @@ fn repeat_detection_json(detection: &crate::application::EffectiveRepeatDetectio
             "step_units": crate::repeat_slippage::SLIPPAGE_STEP_UNITS,
             "mean_events": slippage.mean_events(),
             "expansion_bias": slippage.expansion_bias(),
+            "algorithm": crate::repeat_slippage::SLIPPAGE_ALGORITHM,
+            "count_algorithm": crate::repeat_slippage::SLIPPAGE_COUNT_ALGORITHM,
+            "bias_algorithm": crate::repeat_slippage::SLIPPAGE_BIAS_ALGORITHM,
+            "rng_scope": crate::repeat_slippage::SLIPPAGE_SCOPE,
+            "rng_scope_catalog_version": crate::repeat_slippage::SLIPPAGE_SCOPE_CATALOG_VERSION,
+            "limitations": crate::repeat_slippage::SLIPPAGE_LIMITATIONS,
+            "lineages": config.haplotype_copy_count()?,
+        },
+        "frequency_normalization": {
+            "tolerance": config.normalization().tolerance(),
+            "sum_algorithm": "neumaier_sum_v1",
+            "canonical_order": "locus_id,allele_index",
         },
         "regions": detection_regions_json(detection),
-    })
+    }))
+}
+
+/// Los loci del catálogo que **no** son detectados: los que la efectiva y el
+/// manifiesto siguen publicando enteros (REQ-MAN-95, DTC-104).
+fn declared_repeat_loci(
+    config: &EffectiveConfig,
+) -> impl Iterator<Item = &crate::application::EffectiveRepeatLocus> {
+    config
+        .repeat_loci()
+        .iter()
+        .filter(|locus| locus.origin() != crate::application::RepeatLocusOrigin::Detected)
+}
+
+/// Los loci **detectados** del catálogo, en su orden: los que publica la tabla
+/// de alelos y no los documentos JSON.
+fn detected_repeat_loci(
+    config: &EffectiveConfig,
+) -> impl Iterator<Item = &crate::application::EffectiveRepeatLocus> {
+    config
+        .repeat_loci()
+        .iter()
+        .filter(|locus| locus.origin() == crate::application::RepeatLocusOrigin::Detected)
 }
 
 fn detection_regions_json(detection: &crate::application::EffectiveRepeatDetection) -> Value {
@@ -558,6 +606,136 @@ pub fn repeat_catalog_link_json(metadata_sha256: &str) -> Value {
     })
 }
 
+/// Ruta publicada de la tabla de alelos de los loci detectados (REQ-MAN-98,
+/// DTC-104; entrega 4 bis).
+pub const REPEAT_ALLELES_TSV_PATH: &str = crate::repeat_catalog_validation::ALLELES_PATH;
+/// Lo que un rechazo de la tabla de alelos cita como contrato: la tabla no
+/// tiene esquema JSON, y sus columnas las fija DTC-104.
+const REPEAT_ALLELES_SCHEMA: &str = "repeat_alleles.tsv (columnas de DTC-104)";
+/// Cabecera de la tabla de alelos, en su orden (DTC-104). Las cinco últimas
+/// columnas son del locus y se repiten en cada fila suya.
+pub const REPEAT_ALLELES_TSV_HEADER: [&str; 13] = [
+    "locus_id",
+    "allele_index",
+    "sequence",
+    "origin",
+    "declared_frequency",
+    "effective_frequency",
+    "realized_copies",
+    "realized_frequency",
+    "drawn_events",
+    "applied_events",
+    "unapplied_events",
+    "truth_tract_bases_bound",
+    "vcf_tract_bases_bound",
+];
+
+/// **La tabla de alelos de los loci detectados** (REQ-MAN-98, DTC-104): una
+/// fila por alelo de cada detectado, en el orden del catálogo y, dentro de
+/// cada locus, en el orden canónico del abanico. Solo la cabecera si no queda
+/// ningún detectado.
+///
+/// Las copias realizadas salen de los sorteos y las bases de tracto del VCF de
+/// lo medido al publicarlo, como en el manifiesto (DTC-097). La anotación de
+/// cada alelo no se publica: se deriva de su secuencia y del motivo del
+/// catálogo (decisión A2 del 01/11/2026).
+pub fn repeat_alleles_tsv_bytes(
+    config: &EffectiveConfig,
+    draws: &[RepeatAlleleDraw],
+    realized: &RealizedTractOutput,
+) -> Result<Vec<u8>, Diagnostic> {
+    let mut copies = BTreeMap::<(&str, usize), u64>::new();
+    for draw in draws {
+        *copies
+            .entry((draw.locus_id(), draw.allele_index()))
+            .or_insert(0) += 1;
+    }
+    repeat_alleles_tsv_bytes_with(
+        config,
+        |locus, index| copies.get(&(locus, index)).copied().unwrap_or(0),
+        realized,
+    )
+}
+
+/// El cuerpo de [`repeat_alleles_tsv_bytes`], con las copias realizadas de
+/// cada alelo dadas por `copies_of(locus, índice)`. El juez de los recursos
+/// publicados la llama con las copias que la tabla publicada dice, después de
+/// atarlas a la verdad, para rehacer el resto de la tabla desde el TOML.
+fn repeat_alleles_tsv_bytes_with(
+    config: &EffectiveConfig,
+    copies_of: impl Fn(&str, usize) -> u64,
+    realized: &RealizedTractOutput,
+) -> Result<Vec<u8>, Diagnostic> {
+    use std::fmt::Write as _;
+    let truth_bound = config
+        .repeat_output_budget()
+        .per_locus()
+        .iter()
+        .map(|locus| (locus.locus_id(), locus.truth_bases()))
+        .collect::<BTreeMap<_, _>>();
+    // Se queda la **primera** entrada de cada locus, como
+    // `publish_measured_vcf_tract_bases`.
+    let mut vcf_bound = BTreeMap::<&str, u64>::new();
+    for (locus, bases) in &realized.vcf_by_locus {
+        vcf_bound.entry(locus.as_str()).or_insert(*bases);
+    }
+    let mut text = REPEAT_ALLELES_TSV_HEADER.join("\t");
+    text.push('\n');
+    for locus in detected_repeat_loci(config) {
+        let generation = locus
+            .slippage()
+            .and_then(crate::application::EffectiveRepeatSlippage::generation)
+            .ok_or_else(|| {
+                Diagnostic::internal_invariant("results", "repeat_alleles_tsv").with(
+                    "detail",
+                    format!("el detectado {} no tiene su abanico generado", locus.id()),
+                )
+            })?;
+        let id = locus.id();
+        let drawn = (0..locus.alleles().len())
+            .map(|index| copies_of(id, index))
+            .try_fold(0_u64, u64::checked_add)
+            .ok_or_else(|| {
+                Diagnostic::internal_invariant("results", "repeat_alleles_tsv")
+                    .with("detail", "las copias realizadas desbordan")
+            })?;
+        for (index, allele) in locus.alleles().iter().enumerate() {
+            let copies = copies_of(id, index);
+            // Sin copias sorteadas no hay proporción: `.`, como el `null` del
+            // manifiesto.
+            let frequency = if drawn == 0 {
+                ".".to_owned()
+            } else {
+                (copies as f64 / drawn as f64).to_string()
+            };
+            let _ = writeln!(
+                text,
+                "{id}\t{index}\t{}\t{}\t{}\t{}\t{copies}\t{frequency}\t{}\t{}\t{}\t{}\t{}",
+                allele.tract().as_text(),
+                allele.origin().as_str(),
+                allele.declared_frequency(),
+                allele.frequency(),
+                generation.drawn_events(),
+                generation.applied_events(),
+                generation.unapplied_events(),
+                truth_bound.get(id).copied().unwrap_or(0),
+                vcf_bound.get(id).copied().unwrap_or(0),
+            );
+        }
+    }
+    Ok(text.into_bytes())
+}
+
+/// El enlace con huella que la efectiva publica en
+/// `repeat_detection.alleles_table`.
+#[must_use]
+pub fn repeat_alleles_link_json(table_sha256: &str) -> Value {
+    json!({
+        "path": REPEAT_ALLELES_TSV_PATH,
+        "sha256": table_sha256,
+    })
+}
+
 /// Publica cada locus con su motivo, su intervalo, su tope, sus alelos y la
 /// **auditoría** de la normalización de sus frecuencias.
 ///
@@ -571,8 +749,10 @@ pub fn repeat_catalog_link_json(metadata_sha256: &str) -> Value {
 /// publicar solo una de las dos bajo un nombre que sugiere la otra es
 /// exactamente el error que DTC-049 obliga a evitar.
 fn repeat_loci_json(config: &EffectiveConfig) -> Result<Value, Diagnostic> {
-    let mut loci = Vec::with_capacity(config.repeat_loci().len());
-    for locus in config.repeat_loci() {
+    let mut loci = Vec::new();
+    // **Solo los declarados** (REQ-MAN-95, DTC-104): los detectados van en el
+    // catálogo y en la tabla de alelos, y la efectiva no crece con ellos.
+    for locus in declared_repeat_loci(config) {
         let normalization = locus.normalization();
         loci.push(json!({
             "id": locus.id(),
@@ -672,7 +852,10 @@ pub fn validate_published_tract_output_accounting(
     truth_path: &Path,
     vcf_path: Option<&Path>,
 ) -> Result<(), Diagnostic> {
+    // Con la sección de microsatélites, el catálogo y la tabla de alelos se
+    // leen junto a la configuración efectiva, en la raíz del paquete.
     judge_tract_output_accounting(
+        effective_path.parent().unwrap_or_else(|| Path::new(".")),
         effective_path,
         effective_bytes,
         manifest_path,
@@ -688,7 +871,15 @@ pub fn validate_published_tract_output_accounting(
 /// rehacer, desde el TOML copiado, las cifras de tracto que los dos documentos
 /// tienen que publicar (DT-052). Sin sección de loci no recuenta nada y
 /// devuelve ceros: sin loci no hay registros ni piezas de repetición.
+///
+/// Con la sección de microsatélites (entrega 4 bis), cada registro de
+/// repetición se atribuye al primer locus **del catálogo** que lo contiene
+/// (`repeat_catalog.tsv`, no `repeat_loci` del manifiesto, que ya no lleva los
+/// detectados), y la parte VCF de cada locus se lee de la efectiva para los
+/// declarados y de la tabla de alelos para los detectados (REQ-VAL-62).
+#[allow(clippy::too_many_arguments)]
 fn judge_tract_output_accounting(
+    root: &Path,
     effective_path: &Path,
     effective_bytes: &[u8],
     manifest_path: &Path,
@@ -733,23 +924,60 @@ fn judge_tract_output_accounting(
     }
 
     let recomputed_truth = recount_truth_tract_bases(truth_path)?;
-    // Los loci tal como el manifiesto los publica, en base uno e inclusivos:
-    // a cada registro de repetición se le atribuye el primero, por posición,
-    // cuyo intervalo contiene.
-    let loci = section
-        .get("loci")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|locus| {
-            Some((
-                locus.get("sequence_id")?.as_str()?.to_owned(),
-                locus.get("start")?.as_u64()?,
-                locus.get("end")?.as_u64()?,
-                locus.get("id")?.as_str()?.to_owned(),
-            ))
-        })
-        .collect::<BTreeSet<_>>();
+    // Con la sección de microsatélites, el catálogo y la tabla de alelos
+    // publicados: el primero lleva todos los loci, y la segunda la parte VCF
+    // de cada detectado.
+    let detection_tables = if effective.get("repeat_detection").is_some() {
+        let read = |path: &str| {
+            fs::read(root.join(path)).map_err(|_| {
+                repeat_section_error(
+                    manifest_path,
+                    "no se puede leer el catálogo de microsatélites o la tabla de alelos publicados",
+                )
+            })
+        };
+        Some((
+            read(REPEAT_CATALOG_TSV_PATH)?,
+            read(REPEAT_ALLELES_TSV_PATH)?,
+        ))
+    } else {
+        None
+    };
+    let detected_alleles = detection_tables
+        .as_ref()
+        .map(|(_, alleles)| crate::repeat_catalog_validation::parse_alleles_table(alleles))
+        .transpose()?
+        .unwrap_or_default();
+    // Los loci, en base uno e inclusivos: a cada registro de repetición se le
+    // atribuye el primero, por posición, cuyo intervalo contiene. Con la
+    // sección, los del catálogo; sin ella, los del manifiesto, que son todos.
+    let loci = match &detection_tables {
+        Some((catalog, _)) => crate::repeat_catalog_validation::published_catalog_loci(catalog)?
+            .into_iter()
+            .map(|locus| {
+                (
+                    locus.sequence_id.to_owned(),
+                    locus.start,
+                    locus.end,
+                    locus.id.to_owned(),
+                )
+            })
+            .collect::<BTreeSet<_>>(),
+        None => section
+            .get("loci")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|locus| {
+                Some((
+                    locus.get("sequence_id")?.as_str()?.to_owned(),
+                    locus.get("start")?.as_u64()?,
+                    locus.get("end")?.as_u64()?,
+                    locus.get("id")?.as_str()?.to_owned(),
+                ))
+            })
+            .collect::<BTreeSet<_>>(),
+    };
     let (recomputed_vcf, recomputed_by_locus) = match vcf_path {
         None => (0, BTreeMap::new()),
         Some(path) => recount_vcf_tract_bases(path, &loci, manifest_path)?,
@@ -783,6 +1011,15 @@ fn judge_tract_output_accounting(
             "la configuración efectiva no publica las bases de tracto que el VCF lleva",
         ));
     }
+    // La parte VCF de cada detectado, una vez por locus (la tabla la repite
+    // en cada fila suya; que todas digan lo mismo lo exige el bucle de abajo).
+    let mut detected_seen = BTreeSet::new();
+    let detected_vcf = detected_alleles
+        .iter()
+        .filter(|row| detected_seen.insert(row.locus_id))
+        .fold(0_u64, |total, row| {
+            total.saturating_add(row.vcf_tract_bases_bound)
+        });
     let per_locus = effective_budget
         .and_then(|budget| budget.get("per_locus"))
         .and_then(Value::as_array)
@@ -791,7 +1028,8 @@ fn judge_tract_output_accounting(
         .map(|locus| locus.get("vcf_tract_bases_bound").and_then(Value::as_u64))
         .try_fold(0_u64, |total, bases| {
             bases.map(|bases| total.saturating_add(bases))
-        });
+        })
+        .map(|declared| declared.saturating_add(detected_vcf));
     if per_locus != Some(recomputed_vcf) {
         return Err(effective_error(
             effective_path,
@@ -813,6 +1051,20 @@ fn judge_tract_output_accounting(
                 effective_path,
                 format!(
                     "las bases de tracto del VCF del locus {id} no son las que llevan sus registros"
+                ),
+            ));
+        }
+    }
+    // Y cada fila de cada detectado, lo que llevan los registros de su locus.
+    for row in &detected_alleles {
+        let expected = recomputed_by_locus.get(row.locus_id).copied().unwrap_or(0);
+        if row.vcf_tract_bases_bound != expected {
+            return Err(effective_error_for_schema(
+                &root.join(REPEAT_ALLELES_TSV_PATH),
+                REPEAT_ALLELES_SCHEMA,
+                format!(
+                    "las bases de tracto del VCF del detectado {} no son las que llevan sus registros",
+                    row.locus_id
                 ),
             ));
         }
@@ -1058,6 +1310,12 @@ pub fn publish_measured_vcf_tract_bases(document: &mut Value, realized: &Realize
 /// techo infinito.
 fn repeat_output_budget_json(config: &EffectiveConfig) -> Value {
     let budget = config.repeat_output_budget();
+    // La cota de cada locus **detectado** va en la tabla de alelos
+    // (`truth_tract_bases_bound`), no aquí (DTC-104); los totales siguen
+    // cubriendo todos los loci.
+    let detected = detected_repeat_loci(config)
+        .map(crate::application::EffectiveRepeatLocus::id)
+        .collect::<BTreeSet<_>>();
     json!({
         "truth_tract_bases_bound": budget.truth_bases(),
         // Se mide al publicar el VCF y lo completa
@@ -1067,7 +1325,9 @@ fn repeat_output_budget_json(config: &EffectiveConfig) -> Value {
         "declared_max_tract_output_bases": budget.declared_cap(),
         "truth_copies_per_haplotype_copy":
             crate::application::EffectiveRepeatOutputBudget::TRUTH_COPIES_PER_HAPLOTYPE_COPY,
-        "per_locus": budget.per_locus().iter().map(|locus| json!({
+        "per_locus": budget.per_locus().iter()
+            .filter(|locus| !detected.contains(locus.locus_id()))
+            .map(|locus| json!({
             "id": locus.locus_id(),
             "truth_tract_bases_bound": locus.truth_bases(),
             "vcf_tract_bases_bound": 0,
@@ -1241,8 +1501,13 @@ pub fn repeat_loci_manifest_json(
             .or_default()
             .push(draw);
     }
-    let mut loci = Vec::with_capacity(config.repeat_loci().len());
-    for locus in config.repeat_loci() {
+    let mut loci = Vec::new();
+    // **Solo los declarados** (REQ-MAN-95, DTC-104). La sección existe
+    // mientras el catálogo tenga algún locus, porque lleva la referencia, los
+    // mínimos y la contabilidad de tracto de todos; su lista de loci puede
+    // quedar vacía con solo detectados, cuyos alelos y copias van en la tabla
+    // de alelos.
+    for locus in declared_repeat_loci(config) {
         let drawn = draws_by_locus
             .get(locus.id())
             .map_or(&[][..], Vec::as_slice);
@@ -2219,13 +2484,22 @@ fn validate_effective_config_v3_against_manifest_bytes(
     // sección en el manifiesto ni debe hacerlo. Lo que no puede existir es una
     // configuración efectiva **con loci** frente a un manifiesto que no los
     // registra, ni al revés, y eso es exactamente lo que se comprueba.
+    //
+    // **Con la sección de microsatélites, una efectiva sin loci puede ir con
+    // un manifiesto que sí los registra** (entrega 4 bis): los detectados no
+    // viajan en la efectiva, y el manifiesto lleva su sección mientras el
+    // catálogo tenga algún locus. Que el manifiesto tenga la sección si y solo
+    // si el catálogo no está vacío lo ata la comparación con lo que resuelve
+    // el TOML (`validate_published_repeat_loci`).
     let effective_declares_loci = object
         .get("repeat_loci")
         .and_then(Value::as_array)
         .is_some_and(|loci| !loci.is_empty());
     let manifest_declares_loci = manifest.get("schema_version").and_then(Value::as_str)
         == Some(GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS);
-    if effective_declares_loci != manifest_declares_loci {
+    let may_detect = object.contains_key("repeat_detection");
+    if effective_declares_loci != manifest_declares_loci && !(may_detect && manifest_declares_loci)
+    {
         return Err(effective_error(
             effective_path,
             if effective_declares_loci {
@@ -2718,6 +2992,11 @@ fn validate_published_resources_v3(
     // el abanico **por su cuenta**, desde los bytes publicados, y contrasta lo
     // escrito con lo rehecho.
     validate_published_slippage_fans(effective, source_reference, root_seed, effective_path)?;
+    // Y el de cada **detectado**, desde su fila del catálogo y la tabla de
+    // alelos publicados (REQ-VAL-60, entrega 4 bis), también antes de atar
+    // nada al TOML: así los parámetros del deslizamiento común los juzga
+    // primero el juez que rehace el abanico, como en los declarados.
+    validate_published_detected_fans(root, effective, source_reference, root_seed)?;
     // **La reconstrucción sigue las tres etapas del productor** (REQ-REF-38):
     // detectar sobre la referencia publicada, leer la matriz publicada,
     // retirar los detectados que una variante invade y generar los abanicos.
@@ -2772,6 +3051,7 @@ fn validate_published_resources_v3(
     let physical_config = physical_config
         .with_final_repeat_catalog()?
         .unwrap_or(physical_config);
+    validate_published_technical_event_block(effective, &physical_config, effective_path)?;
     validate_physical_technical_event(
         root,
         effective,
@@ -2909,6 +3189,7 @@ fn validate_published_resources_v3(
         // tienen que ser cero, y la comparación de abajo lo exige.
         None => RealizedTractOutput::default(),
         Some(truth) => judge_tract_output_accounting(
+            root,
             effective_path,
             effective_bytes,
             manifest_path,
@@ -2928,6 +3209,16 @@ fn validate_published_resources_v3(
         &measured_tract_output,
         effective_path,
         manifest_path,
+    )?;
+    // **La tabla de alelos es la que el TOML produce**, con lo medido
+    // (REQ-VAL-62): va detrás de rehacer el abanico desde lo publicado y de
+    // recontar la verdad y el VCF.
+    validate_published_repeat_alleles(
+        root,
+        &physical_config,
+        source_reference,
+        &truth_tally,
+        &measured_tract_output,
     )?;
     validate_published_execution_ids(
         root,
@@ -3878,8 +4169,8 @@ fn validate_physical_technical_event(
     }
     // **Los parámetros de la amplificación del manifiesto de evento son los de
     // la configuración efectiva** (DT-043). El bloque de la efectiva ya está
-    // atado exactamente a lo que resuelve el TOML copiado (la comparación de
-    // `technical_event` en `validate_effective_targets_against_configuration`),
+    // atado exactamente a lo que resuelve el TOML copiado con el catálogo final
+    // (`validate_published_technical_event_block`),
     // y el manifiesto de evento publica el mismo bloque —sale de la misma
     // función del productor— más los recuentos realizados. Se exige que cada
     // clave de la efectiva aparezca **idéntica** en el manifiesto de evento:
@@ -4603,15 +4894,19 @@ fn validate_published_repeat_loci(
         // La sección de microsatélites —criterios, deslizamiento común y
         // regiones— es la que resuelve el TOML. El enlace con el catálogo lo
         // juzga el juez del catálogo, y el catálogo, la reconstrucción de
-        // `validate_reconstructed_repeat_catalog`.
+        // `validate_reconstructed_repeat_catalog`; el de la tabla de alelos,
+        // el mismo juez del catálogo, y la tabla,
+        // `validate_published_repeat_alleles`.
         let mut published_detection = effective.get("repeat_detection").cloned();
         if let Some(Value::Object(detection)) = published_detection.as_mut() {
             detection.remove("catalog");
+            detection.remove("alleles_table");
         }
         if published_detection
             != physical_config
                 .repeat_detection()
-                .map(repeat_detection_json)
+                .map(|detection| repeat_detection_json(physical_config, detection))
+                .transpose()?
         {
             return Err(effective_error(
                 effective_path,
@@ -4654,47 +4949,24 @@ fn validate_published_repeat_loci(
         .and_then(|section| section.get("loci"))
         .and_then(Value::as_array)
         .map_or(&[][..], Vec::as_slice);
-    for (locus, published_locus) in physical_config.repeat_loci().iter().zip(published_loci) {
-        // Sin copias no hay bases que leer: una referencia leída sin bases solo
-        // ocurre sin poblaciones, y entonces la verdad no lleva copias y el
-        // recuento esperado es vacío sea cual sea la clave de cada alelo.
-        let reference_tract = crate::repeat_genotypes::reference_tract(reference, locus).ok();
-        let mut claimed = BTreeMap::<TruthTractKey, Option<u64>>::new();
+    // Solo los declarados: son los que la sección publica, en su orden. Los
+    // detectados se atan a la verdad en `validate_published_repeat_alleles`.
+    for (locus, published_locus) in declared_repeat_loci(physical_config).zip(published_loci) {
         let published_alleles = published_locus
             .get("alleles")
             .and_then(Value::as_array)
             .map_or(&[][..], Vec::as_slice);
-        for (allele, published_allele) in locus.alleles().iter().zip(published_alleles) {
-            let tract = allele.tract();
-            let key = (reference_tract.as_deref() != Some(tract.bases())).then(|| {
-                (
-                    String::from_utf8_lossy(tract.bases()).into_owned(),
-                    tract
-                        .blocks()
-                        .iter()
-                        .map(|block| crate::truth_schema::TruthRepeatBlock {
-                            motif: block.motif().as_text(),
-                            bases: block.length(),
-                        })
-                        .collect(),
-                )
-            });
-            let copies = published_allele
-                .get("realized_copies")
-                .and_then(Value::as_u64);
-            let total = claimed.entry(key).or_insert(Some(0));
-            *total = total
-                .zip(copies)
-                .and_then(|(sum, copies)| sum.checked_add(copies));
-        }
-        claimed.retain(|_, copies| *copies != Some(0));
-        let observed = truth_tally
-            .get(locus.id())
-            .into_iter()
-            .flatten()
-            .map(|(key, copies)| (key.clone(), Some(*copies)))
-            .collect::<BTreeMap<_, _>>();
-        if claimed != observed {
+        if !realized_copies_match_truth(
+            locus,
+            reference,
+            |index| {
+                published_alleles
+                    .get(index)
+                    .and_then(|allele| allele.get("realized_copies"))
+                    .and_then(Value::as_u64)
+            },
+            truth_tally,
+        ) {
             return Err(repeat_section_error(
                 manifest_path,
                 &format!(
@@ -4705,6 +4977,119 @@ fn validate_published_repeat_loci(
         }
     }
     Ok(())
+}
+
+/// **La tabla de alelos de los detectados es la que resuelve el TOML copiado,
+/// completada con lo medido** (REQ-VAL-62, entrega 4 bis).
+///
+/// Lo mismo que [`validate_published_repeat_loci`] hace con los declarados,
+/// sobre la tabla: las copias realizadas de cada alelo tienen que ser las que
+/// la verdad lleva (sumando los alelos que la verdad no distingue), y con esas
+/// copias y las bases de tracto del VCF **recontadas** —no las publicadas— el
+/// productor rehace la tabla desde la configuración reconstruida del TOML, que
+/// tiene que coincidir byte a byte. Así quedan atadas las columnas que salen
+/// del TOML (secuencias, frecuencias declaradas y efectivas, pasos, cota de la
+/// verdad), las que se derivan de las copias (la frecuencia realizada) y las
+/// medidas (las bases del VCF).
+///
+/// Llama al productor a propósito, como la reconstrucción del catálogo: la
+/// independencia la pone [`validate_published_detected_fans`], que va antes.
+fn validate_published_repeat_alleles(
+    root: &Path,
+    physical_config: &EffectiveConfig,
+    reference: &Reference,
+    truth_tally: &TruthRepeatTally,
+    measured: &RealizedTractOutput,
+) -> Result<(), Diagnostic> {
+    if physical_config.repeat_detection().is_none() {
+        return Ok(());
+    }
+    let path = root.join(REPEAT_ALLELES_TSV_PATH);
+    // El juez del catálogo ya leyó la tabla y comprobó su huella y su forma.
+    let published =
+        fs::read(&path).map_err(|error| io_error(&path, "read_repeat_alleles", error))?;
+    let rows = crate::repeat_catalog_validation::parse_alleles_table(&published)?;
+    let copies = rows
+        .iter()
+        .map(|row| ((row.locus_id, row.allele_index), row.realized_copies))
+        .collect::<BTreeMap<_, _>>();
+    let copies_of = |locus: &str, index: usize| copies.get(&(locus, index as u64)).copied();
+    for locus in detected_repeat_loci(physical_config) {
+        if !realized_copies_match_truth(
+            locus,
+            reference,
+            |index| copies_of(locus.id(), index),
+            truth_tally,
+        ) {
+            return Err(effective_error_for_schema(
+                &path,
+                REPEAT_ALLELES_SCHEMA,
+                format!(
+                    "las copias realizadas de los alelos de {} no son las que la verdad lleva",
+                    locus.id()
+                ),
+            ));
+        }
+    }
+    let expected = repeat_alleles_tsv_bytes_with(
+        physical_config,
+        |locus, index| copies_of(locus, index).unwrap_or(0),
+        measured,
+    )?;
+    if expected != published {
+        return Err(effective_error_for_schema(
+            &path,
+            REPEAT_ALLELES_SCHEMA,
+            "la tabla de alelos publicada no es la que el TOML, la referencia, la matriz y lo \
+             medido producen",
+        ));
+    }
+    Ok(())
+}
+
+/// Si las copias realizadas que se publican de los alelos de `locus`
+/// —`copies(índice)`— son las que **la verdad** lleva, sumando los alelos que
+/// la verdad no distingue (mismas bases y mismos bloques; ver
+/// [`truth_repeat_tally`]).
+fn realized_copies_match_truth(
+    locus: &crate::application::EffectiveRepeatLocus,
+    reference: &Reference,
+    copies: impl Fn(usize) -> Option<u64>,
+    truth_tally: &TruthRepeatTally,
+) -> bool {
+    // Sin copias no hay bases que leer: una referencia leída sin bases solo
+    // ocurre sin poblaciones, y entonces la verdad no lleva copias y el
+    // recuento esperado es vacío sea cual sea la clave de cada alelo.
+    let reference_tract = crate::repeat_genotypes::reference_tract(reference, locus).ok();
+    let mut claimed = BTreeMap::<TruthTractKey, Option<u64>>::new();
+    for (index, allele) in locus.alleles().iter().enumerate() {
+        let tract = allele.tract();
+        let key = (reference_tract.as_deref() != Some(tract.bases())).then(|| {
+            (
+                String::from_utf8_lossy(tract.bases()).into_owned(),
+                tract
+                    .blocks()
+                    .iter()
+                    .map(|block| crate::truth_schema::TruthRepeatBlock {
+                        motif: block.motif().as_text(),
+                        bases: block.length(),
+                    })
+                    .collect(),
+            )
+        });
+        let total = claimed.entry(key).or_insert(Some(0));
+        *total = total
+            .zip(copies(index))
+            .and_then(|(sum, copies)| sum.checked_add(copies));
+    }
+    claimed.retain(|_, copies| *copies != Some(0));
+    let observed = truth_tally
+        .get(locus.id())
+        .into_iter()
+        .flatten()
+        .map(|(key, copies)| (key.clone(), Some(*copies)))
+        .collect::<BTreeMap<_, _>>();
+    claimed == observed
 }
 
 /// **Las cifras de tracto publicadas son las que resuelve el TOML copiado,
@@ -5577,28 +5962,10 @@ fn validate_effective_targets_against_configuration(
             "direct_events efectivo no coincide exactamente con el TOML resuelto",
         ));
     }
-    // Con la sección de microsatélites el tartamudeo clonal se desconecta si el
-    // catálogo final se queda vacío (`with_final_repeat_catalog`), y eso solo se
-    // sabe después de detectar. Aquí se compara contra lo que corresponde al
-    // catálogo **publicado**; que el publicado sea el que el TOML, la
-    // referencia y la matriz producen lo exige `validate_published_repeat_loci`.
-    let published_catalog_is_empty = effective
-        .get("repeat_loci")
-        .and_then(Value::as_array)
-        .is_some_and(Vec::is_empty);
-    let detached = (expected.repeat_detection().is_some() && published_catalog_is_empty)
-        .then(|| expected.without_clonal_stutter())
-        .flatten();
-    let event_config = detached.as_ref().unwrap_or(&expected);
-    let expected_technical_event = event_config
-        .technical_event()
-        .map(|event| technical_event_json(event_config, event));
-    if effective.get("technical_event") != expected_technical_event.as_ref() {
-        return Err(effective_error(
-            effective_path,
-            "technical_event efectivo no coincide exactamente con el TOML resuelto",
-        ));
-    }
+    // `technical_event` se compara más abajo, en el juez completo, contra la
+    // configuración del **catálogo final** (`validate_published_technical_event_block`):
+    // el tartamudeo depende de que el catálogo tenga algún locus, y eso solo
+    // se sabe después de detectar y de retirar.
     let expected_vcf = effective_vcf_output_json(&expected);
     if effective.get("vcf_output") != Some(&expected_vcf) {
         return Err(effective_error(
@@ -5607,6 +5974,36 @@ fn validate_effective_targets_against_configuration(
         ));
     }
     Ok(expected)
+}
+
+/// **El evento técnico de la efectiva es el que resuelve el TOML copiado
+/// sobre el catálogo final**: con la sección de microsatélites, el
+/// tartamudeo solo está activo si el catálogo final tiene algún locus, y el
+/// clonal se desconecta si se queda vacío (`with_final_repeat_catalog`).
+///
+/// Hasta la entrega 4 bis esta comparación vivía en
+/// `validate_effective_targets_against_configuration`, contra la
+/// configuración recién leída del TOML, que todavía no ha detectado nada:
+/// con solo loci detectados el plan del tartamudeo salía apagado en lo
+/// esperado y la ejecución, que lo aplicó, moría en su propio juez (con
+/// tartamudeo y sin ningún declarado; comprobado sobre `afda48b`). Y el
+/// catálogo vacío se decidía mirando `repeat_loci` de la efectiva, que con
+/// solo detectados está vacía desde la entrega 4 bis.
+fn validate_published_technical_event_block(
+    effective: &serde_json::Map<String, Value>,
+    final_config: &EffectiveConfig,
+    effective_path: &Path,
+) -> Result<(), Diagnostic> {
+    let expected = final_config
+        .technical_event()
+        .map(|event| technical_event_json(final_config, event));
+    if effective.get("technical_event") != expected.as_ref() {
+        return Err(effective_error(
+            effective_path,
+            "technical_event efectivo no coincide exactamente con el TOML resuelto",
+        ));
+    }
+    Ok(())
 }
 
 struct ReplayEntropy(RootSeed);
@@ -5842,10 +6239,13 @@ fn published_simulated_tracts<'a>(
     let Some(loci) = repeat_loci else {
         return Ok(Vec::new());
     };
-    // **No se alcanza desde un documento publicado**: la comprobación de que la
-    // configuración efectiva y el manifiesto registran los mismos loci rechaza
-    // antes un `repeat_loci` que no sea una lista. Se conserva porque este
-    // lector no puede depender de que esa otra comprobación siga donde está.
+    // Un `repeat_loci` que no es una lista lo rechaza antes la comprobación de
+    // que la configuración efectiva y el manifiesto registran los mismos loci
+    // si el manifiesto los registra y la efectiva no tiene la sección de
+    // microsatélites; sin loci en el manifiesto, o con la sección (entrega 4
+    // bis: la efectiva puede no llevar ninguno), llega aquí, y lo ejercitan
+    // `tests/results_manifest_guards.rs` y
+    // `tests/simulated_reference_repeat_tract.rs`.
     let loci = loci.as_array().ok_or_else(|| {
         effective_error(
             effective_path,
@@ -6174,7 +6574,12 @@ fn repeat_section_error_from_reason(path: &Path, detail: &str) -> Diagnostic {
 /// modo que esa correspondencia la sostiene esta función, y la frecuencia
 /// realizada se compara **bit a bit** contra copias realizadas entre copias
 /// sorteadas, igual que en el documento vecino.
-fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
+///
+/// La lista de loci solo puede estar vacía si el manifiesto lista el catálogo
+/// de microsatélites o es el de un paquete fallido (`may_be_empty`): entonces
+/// lleva solo los declarados, y los detectados van en la tabla de alelos
+/// (entrega 4 bis), conservada o no.
+fn validate_repeat_loci_section(value: &Value, may_be_empty: bool) -> Result<(), &'static str> {
     let section = value
         .as_object()
         .ok_or_else(|| reason("la sección repeat_loci no es un objeto"))?;
@@ -6224,7 +6629,7 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
     let loci = section
         .get("loci")
         .and_then(Value::as_array)
-        .filter(|loci| !loci.is_empty())
+        .filter(|loci| may_be_empty || !loci.is_empty())
         .ok_or_else(|| reason("la sección repeat_loci no publica ningún locus"))?;
     let mut identifiers = BTreeSet::new();
     for locus in loci {
@@ -6494,6 +6899,165 @@ fn validate_published_slippage_fans(
         )
         .map_err(|detail| reject(&detail))?;
         compare_published_fan_against_oracle(locus, slippage, &recomputed, lineages, &reject)?;
+    }
+    Ok(())
+}
+
+/// **El abanico de cada locus detectado, rehecho desde lo publicado**
+/// (REQ-VAL-60, entrega 4 bis).
+///
+/// Lo mismo que [`validate_published_slippage_fans`] para los declarados, con
+/// lo que un detectado publica: su fila del catálogo (secuencia, inicio, fin y
+/// motivo), el deslizamiento común y los linajes de
+/// `repeat_detection.slippage`, el tope de `repeat_detection.max_units`, la
+/// referencia publicada y la semilla publicada. Rehace el abanico con el
+/// mismo recorrido escrito aparte del productor ([`recompute_slippage_fan`]) y
+/// lo contrasta **fila a fila** con la tabla de alelos: cuántas filas tiene el
+/// locus, la secuencia y la frecuencia declarada de cada una, bit a bit, y los
+/// tres recuentos de pasos **de cada fila**, lo que además obliga a que sean
+/// iguales en todas las filas del locus.
+///
+/// Va justo después del juez del abanico de los declarados y antes de atar
+/// nada al TOML; lee las dos tablas con el lector estricto que comparte con el
+/// juez del catálogo, que llega después y exige además sus huellas y que los
+/// loci detectados de las dos sean los mismos y en el mismo orden. Comparte lo
+/// que comparte el de los declarados (las primitivas de azar y la operación de
+/// paso del dominio), y nada más del productor.
+fn validate_published_detected_fans(
+    root: &Path,
+    effective: &serde_json::Map<String, Value>,
+    reference: &Reference,
+    root_seed: RootSeed,
+) -> Result<(), Diagnostic> {
+    let Some(detection) = effective.get("repeat_detection") else {
+        return Ok(());
+    };
+    let table_path = root.join(REPEAT_ALLELES_TSV_PATH);
+    // Cada `reject(reason(..))` anota su propia línea; el cierre no.
+    let reject = |detail: &str| effective_diagnostic(&table_path, REPEAT_ALLELES_SCHEMA, detail);
+    // Un fichero que falta se rechaza aquí como fallo de lectura; sus huellas
+    // y su lista en el manifiesto las exige después el juez del catálogo.
+    let catalog = fs::read(root.join(REPEAT_CATALOG_TSV_PATH)).map_err(|error| {
+        io_error(
+            &root.join(REPEAT_CATALOG_TSV_PATH),
+            "read_repeat_catalog",
+            error,
+        )
+    })?;
+    let alleles = fs::read(&table_path)
+        .map_err(|error| io_error(&table_path, "read_repeat_alleles", error))?;
+    let alleles = crate::repeat_catalog_validation::parse_alleles_table(&alleles)?;
+    let mut by_locus =
+        BTreeMap::<&str, Vec<&crate::repeat_catalog_validation::AlleleRow<'_>>>::new();
+    for row in &alleles {
+        by_locus.entry(row.locus_id).or_default().push(row);
+    }
+    let slippage = detection.get("slippage");
+    let read_f64 = |key: &str| {
+        slippage
+            .and_then(|value| value.get(key))
+            .and_then(Value::as_f64)
+    };
+    let (Some(mean_events), Some(expansion_bias)) =
+        (read_f64("mean_events"), read_f64("expansion_bias"))
+    else {
+        return Err(reject(reason(
+            "el deslizamiento común publicado no tiene media y sesgo decimales",
+        )));
+    };
+    let lineages = slippage
+        .and_then(|value| value.get("lineages"))
+        .and_then(Value::as_u64);
+    // Las mismas cotas que en los declarados, antes de rehacer nada (DT-024).
+    if lineages != published_haplotype_copies(effective) {
+        return Err(reject(reason(
+            "los linajes del deslizamiento común no son las copias haplotípicas de las \
+             poblaciones iniciales",
+        )));
+    }
+    let lineages = lineages.unwrap_or(0);
+    if !(0.0..=crate::repeat_slippage::SLIPPAGE_MAX_MEAN_EVENTS).contains(&mean_events) {
+        return Err(reject(reason(
+            "la media de pasos del deslizamiento común rebasa el tope que el generador admite",
+        )));
+    }
+    let max_units = detection
+        .get("max_units")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| reject(reason("el tope de unidades de la sección no es un entero")))?;
+    let reference_id = effective
+        .get("inserted_reference")
+        .or_else(|| effective.get("reference"))
+        .and_then(|reference| reference.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    for catalog_locus in crate::repeat_catalog_validation::published_catalog_loci(&catalog)? {
+        if !catalog_locus.detected {
+            continue;
+        }
+        let locus_id = catalog_locus.id;
+        let locus_reject =
+            |detail: &str| reject(&format!("abanico del detectado {locus_id}: {detail}"));
+        let motifs = catalog_locus
+            .motifs
+            .iter()
+            .map(|motif| String::from_utf8_lossy(motif).into_owned())
+            .collect::<Vec<_>>();
+        let locus = json!({
+            "sequence_id": catalog_locus.sequence_id,
+            "start": catalog_locus.start,
+            "end": catalog_locus.end,
+            "motifs": motifs,
+        });
+        let ancestral =
+            published_ancestral_tract(&locus, reference, &|detail| locus_reject(detail))?;
+        // **Inalcanzable en la práctica**, como en los declarados: solo falla
+        // con un componente de más de 4 GiB.
+        let mut rng = crate::repeat_slippage::slippage_subseed(root_seed, reference_id, locus_id)
+            .map_err(|error| locus_reject(&reason(error.detail())))?
+            .local_rng();
+        let recomputed = recompute_slippage_fan(
+            &mut rng,
+            &ancestral,
+            max_units,
+            mean_events,
+            expansion_bias,
+            lineages,
+        )
+        .map_err(|detail| locus_reject(&detail))?;
+        let rows = by_locus.get(locus_id).map_or(&[][..], Vec::as_slice);
+        if rows.len() != recomputed.alleles.len() {
+            return Err(locus_reject(reason(
+                "el número de alelos publicados no es el que el modelo produce",
+            )));
+        }
+        for (index, (row, (expected_bases, expected_lineages))) in
+            rows.iter().zip(&recomputed.alleles).enumerate()
+        {
+            if row.sequence.as_bytes() != expected_bases.as_slice() {
+                return Err(locus_reject(reason(
+                    "la secuencia de un alelo publicado no es la que el modelo produce, o el \
+                     orden canónico no es el suyo",
+                )));
+            }
+            let expected_frequency = *expected_lineages as f64 / lineages as f64;
+            if row.declared_frequency.to_bits() != expected_frequency.to_bits() {
+                return Err(locus_reject(&reason(format!(
+                    "la frecuencia de un alelo no es la proporción de linajes que terminan en él \
+                     (alelo {index}: publicada {}, rehecha {expected_frequency} = \
+                     {expected_lineages}/{lineages})",
+                    row.declared_frequency
+                ))));
+            }
+            if (row.drawn_events, row.applied_events, row.unapplied_events)
+                != (recomputed.drawn, recomputed.applied, recomputed.unapplied)
+            {
+                return Err(locus_reject(&reason(format!(
+                    "la contabilidad publicada del generador en el alelo {index} no es la que el \
+                     modelo produce"
+                ))));
+            }
+        }
     }
     Ok(())
 }
@@ -7291,7 +7855,21 @@ fn parse_general_manifest_bytes_unretagged(
         let section = object.get("repeat_loci").ok_or_else(|| {
             repeat_section_error(path, "la versión 6 exige la sección repeat_loci")
         })?;
-        validate_repeat_loci_section(section)
+        // Con la sección de microsatélites, que se ve en el manifiesto porque
+        // lista el catálogo, la lista de loci lleva solo los declarados y
+        // puede quedar vacía (entrega 4 bis). En un paquete fallido que no
+        // conserva la unidad genotípica, el catálogo no se conserva y la
+        // lista registra los declarados, que pueden no ser ninguno (DTC-045).
+        let lists_catalog = object
+            .get("artifacts")
+            .and_then(Value::as_array)
+            .is_some_and(|artifacts| {
+                artifacts.iter().any(|artifact| {
+                    artifact.get("kind").and_then(Value::as_str) == Some("repeat_catalog_tsv")
+                })
+            });
+        let failed = object.get("state").and_then(Value::as_str) == Some("failed");
+        validate_repeat_loci_section(section, lists_catalog || failed)
             .map_err(|detail| repeat_section_error_from_reason(path, detail))?;
     }
     required_non_empty_text(object, "execution_id", path)?;
@@ -7396,9 +7974,12 @@ fn parse_general_manifest_bytes_unretagged(
         require_artifact_kind(&catalog, "population-snvs-tsv", "population_snvs_tsv", path)?;
         expected_minimum.insert("population-snvs-tsv");
     }
-    // El catálogo de microsatélites (REQ-MAN-98) viaja en pareja y es parte
+    // El catálogo de microsatélites (REQ-MAN-98) viaja en pareja, con la
+    // tabla de alelos de los detectados (entrega 4 bis), y los tres son parte
     // del mínimo; su presencia la ata a la sección el juez del catálogo.
-    if catalog.contains_key("repeat-catalog-metadata") || catalog.contains_key("repeat-catalog-tsv")
+    if catalog.contains_key("repeat-catalog-metadata")
+        || catalog.contains_key("repeat-catalog-tsv")
+        || catalog.contains_key("repeat-alleles-tsv")
     {
         require_artifact_kind(
             &catalog,
@@ -7407,8 +7988,10 @@ fn parse_general_manifest_bytes_unretagged(
             path,
         )?;
         require_artifact_kind(&catalog, "repeat-catalog-tsv", "repeat_catalog_tsv", path)?;
+        require_artifact_kind(&catalog, "repeat-alleles-tsv", "repeat_alleles_tsv", path)?;
         expected_minimum.insert("repeat-catalog-metadata");
         expected_minimum.insert("repeat-catalog-tsv");
+        expected_minimum.insert("repeat-alleles-tsv");
     }
     if truth_expected {
         expected_minimum.insert("truth-jsonl");

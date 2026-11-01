@@ -289,6 +289,9 @@ fn execute_validated_config_with_effective_document(
     // `inserted_publication`).
     let mut truth_record: Option<ArtifactRecord> = None;
     let mut genotype_records: Vec<ArtifactRecord> = Vec::new();
+    // Con la sección de microsatélites, la tabla de alelos es parte de la
+    // unidad: sin ella la unidad no está completa y no se conserva.
+    let mut repeat_alleles_record: Option<ArtifactRecord> = None;
     let started = (|| -> Result<(), Diagnostic> {
         configuration_input = Some(copy_configuration_input(effective, &mut workspace)?);
         reference_artifact = Some(write_reference(
@@ -360,6 +363,20 @@ fn execute_validated_config_with_effective_document(
         // sección: sin ella no se escribe nada y los bytes son los de antes.
         let repeat_catalog_link =
             publish_repeat_catalog(effective, simulation_artifact, &mut workspace)?;
+        // El par del catálogo entra en la unidad genotípica (DTC-045, entrega
+        // 4 bis): la verdad nombra los detectados por su identificador.
+        genotype_records.extend(
+            workspace
+                .artifacts()
+                .iter()
+                .filter(|artifact| {
+                    matches!(
+                        artifact.id.as_str(),
+                        REPEAT_CATALOG_TSV_ID | REPEAT_CATALOG_METADATA_ID
+                    )
+                })
+                .cloned(),
+        );
         if let (Some(link), Some(initial_individuals)) = (
             &mut population_snvs,
             &prepared_execution.initial_individuals,
@@ -496,6 +513,31 @@ fn execute_validated_config_with_effective_document(
                 index_artifact_id: published.index.map(|artifact| artifact.id),
             });
         }
+        // **La tabla de alelos de los detectados** (REQ-MAN-98, DTC-104):
+        // después de la unidad genotípica, porque las bases de tracto del VCF
+        // por locus solo se conocen al publicarlo, y antes de la efectiva, que
+        // lleva su huella. Entra en la unidad genotípica.
+        let repeat_alleles_link = if effective.repeat_detection().is_some() {
+            let table = workspace.write_artifact(
+                REPEAT_ALLELES_TSV_ID,
+                "repeat_alleles_tsv",
+                Path::new(crate::results::REPEAT_ALLELES_TSV_PATH),
+                &crate::results::repeat_alleles_tsv_bytes(
+                    effective,
+                    prepared_execution
+                        .initial_individuals
+                        .as_ref()
+                        .map_or(&[][..], InitialIndividualsMaterialization::repeat_draws),
+                    &realized_tract_output,
+                )?,
+            )?;
+            let link = crate::results::repeat_alleles_link_json(&table.digest);
+            repeat_alleles_record = Some(table.clone());
+            genotype_records.push(table);
+            Some(link)
+        } else {
+            None
+        };
         if let Some(event) = effective.technical_event() {
             match publish_technical_event(
                 &mut workspace,
@@ -525,6 +567,9 @@ fn execute_validated_config_with_effective_document(
         );
         if let Some(link) = repeat_catalog_link {
             effective_document["repeat_detection"]["catalog"] = link;
+        }
+        if let Some(link) = repeat_alleles_link {
+            effective_document["repeat_detection"]["alleles_table"] = link;
         }
         if let Some(inserted) = &inserted_publication {
             effective_document["inserted_reference"] = crate::results::inserted_reference_json(
@@ -663,8 +708,12 @@ fn execute_validated_config_with_effective_document(
             // paquete fallido decide conservarla. Es lo único que la unidad
             // cita fuera de sí misma: la matriz y sus metadatos citan la
             // referencia de la simulación, y el VCF, la verdad y la referencia.
+            // La condición de la tabla de alelos no la ejercita ninguna prueba:
+            // el gancho de fallo del paquete fallido corre después de escribirla,
+            // y solo se alcanzaría con un fallo de E/S entre el VCF y la tabla.
             let genotype_unit_kept = truth_record.is_some()
                 && (effective.vcf_output().is_none() || !vcf_outputs.is_empty())
+                && (effective.repeat_detection().is_none() || repeat_alleles_record.is_some())
                 && configuration_input.as_ref().is_some_and(|input| {
                     valid_failure_configuration_copy(&workspace, effective, &input.copy)
                 })
@@ -2540,6 +2589,12 @@ fn publish_population_snvs(
     })
 }
 
+/// Identificadores de artefacto del catálogo de microsatélites y de la tabla
+/// de alelos de los detectados (REQ-MAN-98).
+const REPEAT_CATALOG_TSV_ID: &str = "repeat-catalog-tsv";
+const REPEAT_CATALOG_METADATA_ID: &str = "repeat-catalog-metadata";
+const REPEAT_ALLELES_TSV_ID: &str = "repeat-alleles-tsv";
+
 /// Escribe la tabla y el metadato del catálogo de microsatélites, con la
 /// huella del FASTA final y la de la tabla dentro del metadato, y devuelve el
 /// enlace con huella que la efectiva publica en `repeat_detection.catalog`.
@@ -2553,7 +2608,7 @@ fn publish_repeat_catalog(
         return Ok(None);
     }
     let table = workspace.write_artifact(
-        "repeat-catalog-tsv",
+        REPEAT_CATALOG_TSV_ID,
         "repeat_catalog_tsv",
         Path::new(crate::results::REPEAT_CATALOG_TSV_PATH),
         &crate::results::repeat_catalog_tsv_bytes(effective)?,
@@ -2564,7 +2619,7 @@ fn publish_repeat_catalog(
         &table.digest,
     )?;
     let metadata = workspace.write_artifact(
-        "repeat-catalog-metadata",
+        REPEAT_CATALOG_METADATA_ID,
         "repeat_catalog_metadata",
         Path::new(crate::results::REPEAT_CATALOG_METADATA_PATH),
         &json_document_bytes(&metadata)?,
@@ -5541,6 +5596,152 @@ print(truth, vcf)
             "manifest-general-v6.schema.json",
         );
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    /// Una referencia con un solo microsatélite que detectar, `(CA)×50` en
+    /// 101..200 entre dos `G×100` pegadas a los bordes (que el detector
+    /// descarta por el borde), la sección de microsatélites **sin ningún
+    /// locus declarado**, una matriz generada, dos individuos diploides y VCF
+    /// de texto.
+    fn detected_unit_config(root: &Path) -> PathBuf {
+        let bases = format!("{}{}{}", "G".repeat(100), "CA".repeat(50), "G".repeat(100));
+        fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
+        let config = root.join("general.toml");
+        fs::write(
+            &config,
+            format!(
+                r#"config_kind = "general"
+schema_version = "4"
+seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+
+[population_snvs]
+mode = "generate"
+
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "reference.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = {}
+
+[reference.repeat_detection]
+
+[reference.repeat_detection.slippage]
+model = "stepwise"
+mean_events = 1.0
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 2
+individual_ids = ["I1", "I2"]
+ploidy = 2
+genotype_model = "hwe"
+
+[vcf_output]
+mode = "text"
+"#,
+                bases.len()
+            ),
+        )
+        .expect("config");
+        config
+    }
+
+    /// Los tres ficheros de la detección de microsatélites.
+    const DETECTION_FILES: [&str; 3] = [
+        "repeat_catalog.tsv",
+        "repeat_catalog.metadata.json",
+        "repeat_alleles.tsv",
+    ];
+
+    /// DTC-045 ampliada por la entrega 4 bis del plan de detección: **el par
+    /// del catálogo y la tabla de alelos forman parte de la unidad
+    /// genotípica**. Con solo un detectado, el paquete fallido que conserva la
+    /// unidad conserva los tres ficheros, byte a byte los de la ejecución
+    /// completa, y su lista de loci del manifiesto está vacía (lleva solo los
+    /// declarados); el que no la conserva porque la tabla de alelos cambió en
+    /// disco después de escribirse no conserva ninguno de los tres, ni la
+    /// verdad, y su lista de loci sigue vacía, con cero bases realizadas.
+    ///
+    /// **Debe fallar contra** dejar la tabla de alelos o el catálogo fuera de
+    /// la unidad (el primer paquete los perdería, o el segundo conservaría la
+    /// verdad con una tabla alterada) y contra exigir un locus en la lista de
+    /// un manifiesto fallido (el lector rechazaría el paquete y se publicaría
+    /// el mínimo).
+    #[test]
+    fn the_catalog_pair_and_the_alleles_table_are_part_of_the_genotype_unit() {
+        /// Borra el directorio de la prueba al soltarlo, también si falla.
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let cleanup = Cleanup(test_root("unit-detection"));
+        let root = cleanup.0.clone();
+        let config = detected_unit_config(&root);
+        let complete = run_complete(&config, &root.join("complete"));
+        assert_eq!(complete["repeat_loci"]["loci"], json!([]));
+
+        let kept = root.join("kept");
+        let (error, manifest) = run_failed(&config, &kept, |_| Err(provoked_failure()));
+        assert_eq!(error.code(), "GPS-IO-001");
+        let ids = catalog_ids(&manifest);
+        for id in [
+            "repeat-alleles-tsv",
+            "repeat-catalog-metadata",
+            "repeat-catalog-tsv",
+            "truth-jsonl",
+        ] {
+            assert!(ids.contains(&id.to_owned()), "{id}: {ids:?}");
+        }
+        for file in DETECTION_FILES {
+            assert_same_bytes(&root.join("complete"), &kept, file);
+        }
+        assert_eq!(manifest["repeat_loci"]["loci"], json!([]));
+        assert_eq!(manifest["repeat_loci"], complete["repeat_loci"]);
+        assert_external_schema(
+            &kept.join("manifest.json"),
+            "manifest-general-v6.schema.json",
+        );
+
+        let dropped = root.join("dropped");
+        let (error, manifest) = run_failed(&config, &dropped, |workspace| {
+            let mut bytes =
+                fs::read(workspace.root().join("repeat_alleles.tsv")).expect("tabla de alelos");
+            bytes.extend_from_slice(b"\n");
+            workspace.replace_artifact_bytes_for_validation_test("repeat-alleles-tsv", &bytes)?;
+            Err(provoked_failure())
+        });
+        assert_eq!(error.code(), "GPS-IO-001");
+        assert_eq!(catalog_ids(&manifest), ["config-general"]);
+        for file in DETECTION_FILES.iter().chain(&["outputs/truth.jsonl"]) {
+            assert!(!dropped.join(file).exists(), "{file}");
+        }
+        assert_eq!(manifest["repeat_loci"]["loci"], json!([]));
+        assert_eq!(
+            manifest["repeat_loci"]["tract_output"]["realized_total_tract_bases"],
+            0
+        );
+        assert_external_schema(
+            &dropped.join("manifest.json"),
+            "manifest-general-v6.schema.json",
+        );
     }
 
     /// Referencia suministrada de 2000 pb con un microsatélite **insertado**

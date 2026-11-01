@@ -492,9 +492,26 @@ fn the_rust_reader_rejects_a_repeat_section_as_strictly_as_its_schema() {
             corrupt(&|document| document["repeat_loci"] = serde_json::json!({})),
         ),
         (
-            "sección sin ningún locus",
+            // Sin el catálogo de microsatélites en la lista de artefactos: con
+            // él, la lista de loci lleva solo los declarados y puede quedar
+            // vacía (entrega 4 bis), y el esquema ya no puede exigir un locus.
+            "sección sin ningún locus y sin catálogo",
             "la sección repeat_loci no publica ningún locus",
-            corrupt(&|document| document["repeat_loci"]["loci"] = serde_json::json!([])),
+            corrupt(&|document| {
+                document["repeat_loci"]["loci"] = serde_json::json!([]);
+                for pointer in ["/artifacts", "/output_categories/minimum"] {
+                    document
+                        .pointer_mut(pointer)
+                        .and_then(Value::as_array_mut)
+                        .expect("lista")
+                        .retain(|entry| {
+                            let id = entry.get("id").unwrap_or(entry);
+                            id != "repeat-catalog-metadata"
+                                && id != "repeat-catalog-tsv"
+                                && id != "repeat-alleles-tsv"
+                        });
+                }
+            }),
         ),
         (
             "campo desconocido en la sección",

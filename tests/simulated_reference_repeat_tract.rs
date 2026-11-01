@@ -1018,14 +1018,16 @@ fn every_corruption_of_a_published_tract_is_rejected_by_its_own_branch() {
         );
     }
 
+    // Con la sección de microsatélites, una efectiva sin loci puede ir con un
+    // manifiesto que los registra (entrega 4 bis), de modo que la comprobación
+    // de los dos documentos ya no lo caza: lo rechaza el lector de los tractos
+    // de la referencia simulada.
     let mut not_a_list = original.clone();
     not_a_list["repeat_loci"] = serde_json::json!({"STR-2": {}});
     let error = judge(&not_a_list).expect_err("repeat_loci que no es una lista");
     let detail = error.context().get("detail").cloned().unwrap_or_default();
     assert!(
-        detail.contains(
-            "el manifiesto registra loci de repetición que la configuración efectiva no declara"
-        ),
+        detail.contains("tractos de la referencia simulada: repeat_loci no es una lista"),
         "{detail}"
     );
 }

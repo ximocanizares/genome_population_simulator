@@ -96,6 +96,8 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-060 | En una molécula quimérica, el tartamudeo situaba los tractos con la copia del primer tramo sobre la molécula entera: tartamudeaba bases que no eran un tracto y no evaluaba los tractos del segundo tramo | Media | 27/10/2026 | **Cerrada (27/10/2026)** |
 | DT-061 | Se pierden microsatélites pegados a otro: (a) por **nuestra** regla de solapes, que descarta entero el tramo que pisa a otro solo en la copia parcial de la frontera (`(CA)×10 A×12`, el `(TCTG)` central de un compuesto); (b) por el buscador de `pop_var_caller`, que no emite un microsatélite corto entre dos tiras largas de una misma base ni recupera una repetición con una interrupción que desplaza la fase | Media | 30/10/2026 | Parte (a) **cerrada el 01/11/2026**; parte (b) abierta, pendiente de una versión nueva de `pop_var_caller` |
 | DT-062 | El código copiado de `pop_var_caller` no lleva el aviso completo de su licencia MIT: falta el texto del permiso, y `LICENSE` no nombra a sus autores | Baja | 31/10/2026 | **Cerrada (01/11/2026)** |
+| DT-063 | Varias pruebas dejan sus directorios en `/tmp` al terminar: una pasada de la batería entera dejó unos 2 300 `/tmp/gps-*` (171 MB) | Baja | 01/11/2026 | Abierta |
+| DT-064 | Ningún juez independiente compara la frecuencia efectiva de un abanico generado con la declarada: la ata solo la reconstrucción con el productor | Baja | 01/11/2026 | Abierta |
 
 ---
 
@@ -5752,3 +5754,55 @@ texto del permiso que ya contiene `LICENSE` cubra también esa copia.
 contiene `LICENSE` cubre así también esa copia. Se añadió como línea de
 copyright, y no como párrafo aparte, para que GitHub siga reconociendo la
 licencia como MIT.
+
+## DT-063. Varias pruebas dejan sus directorios en `/tmp` al terminar
+
+**Gravedad: baja.** Hallada el 01/11/2026, al limpiar los restos de la
+entrega 4 de la detección de microsatélites.
+
+**Qué pasa.** Tras las tres pasadas de la batería de ese día (la del
+implementador, la de la revisión adversarial y la de la raíz) quedaban
+**2 332 directorios `/tmp/gps-*`, 171 MB**, todos del mismo día. Los dejan
+pruebas que crean un directorio temporal por caso y no lo borran al acabar, o
+solo lo borran si la prueba pasa. Por prefijo, los que más dejaban:
+
+| Prefijo | Directorios | Lo crea |
+|---|---|---|
+| `gps-s32` | 594 | `tests/repeat_locus_invasion.rs` |
+| `gps-tract-insertion-run-*` | 893 | `tests/reference_tract_insertion_run.rs` |
+| `gps-sim-ref-tract` | 450 | `tests/simulated_reference_repeat_tract.rs` |
+| `gps-f5-profile` | 209 | pruebas internas de `src/f5_profile.rs` |
+| `gps-dt022` | 95 | `tests/published_reused_matrix_location.rs` |
+| `gps-tract-length` | 72 | `tests/stutter_tract_length.rs` |
+| `gps-f5-publication-unit` | 19 | pruebas internas de `src/f5_publication.rs` |
+
+No falsea ningún resultado: cada directorio lleva el identificador del proceso
+y un contador. Pero se acumula con cada pasada, y en un disco WSL que no
+devuelve espacio sin compactar conviene no dejarlo crecer.
+
+**Cómo se cierra.** Que cada uno de esos ficheros borre lo suyo al terminar,
+también cuando la prueba falla: un guardián que borra el directorio al salir
+de ámbito, como el de las pruebas del catálogo de microsatélites desde la
+entrega 4. Se comprueba contando los `/tmp/gps-*` antes y después de una
+pasada de la batería entera: deben ser los mismos.
+
+## DT-064. Ningún juez independiente compara la frecuencia efectiva de un abanico generado con la declarada
+
+**Gravedad: baja.** Hallada el 01/11/2026 por el implementador de la entrega
+4 bis de la detección de microsatélites, al mutar los jueces.
+
+**Qué pasa.** Cada alelo de un abanico generado por el deslizamiento publica
+dos frecuencias: la **declarada**, que sale del generador, y la **efectiva**,
+la que se usa al sortear tras normalizar. El juez que rehace el abanico desde
+la semilla compara la declarada, pero ninguna comprobación independiente
+compara la efectiva con ella. La mutación que invierte solo la frecuencia
+efectiva de un abanico generado, con la declarada intacta, sobrevive a los
+jueces independientes; solo la caza la reconstrucción con el productor, que
+compara byte a byte. Vale igual para los detectados (tabla de alelos) que para
+los declarados con generador (configuración efectiva). Es previo a la entrega
+4 bis: esta solo lo hizo visible.
+
+**Cómo se cierra.** Que el juez que rehace el abanico derive también la
+frecuencia efectiva desde la declarada con las constantes de normalización
+publicadas, con aritmética propia, y la compare; con una prueba que falle
+contra la inversión de la efectiva.

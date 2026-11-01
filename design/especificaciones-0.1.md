@@ -1074,17 +1074,32 @@ su asignación por fase está en la matriz de trazabilidad.
 - **REQ-IND-68.** La generación es **una sola tirada de inicialización de la
   diversidad**, no una simulación de generaciones. El modelo escalonado aplicado
   generación tras generación pertenece a la fase de evolución.
-- **REQ-MAN-95.** La configuración efectiva y el manifiesto general deben
-  publicar, **por alelo y no por locus**, el **origen** de cada alelo de
-  repetición: declarado por el usuario o generado por deslizamiento. El origen
-  del alelo y el del locus deben concordar.
+- **REQ-MAN-95.** Se debe publicar, **por alelo y no por locus**, el
+  **origen** de cada alelo de repetición: declarado por el usuario o generado
+  por deslizamiento. Los alelos de un locus **declarado** se publican en la
+  configuración efectiva y en el manifiesto general; los de un locus
+  **detectado**, en la tabla de alelos de REQ-MAN-98, y no en esos dos
+  documentos. El origen del alelo y el del locus deben concordar.
+  *Nota del 01/11/2026 (entrega 4 bis del plan de detección, decisión del
+  responsable): hasta esta fecha decía «La configuración efectiva y el
+  manifiesto general deben publicar, por alelo y no por locus, el origen de
+  cada alelo de repetición», sin distinguir declarados y detectados.*
 - **REQ-MAN-96.** Un locus generado debe publicar además sus **parámetros**, la
   **versión de su algoritmo**, las de los algoritmos de azar que consume, el
   **nombre de su ámbito de azar** y la **versión del catálogo de ámbitos**, las
   **tres limitaciones declaradas del modelo palabra por palabra**, y la
   contabilidad de la generación: linajes, pasos sorteados, pasos aplicados y
   **pasos no aplicados al detenerse en un borde**. Los aplicados más los no
-  aplicados deben sumar exactamente los sorteados.
+  aplicados deben sumar exactamente los sorteados. Para los loci
+  **detectados**, lo que es común a todos —los parámetros del deslizamiento
+  común, las versiones, el ámbito y la versión de su catálogo, los linajes y
+  las tres limitaciones palabra por palabra— se publica **una sola vez**, en
+  la sección de microsatélites de la configuración efectiva, y la contabilidad
+  de cada uno —pasos sorteados, aplicados y no aplicados— en la tabla de
+  alelos de REQ-MAN-98. La suma se exige locus a locus. *Nota del 01/11/2026
+  (entrega 4 bis): las dos últimas frases se añadieron ese día; antes cada
+  locus detectado repetía en la configuración efectiva y en el manifiesto todo
+  el bloque, limitaciones incluidas.*
 - **REQ-MAN-97.** Cuando se declare el multiplicador de REQ-CONF-141, la
   configuración efectiva y el manifiesto de evento deben publicarlo junto a la
   tabla de probabilidades por ciclo del tartamudeo clonal, y la fila de los
@@ -1099,13 +1114,25 @@ su asignación por fase está en la matriz de trazabilidad.
   (REQ-CONF-143). Los recuentos de descarte deben sumar lo que el barrido
   encontró. El catálogo viaja **aparte**, en una tabla y su metadato enlazados
   con huella desde la configuración efectiva (DTC-104; decidido en la pausa de
-  la entrega 1 y concretado el 01/11/2026). La verdad y el VCF no cambian de
-  formato.
+  la entrega 1 y concretado el 01/11/2026). **Los alelos de los loci
+  detectados** viajan también aparte, en una tabla con una fila por alelo,
+  enlazada con huella desde la configuración efectiva y listada en el
+  manifiesto general: su secuencia, su origen, sus frecuencias declarada y
+  efectiva, sus copias y su frecuencia realizadas y, por locus, la
+  contabilidad del deslizamiento y sus bases de tracto. La configuración
+  efectiva y el manifiesto general no publican nada propio de cada locus
+  detectado, de modo que no crecen con su número; los loci declarados siguen
+  publicándose enteros en ellos (entrega 4 bis, decisión del responsable del
+  01/11/2026). La verdad y el VCF no cambian de formato.
 - **REQ-VAL-60.** Un juez independiente debe **rehacer el abanico publicado** —
   desde la referencia publicada, los parámetros publicados y la semilla
-  publicada— y contrastarlo con el escrito, alelo a alelo. No basta con
-  reconstruir la configuración llamando al productor: eso compara el abanico
-  consigo mismo y no puede fallar.
+  publicada— y contrastarlo con el escrito, alelo a alelo. El de un locus
+  detectado lo rehace desde su fila del catálogo y el deslizamiento común de la
+  sección de microsatélites publicados, y lo contrasta fila a fila con la tabla
+  de alelos, incluida en cada fila la contabilidad del locus (frase añadida el
+  01/11/2026, entrega 4 bis). No basta con reconstruir la configuración
+  llamando al productor: eso compara el abanico consigo mismo y no puede
+  fallar.
 - **REQ-VAL-61.** Al publicar, el juez de los recursos publicados debe atar a la
   calibración y a lo declarado las fracciones de entrada del tartamudeo clonal,
   en los **dos** documentos que las publican. En la configuración efectiva, el
@@ -1119,11 +1146,14 @@ su asignación por fase está en la matriz de trazabilidad.
   unas fracciones cambiadas junto con su probabilidad.
 - **REQ-VAL-62.** Al publicar, el juez de los recursos publicados debe atar los
   loci de repetición publicados al TOML copiado en el paquete y a la verdad
-  publicada. En la configuración efectiva, los loci —con sus alelos, declarados
-  o generados— y los mínimos de admisión deben coincidir **exactamente** con los
-  que resuelve el TOML copiado sobre la referencia publicada. En el manifiesto
-  general, la sección de loci debe coincidir exactamente con la que resuelve el
-  TOML **salvo lo medido**: lo que solo sale del sorteo —copias sorteadas, copias
+  publicada. En la configuración efectiva, los loci declarados —con sus
+  alelos, declarados o generados— y los mínimos de admisión, y en la tabla de
+  alelos los alelos de los loci detectados, deben coincidir **exactamente** con
+  los que resuelve el TOML copiado sobre la referencia publicada, salvo, en la
+  tabla, las columnas medidas: copias y frecuencia realizadas y bases de tracto
+  del VCF. En el manifiesto general, la sección de loci —la de los declarados—
+  debe coincidir exactamente con la que resuelve el TOML **salvo lo medido**:
+  lo que solo sale del sorteo —copias sorteadas, copias
   realizadas y frecuencia realizada— y las bases de tracto **medidas** en la
   verdad y en el VCF; la cota declarada de bases de tracto de la verdad debe
   coincidir con la del TOML, y las bases medidas deben ser las que llevan la
@@ -1131,11 +1161,18 @@ su asignación por fase está en la matriz de trazabilidad.
   configuración efectiva, la cota de bases de tracto —la de la verdad, la de
   cada locus, el tope declarado y las copias de la verdad por copia de
   haplotipo— debe coincidir exactamente con la que resuelve el TOML copiado, y
-  su parte VCF, en total y por locus, debe ser la que lleva el VCF publicado;
-  sin loci, la cota entera es cero. Las copias realizadas de cada alelo deben
-  ser las que lleva la verdad publicada, sumadas sobre los alelos que la verdad
-  no distingue (mismas bases y mismos bloques). Esta comparación va **después**
-  del juez de REQ-VAL-60, que sigue rehaciendo el abanico desde lo publicado.
+  su parte VCF, en total y por locus —los declarados en la configuración
+  efectiva y los detectados en la tabla de alelos—, debe ser la que lleva el
+  VCF publicado, atribuyendo cada registro de repetición al primer locus del
+  catálogo que lo contiene; sin loci, la cota entera es cero. Las copias
+  realizadas de cada alelo —en el manifiesto las de los declarados y en la
+  tabla las de los detectados— deben ser las que lleva la verdad publicada,
+  sumadas sobre los alelos que la verdad no distingue (mismas bases y mismos
+  bloques). Esta comparación va **después** del juez de REQ-VAL-60, que sigue
+  rehaciendo el abanico desde lo publicado. *Nota del 01/11/2026 (entrega 4
+  bis): hasta esta fecha el requisito ataba todos los loci, con sus alelos, en
+  la configuración efectiva y en el manifiesto general; desde entonces los
+  detectados se atan en la tabla de alelos.*
 - **REQ-VAL-63.** Al publicar, el juez de los recursos publicados debe exigir
   que cada parámetro del bloque de amplificación de la configuración efectiva
   (`technical_event.artifacts.pcr`) aparezca **idéntico** en el manifiesto de
@@ -1161,8 +1198,15 @@ su asignación por fase está en la matriz de trazabilidad.
   fijados (DTC-103), el juez exige además de cada tramo detectado la tirada
   mínima, el tope de unidades, que cabe en una región si las hay, que su
   puntuación es la de sus propias comparaciones y que su identificador sale de
-  sus coordenadas, y que la tabla dice lo mismo que `repeat_loci` de la
-  configuración efectiva (`src/repeat_catalog_validation.rs`, 01/11/2026).
+  sus coordenadas (`src/repeat_catalog_validation.rs`, 01/11/2026), y que las
+  filas declaradas de la tabla son los loci de `repeat_loci` de la
+  configuración efectiva y las detectadas, los loci de la tabla de alelos, en
+  el mismo orden. De la tabla de alelos exige además su forma, que las copias
+  realizadas de cada locus suman las copias haplotípicas publicadas, que cada
+  frecuencia realizada sale de sus copias y que los pasos aplicados y no
+  aplicados suman los sorteados. *Nota del 01/11/2026 (entrega 4 bis): hasta
+  esta fecha exigía «que la tabla dice lo mismo que `repeat_loci` de la
+  configuración efectiva», cuando esa lista llevaba todos los loci.*
 - **REQ-UI-16.** La interfaz debe ofrecer un **control para elegir** entre
   declarar los alelos de un locus y generarlos, y **enseñar solo la tabla que
   corresponda**: con «declarar», las de alelos e interrupciones; con «generar»,
@@ -5295,7 +5339,12 @@ VCF y no constituya un experimento de secuenciación.
   y parámetros configurados, su procedencia concreta o aleatoria, el motivo,
   unidad, copias o longitud y los objetivos de pureza y variabilidad. También
   debe conservar los valores realizados de pureza, interrupciones y variabilidad
-  por haplotipo, individuo o población cuando corresponda.
+  por haplotipo, individuo o población cuando corresponda. *Nota del
+  01/11/2026:* con la sección de microsatélites, los loci **detectados** se
+  registran en el catálogo y en la tabla de alelos, enlazados desde la
+  configuración efectiva y listados con su huella en el manifiesto general
+  (REQ-MAN-98), y no dentro del manifiesto (decisión del responsable del
+  29/10/2026, concretada el 01/11/2026; DTC-035).
 - **REQ-MAN-30.** Para cada mutación de repetición en tándem, el manifiesto debe
   registrar el modelo escalonado simple, la tasa y el sesgo efectivos, el locus
   y haplotipo afectados y si añadió o eliminó exactamente una unidad completa.

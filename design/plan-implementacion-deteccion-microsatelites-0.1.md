@@ -1785,7 +1785,7 @@ bis, inmediatamente después de esta.
 Añadida el 01/11/2026 por la decisión D4-1 (opción C) del responsable. **No
 implementada.** Va inmediatamente después de la entrega 4.
 
-- ☐ **F6.4.a.15b.** Cambio normativo previo.
+- ☑ **F6.4.a.15b.** Cambio normativo previo.
   - Depende de: entrega 4.
   - Procede de: DP-SSR-13 (b), aceptada en el apartado 11.7; D4-1.
   - Cambia: `especificaciones-0.1.md` (REQ-MAN-95, REQ-MAN-96, REQ-VAL-60 y
@@ -1798,20 +1798,667 @@ implementada.** Va inmediatamente después de la entrega 4.
     dónde va la contabilidad del deslizamiento por locus (linajes y pasos); y
     las tres limitaciones una sola vez en `repeat_detection`.
   - Se comprueba con: revisión del responsable antes de tocar el código.
-- ☐ **F6.4.a.15c.** Publicación y jueces.
+  - **Estado, 01/11/2026: hecho.** El responsable aprobó la propuesta de abajo
+    y decidió A1 a A3 según la recomendación. Aplicada ese día a la
+    especificación (REQ-MAN-29, REQ-MAN-95, REQ-MAN-96, REQ-MAN-98, REQ-VAL-60,
+    REQ-VAL-62 y REQ-VAL-64), a las decisiones técnicas (DTC-035, DTC-045 en su
+    ampliación del paquete fallido, DTC-095, DTC-097 y DTC-104) y al apartado
+    16.4 de la arquitectura, con nota fechada donde un texto quedó superado.
+    Sin código.
+- ☑ **F6.4.a.15c.** Publicación y jueces.
   - Depende de: F6.4.a.15b.
-  - Cambia: `src/results.rs` (escritura y las funciones que leen
-    `repeat_loci` de lo publicado: el juez de la efectiva frente al
-    manifiesto, el de la referencia simulada, el de los nombres, el de la
-    referencia final, el de los loci frente al TOML y el de la contabilidad
-    de tracto), `src/execution.rs`, `schemas/` (efectiva y manifiesto
-    retocados in situ, esquema de la tabla de alelos),
-    `src/repeat_catalog_validation.rs` si la tabla nueva entra en su alcance.
+  - Procede de: la propuesta normativa aprobada de abajo (F6.4.a.15b).
+  - Cambia: `src/results.rs`, en la escritura (`repeat_loci_json`,
+    `repeat_loci_manifest_json`, `repeat_output_budget_json`,
+    `repeat_detection_json` y el escritor nuevo de `repeat_alleles.tsv`) y en
+    los jueces que leen `repeat_loci` de lo publicado y cambian: el del
+    abanico (`validate_published_slippage_fans`), el de los loci frente al
+    TOML (`validate_published_repeat_loci`), el de la contabilidad de tracto
+    (`judge_tract_output_accounting`), el de las cotas frente al TOML
+    (`validate_published_tract_bounds`), el de la efectiva frente al
+    manifiesto (`validate_effective_config_v3_against_manifest_bytes`), el de
+    los objetivos frente al TOML
+    (`validate_effective_targets_against_configuration`), la forma de la
+    sección del manifiesto (`validate_repeat_loci_section`) y el orquestador
+    (`validate_published_resources_v3`); `src/execution.rs` (orden de
+    escritura y paquete fallido); `src/repeat_catalog_validation.rs` (la tabla
+    de alelos entra en su alcance); `schemas/` (efectiva y manifiesto
+    retocados in situ por la nota alfa de DTC-036). **La tabla de alelos no
+    lleva esquema**: la juzga el código, como la del catálogo y la de la
+    matriz. No cambian, aunque la lista anterior los nombraba, el juez de la
+    referencia simulada (`published_simulated_tracts`) ni el de la referencia
+    final (`judge_inserted_reference`), que ya saltan los detectados, ni el de
+    los nombres (`validate_published_reference_names`), que solo lee la
+    referencia de la sección.
   - Se comprueba con: sin la sección de detección, todo byte publicado
     idéntico; con ella, los documentos JSON no crecen con los detectados
     (medido con dos tamaños de catálogo); cada comprobación nueva disparada
     con lo publicado alterado a mano. **Debe fallar contra:** un abanico de un
-    detectado que se quede en la efectiva.
+    detectado que se quede en la efectiva; un escenario con solo detectados y
+    tartamudeo clonal que el juez de los objetivos tome por catálogo vacío
+    (hoy lo decide mirando si `repeat_loci` de la efectiva está vacío, y con
+    solo detectados lo estaría siempre); un juez que atribuya las bases del
+    VCF solo a los declarados; un escritor que pierda la misma fila en el
+    catálogo y en la tabla de alelos (lo caza una tabla escrita a mano en la
+    prueba).
+
+> **Estado, 01/11/2026: F6.4.a.15c implementado, pendiente de la revisión
+> adversarial.** Sin *commit*.
+>
+> - **Qué se publica.** Con la sección, `repeat_loci` y
+>   `repeat_output_budget.per_locus` de la efectiva y `repeat_loci.loci` del
+>   manifiesto llevan solo los declarados (la lista del manifiesto puede quedar
+>   vacía); `repeat_detection` gana, en `slippage`, las versiones, el ámbito,
+>   la versión de su catálogo, las tres limitaciones y los linajes,
+>   `frequency_normalization` con sus tres constantes y el enlace
+>   `alleles_table`; `repeat_alleles.tsv` (artefacto `repeat-alleles-tsv`,
+>   clase `repeat_alleles_tsv`, en el mínimo) lleva las trece columnas de la
+>   propuesta, solo con la cabecera si no queda ningún detectado. Se escribe
+>   justo después de la verdad y el VCF y antes del evento técnico y de la
+>   efectiva, y entra en la unidad genotípica con el par del catálogo (que
+>   hasta hoy no estaba en ella). Las frecuencias se escriben con el decimal
+>   más corto de ida y vuelta de Rust, sin exponente. Comprobado con un guion
+>   en Python sobre 250 loci: cada fila de la tabla es, campo a campo, lo que la
+>   efectiva y el manifiesto de `afda48b` publicaban de ese alelo.
+> - **Jueces.** El del catálogo (`src/repeat_catalog_validation.rs`) gana el
+>   enlace, la huella y el tamaño de la tabla de alelos, su lector estricto y
+>   la lista de la propuesta; las filas declaradas se comparan con
+>   `repeat_loci` y las detectadas con la tabla de alelos. Nuevo en
+>   `src/results.rs`: el juez del abanico de los detectados
+>   (`validate_published_detected_fans`), que corre justo después del de los
+>   declarados y antes de atar nada al TOML, con el mismo recorrido escrito
+>   aparte del productor; y la atadura de la tabla al TOML
+>   (`validate_published_repeat_alleles`, copias contra la verdad y la tabla
+>   rehecha byte a byte con las copias publicadas y las bases del VCF
+>   recontadas), detrás de recontar la verdad y el VCF. La contabilidad de
+>   tracto atribuye cada registro de repetición al primer locus del catálogo
+>   y exige la parte VCF de cada fila de cada detectado. El lector del
+>   manifiesto admite la lista de loci vacía si el manifiesto lista el
+>   catálogo o es de un paquete fallido; el juez de los dos documentos admite
+>   una efectiva sin loci frente a un manifiesto con ellos si la efectiva
+>   tiene la sección.
+> - **Defecto previo encontrado y arreglado: el evento técnico frente al
+>   TOML.** El juez de los objetivos comparaba `technical_event` con la
+>   configuración recién leída del TOML, que aún no ha detectado nada: con
+>   solo loci detectados y tartamudeo, el plan del tartamudeo salía apagado en
+>   lo esperado y **la ejecución moría en su propio juez**, también en
+>   `afda48b` (reproducido en una copia de `afda48b` con PCR, tartamudeo de
+>   base y un solo detectado: «technical_event efectivo no coincide
+>   exactamente con el TOML resuelto»). Es lo que el riesgo 1 de la propuesta
+>   veía a medias: el criterio del catálogo vacío no era lo único mal. La
+>   comparación pasa al juez completo, contra la configuración del **catálogo
+>   final** (`validate_published_technical_event_block`, justo después de
+>   `with_final_repeat_catalog`), y el criterio del catálogo vacío desaparece:
+>   lo decide el propio catálogo final.
+> - **Detalle de la propuesta que no se sostenía (apartado 7):** «secuencias
+>   de A, C, G y T». Un tramo detectado puede llevar una `N` (cuenta como base
+>   que no encaja en la pureza) y sus alelos la heredan; lo hizo ver
+>   `a_lone_n_inside_a_long_tract_counts_as_a_purity_mismatch`. El juez admite
+>   A, C, G, T y N, como el lector de los alelos del manifiesto. Ninguna norma
+>   decía lo contrario: REQ-VAL-64 solo pide «su forma».
+> - **Pesos medidos** con los binarios de `afda48b` y de esta entrega en
+>   `--release`, sobre una referencia sintética con 250 y 1 000 microsatélites
+>   plantados (el detector halla 250 y 1 005), diploides HWE, VCF de texto:
+>
+>   | Fichero | 250 loci, 10 ind. | 1 005 loci, 10 ind. | 250, 100 ind. | 1 005, 100 ind. |
+>   |---|---:|---:|---:|---:|
+>   | Efectiva, `afda48b` | 1 203 723 B | 4 823 707 B | 1 570 032 B | 6 285 341 B |
+>   | Efectiva, ahora | 7 412 B | 7 415 B | 8 779 B | 8 782 B |
+>   | Manifiesto, `afda48b` | 1 264 160 B | 5 060 387 B | 1 705 584 B | 6 824 285 B |
+>   | Manifiesto, ahora | 8 488 B | 8 495 B | 9 858 B | 9 865 B |
+>   | `repeat_alleles.tsv` | 127 770 B | 512 911 B | 207 529 B | 830 621 B |
+>
+>   Los dos documentos cambian 3 y 7 bytes entre 250 y 1 005 loci (los dígitos
+>   de los totales); la tabla de alelos crece 510 B por locus con 10
+>   individuos y 825 B con 100, como predijo el apartado 9. La prueba
+>   `the_json_documents_do_not_grow_with_the_detected_loci` lo exige con 12 y
+>   48 plantados.
+> - **Pruebas** (`tests/repeat_catalog_validation.rs`, `tests/repeat_detection_run.rs`
+>   y una de `src/execution.rs`): cada comprobación nueva de los dos jueces la
+>   dispara un caso que altera a mano la tabla de alelos, el catálogo, la
+>   efectiva o el manifiesto y exige el motivo exacto; los detectados se fijan
+>   con una lista escrita a mano; con PCR, tartamudeo clonal y solo detectados
+>   la ejecución se publica; el paquete fallido conserva o pierde los tres
+>   ficheros con la unidad.
+> - **Mutaciones**, en una copia extraída con `git archive` de `afda48b` más
+>   los ficheros de esta entrega, con su propio directorio de compilación, SHA
+>   antes, mutado y restaurado (igual al de antes) en cada una: veinticuatro
+>   mueren con la prueba prevista — los detectados en la efectiva, en el
+>   manifiesto o en `per_locus`; la misma fila perdida en el catálogo y en la
+>   tabla de alelos con el metadato rehecho (el juez y la reconstrucción la
+>   aceptan; la matan las dos tablas escritas a mano); el catálogo vacío
+>   decidido por `repeat_loci` de la efectiva; la atribución del VCF solo a
+>   los declarados; sin la parte VCF de cada fila; el abanico sin frecuencia,
+>   con la contabilidad solo de la primera fila o sin cotejar los linajes; la
+>   tabla sin copias frente a la verdad o sin comparación byte a byte; el juez
+>   del catálogo sin suma de copias, sin frecuencia realizada, sin el orden de
+>   los loci, contando los declarados contra todas las filas o sin la huella
+>   del enlace; la tabla de alelos o el catálogo fuera de la unidad
+>   genotípica; el manifiesto fallido exigiendo un locus; la lista vacía
+>   siempre admitida; la efectiva sin loci siempre admitida; y **el generador
+>   con el espectro invertido** (cada alelo con la frecuencia del simétrico),
+>   que hace morir la publicación con solo detectados en el juez del abanico
+>   de los detectados («alelo 0: publicada 0.75, rehecha 0.25 = 1/4»); con ese
+>   juez quitado, la misma publicación pasa: es la única guarda de eso.
+> - **Una mutación sobrevive, y es un hueco previo:** invertir solo la
+>   frecuencia **efectiva** de un abanico generado (la declarada intacta). Ningún
+>   juez independiente compara la efectiva con la declarada, ni para los
+>   detectados ni para los declarados con generador: la ata solo la
+>   reconstrucción con el productor. Anotado como DT-064 en el registro de
+>   deudas (no lo toca esta entrega).
+> - **Huellas.** Sin la sección no cambia un byte (las cuatro de
+>   `tests/repeat_detection_frozen_identity.rs` intactas; los cinco escenarios
+>   de la revisión de la fusión del VCF sin la sección y las ejecuciones
+>   amplificada sin loci y sin evento de `tests/technical_catalog_contract.rs`,
+>   idénticos al binario de `afda48b`). Con ella cambian a propósito la
+>   efectiva y el manifiesto y aparece la tabla de alelos: comparado campo a
+>   campo contra el binario de `afda48b` compilado aparte (los dos escenarios
+>   de muchos loci, los dieciséis de la revisión con la sección y los dos de
+>   la evidencia de DT-009 con loci), no cambia nada más. La tabla normalizada
+>   de `tests/repeat_scale_frozen_identity.rs` conserva los literales de
+>   `dcae406`; su tabla de documentos y las dos huellas de
+>   `tests/technical_catalog_contract.rs` se volvieron a medir, con la
+>   justificación escrita en cada prueba.
+> - **Puerta de cobertura**: el juez del catálogo pasa de 59 a 78
+>   comprobaciones con techo 0; `src/results.rs` de 726 a 739 y de 153 a 154
+>   sin disparar (la derivación de la subsemilla del abanico de un detectado,
+>   inalcanzable en la práctica como su gemela de los declarados).
+> - **Puertas** (`python3` 3.12.7 del entorno del proyecto, `bcftools` y
+>   `tabix` 1.24): formato y `clippy` limpios; batería 2254 pasan, 0 fallan,
+>   14 ignoradas; pruebas de documentación 2; compilación optimizada; cinco
+>   PASS de los validadores independientes; cobertura dentro de su techo en
+>   los quince jueces; Marimo limpio; 178 pruebas de Python con los 7 fallos
+>   esperados.
+
+#### Propuesta normativa de la entrega 4 bis (F6.4.a.15b, 01/11/2026)
+
+**Estado: aprobada por el responsable el 01/11/2026, con A1 a A3 decididas
+según la recomendación, y aplicada ese día** a `especificaciones-0.1.md`,
+`decisiones-tecnicas-0.1.md` y `arquitectura-0.1.md` (ver el estado de
+F6.4.a.15b). El código no se ha tocado. Lo que sigue se conserva como se
+escribió; el apartado 8 lleva el texto que se aplicó.
+
+**Aviso previo: el cambio toca más normas que las cuatro que nombra el paso.**
+Además de REQ-MAN-95, REQ-MAN-96, REQ-VAL-60, REQ-VAL-62 y DTC-104, sacar los
+detectados de los dos documentos choca con dos normas generales que no son de
+microsatélites: **DTC-035** («cada manifiesto contiene directamente todo lo
+que REQ-MAN obliga a registrar […]; V1 no fragmenta manifiestos en JSONL ni
+**tablas auxiliares**») y **REQ-MAN-29** («el manifiesto debe registrar los
+loci y parámetros configurados […] y conservar los valores realizados»). La
+dirección ya la fijó el responsable al aceptar DP-SSR-13 (b) el 29/10/2026
+(«los abanicos de alelos, en un TSV propio»; «los documentos JSON dejan de
+crecer con los loci»), pero el texto de esas dos normas no se cambió. Aquí se
+propone una nota fechada para cada una y se deja como decisión abierta A1. Por
+consecuencia mecánica cambian también REQ-MAN-98 y REQ-VAL-64 (el catálogo y
+su juez, que hoy comparan la tabla con `repeat_loci`), DTC-097 (la forma
+publicada de cada alelo y del bloque `slippage`), una frase de DTC-095 y la
+ampliación de DTC-045 sobre el paquete fallido, que nombra `repeat_loci`.
+
+##### 1. Lo que hay hoy, comprobado
+
+Comprobado en `afda48b` leyendo `src/results.rs` y publicando dos escenarios
+propios (apartado 9 de esta propuesta). Cada **detectado** publica en la
+configuración efectiva, dentro de `repeat_loci`: `id`, `origin`,
+`sequence_id`, `start`, `end`, `motifs`, `motif_lengths`, `max_units`
+(siempre el tope común de la sección), `admission` (siempre los mínimos
+comunes de `repeat_admission`), `frequency_normalization` (siete campos),
+`alleles` (trece campos por alelo: secuencia, origen, las dos frecuencias y
+nueve de anotación) y `slippage` (catorce campos, de ellos 743 bytes de las
+tres limitaciones). Además, una entrada en `repeat_output_budget.per_locus`
+(identificador, cota de la verdad y bases del VCF). El manifiesto general
+repite el locus sin la normalización y con `drawn_copies` y, por alelo,
+`realized_copies` y `realized_frequency`. Medido: unos 4,2 kB por locus en
+cada documento, más 0,1 kB de la cota por locus.
+
+##### 2. Qué queda de cada detectado en la efectiva y en el manifiesto: nada
+
+- `repeat_loci` de la efectiva lleva **solo los declarados**, con su forma de
+  hoy; sin declarados es `[]`.
+- `repeat_output_budget.per_locus` lleva solo los declarados. Los totales
+  (`truth_tract_bases_bound`, `vcf_tract_bases_bound`,
+  `total_tract_bases_bound`) siguen cubriendo **todos** los loci.
+- `repeat_loci.loci` del manifiesto lleva solo los declarados y **puede quedar
+  vacía**. La sección sigue existiendo mientras el catálogo final tenga algún
+  locus, detectado o declarado, porque lleva la referencia, los mínimos y la
+  contabilidad de tracto total.
+- **Los declarados se quedan como están**, con su bloque entero (también las
+  limitaciones si generan sus alelos). No hay norma que pida moverlos y son
+  pocos; pueden ser compuestos, llevar alelos escritos a mano con
+  interrupciones, una posición declarada o insertada y un generador propio, y
+  meterlos en la tabla obligaría a columnas que un detectado nunca usa.
+  Consecuencia para quien lea los alelos: los de los declarados en los JSON,
+  los de los detectados en la tabla; `repeat_catalog.tsv` sigue siendo el
+  índice de todos, con su origen.
+
+##### 3. Lo que se publica una sola vez en `repeat_detection` de la efectiva
+
+- `slippage`: a lo de hoy (`model`, `step_units`, `mean_events`,
+  `expansion_bias`) se añaden `algorithm`, `count_algorithm`,
+  `bias_algorithm`, `rng_scope`, `rng_scope_catalog_version`, `limitations`
+  (las tres, palabra por palabra) y `lineages`, que es común a todos los
+  detectados porque es el número de copias haplotípicas.
+- `frequency_normalization`: las tres constantes (`tolerance`,
+  `sum_algorithm`, `canonical_order`). Las cuatro sumas por locus **no** se
+  publican para un detectado: salen de la columna de frecuencias con el
+  algoritmo publicado, y en un abanico generado son sumas de `k/L`.
+- `alleles_table`: el enlace con huella a la tabla nueva, `{"path":
+  "repeat_alleles.tsv", "sha256": …}`.
+- `catalog`, `max_units`, `min_copies` y `regions`, como hoy; los mínimos de
+  pureza y tirada siguen en `repeat_admission`.
+
+##### 4. La tabla nueva: `repeat_alleles.tsv`
+
+Artefacto `repeat-alleles-tsv`, clase `repeat_alleles_tsv`, en la raíz del
+paquete junto al catálogo. Se escribe **siempre que exista la sección** (solo
+la cabecera si no queda ningún detectado), igual que el catálogo; sin la
+sección no se escribe y todo byte publicado queda idéntico. Una fila por alelo
+de cada **detectado**, en el orden del catálogo y, dentro de cada locus, por
+`allele_index`. Columnas, con cabecera y en este orden:
+
+| Columna | Qué es | Dónde está hoy |
+|---|---|---|
+| `locus_id` | Identificador `SSR-…` del detectado; une con `repeat_catalog.tsv` | `id` |
+| `allele_index` | Posición del alelo en el orden canónico del abanico, desde 0 | orden de `alleles` |
+| `sequence` | Bases del alelo | `alleles[].sequence` |
+| `origin` | `generated` en toda fila: un detectado no admite alelos escritos a mano. Se conserva por alelo porque lo pide REQ-MAN-95 | `alleles[].origin` |
+| `declared_frequency` | Proporción de linajes que terminan en el alelo | efectiva |
+| `effective_frequency` | La anterior tras la normalización de DTC-049 | efectiva |
+| `realized_copies` | Copias haplotípicas que el sorteo dio al alelo | manifiesto |
+| `realized_frequency` | `realized_copies` entre las copias sorteadas del locus; `.` si no hay ninguna | manifiesto (`null`) |
+| `drawn_events` | Pasos sorteados del locus | `slippage` |
+| `applied_events` | Pasos aplicados del locus | `slippage` |
+| `unapplied_events` | Pasos no aplicados al detenerse en un borde | `slippage` |
+| `truth_tract_bases_bound` | Cota de bases de tracto del locus en la verdad | `repeat_output_budget.per_locus` |
+| `vcf_tract_bases_bound` | Bases de tracto que el VCF publicado lleva en el locus, medidas al publicarlo (DTC-097) | `repeat_output_budget.per_locus` |
+
+Las cinco últimas son **del locus** y se repiten en cada fila suya (decisión
+abierta A3). Enteros en decimal; frecuencias como decimal de ida y vuelta, que
+el juez lee como `f64` y compara bit a bit; `.` solo en `realized_frequency`;
+sin comillas ni campos vacíos.
+
+**Lo que no se publica porque se deriva**, y quién lo deriva:
+
+- `drawn_copies`: la suma de `realized_copies` del locus.
+- La **anotación de cada alelo** (unidades, pureza, tirada más larga, bloques e
+  interrupciones): sale de `sequence` y del motivo del catálogo. Las unidades
+  son bases entre longitud del motivo; lo demás, de la descomposición que la
+  arquitectura (apartado 16.6) declara salida derivada y nunca entrada.
+  Decisión abierta A2.
+- Del locus: `max_units`, `admission` y la normalización (comunes, en la
+  efectiva), `motifs`, `motif_lengths`, el intervalo y el origen (en el
+  catálogo).
+
+##### 5. Enlace, manifiesto y orden de escritura
+
+- **Enlace:** `repeat_detection.alleles_table` de la efectiva, con ruta y
+  huella. **Sin metadato JSON propio**: el contexto de la tabla (parámetros,
+  versiones, ámbito, linajes, limitaciones) ya está en `repeat_detection`. La
+  matriz de SNV lleva metadato (DTC-054) porque es un recurso reutilizable
+  fuera de una ejecución; esta tabla no lo es.
+- **Manifiesto:** la tabla figura en su lista de artefactos con ruta, clase,
+  tamaño y huella, como el par del catálogo.
+- **Orden:** se escribe **después de la unidad genotípica** (la verdad y, si se
+  pidió, el VCF), porque las bases de tracto del VCF por locus solo se conocen
+  al publicarlo, y **antes de la efectiva**, que lleva su huella. Las copias
+  realizadas ya se conocen desde el preflight.
+
+##### 6. Paquete fallido
+
+El par del catálogo y la tabla de alelos **entran en la unidad genotípica**:
+se conservan si y solo si se conserva la unidad, porque la verdad nombra los
+loci detectados por su identificador y sin ellos no se explica. Sin unidad no
+hay tabla, y el `repeat_loci` del manifiesto fallido registra solo los
+declarados, con cero copias como hoy; los detectados se rehacen desde el TOML
+copiado y la referencia. Hoy, sin unidad, el manifiesto fallido los registra
+todos con cero copias: es un cambio visible, y por eso se propone texto para la
+ampliación de DTC-045 (apartado 8).
+
+##### 7. Jueces de la tabla
+
+**Independientes, sin llamar al productor:**
+
+- **El juez del abanico** (REQ-VAL-60; `validate_published_slippage_fans`, en
+  `src/results.rs`): por cada detectado lee su fila del catálogo (secuencia,
+  inicio, fin, motivo), el deslizamiento común, los linajes y el tope de
+  `repeat_detection`, la referencia publicada y la semilla publicada; rehace
+  el abanico con su propio recorrido, como hoy, y compara **fila a fila**: el
+  número de filas del locus, `sequence` y `declared_frequency` bit a bit, y
+  los tres recuentos de pasos **de cada fila** contra los rehechos, lo que
+  además obliga a que sean iguales en todas las filas del locus.
+- **El juez del catálogo** (`src/repeat_catalog_validation.rs`), ampliado con
+  la forma y la aritmética de la tabla: cabecera exacta; trece campos por fila;
+  los `locus_id` son exactamente las filas detectadas del catálogo, en su orden,
+  sin que falte ni sobre ninguna; `allele_index` de 0 a k−1 sin huecos;
+  `origin` siempre `generated`; secuencias de A, C, G y T, distintas dentro del
+  locus; la suma de `realized_copies` del locus es el número de copias
+  haplotípicas publicado; `realized_frequency` es copias entre esa suma, bit a
+  bit, y `.` solo si la suma es cero; aplicados más no aplicados suman los
+  sorteados; la huella y el tamaño coinciden con el enlace de la efectiva y con
+  el manifiesto. La comprobación de hoy «la tabla dice lo mismo que
+  `repeat_loci` de la efectiva» pasa a ser: las filas declaradas del catálogo
+  son los loci de `repeat_loci`, y las detectadas, los loci de la tabla de
+  alelos, en el mismo orden.
+- **Lo realizado contra los ficheros** (REQ-VAL-62, en `src/results.rs`):
+  `realized_copies` contra lo que se recuenta en los bytes de la verdad, y
+  `vcf_tract_bases_bound` de cada locus contra lo que se recuenta en los bytes
+  del VCF, atribuyendo cada registro de repetición al primer locus que lo
+  contiene **entre todos los del catálogo** (leídos de `repeat_catalog.tsv`,
+  no de `repeat_loci` del manifiesto, que ya no los tiene).
+
+**Atadura al TOML** (la reconstrucción con el productor que REQ-VAL-62 ya
+admite, porque la independencia la pone REQ-VAL-60): la tabla se rehace desde
+el TOML copiado, con las columnas medidas sustituidas por lo recontado, y se
+compara byte a byte.
+
+**Lo que no ve**, igual que hoy: las primitivas de azar las comparte con el
+productor (con sus propios vectores congelados), y la exhaustividad del
+catálogo no se puede juzgar sin un detector.
+
+**Para F6.4.a.15c, tres sitios donde el cambio puede romper en silencio**
+(cada uno con su «debe fallar contra»):
+
+1. `validate_effective_targets_against_configuration` decide que el catálogo
+   está vacío —y que el tartamudeo clonal se desconecta— mirando si
+   `repeat_loci` de la efectiva está vacío. Con solo detectados lo estaría
+   siempre. Debe fallar contra: un escenario con solo detectados y tartamudeo
+   clonal que se juzgue como catálogo vacío.
+2. La atribución del VCF por locus en `judge_tract_output_accounting` usa los
+   intervalos de `repeat_loci.loci` del manifiesto. Debe fallar contra: un
+   juez que atribuya solo a los declarados.
+3. La tabla y el catálogo salen del mismo recorrido del productor, y la
+   reconstrucción usa los mismos escritores. Debe fallar contra: un escritor
+   que pierda la misma fila en las dos tablas (lo caza una tabla escrita a mano
+   en la prueba, como en la entrega 4).
+
+##### 8. Texto normativo propuesto (aplicado el 01/11/2026)
+
+**REQ-MAN-95.** *Hoy:* «La configuración efectiva y el manifiesto general
+deben publicar, **por alelo y no por locus**, el **origen** de cada alelo de
+repetición: declarado por el usuario o generado por deslizamiento. El origen
+del alelo y el del locus deben concordar.»
+*Propuesto:* «Se debe publicar, **por alelo y no por locus**, el **origen** de
+cada alelo de repetición: declarado por el usuario o generado por
+deslizamiento. Los alelos de un locus **declarado** se publican en la
+configuración efectiva y en el manifiesto general; los de un locus
+**detectado**, en la tabla de alelos de REQ-MAN-98, y no en esos dos
+documentos. El origen del alelo y el del locus deben concordar.»
+
+**REQ-MAN-96.** *Hoy:* «Un locus generado debe publicar además sus
+parámetros, la versión de su algoritmo, las de los algoritmos de azar que
+consume, el nombre de su ámbito de azar y la versión del catálogo de ámbitos,
+las tres limitaciones declaradas del modelo palabra por palabra, y la
+contabilidad de la generación: linajes, pasos sorteados, pasos aplicados y
+pasos no aplicados al detenerse en un borde. Los aplicados más los no
+aplicados deben sumar exactamente los sorteados.»
+*Propuesto:* el mismo texto, y al final: «Para los loci **detectados**, lo que
+es común a todos —los parámetros del deslizamiento común, las versiones, el
+ámbito y la versión de su catálogo, los linajes y las tres limitaciones
+palabra por palabra— se publica **una sola vez**, en la sección de
+microsatélites de la configuración efectiva, y la contabilidad de cada uno
+—pasos sorteados, aplicados y no aplicados— en la tabla de alelos de
+REQ-MAN-98. La suma se exige locus a locus.»
+
+**REQ-MAN-98.** *Hoy* termina en «El catálogo viaja **aparte** […]. La verdad y
+el VCF no cambian de formato.» *Propuesto:* antes de la última frase, añadir:
+«**Los alelos de los loci detectados** viajan también aparte, en una tabla con
+una fila por alelo, enlazada con huella desde la configuración efectiva y
+listada en el manifiesto general: su secuencia, su origen, sus frecuencias
+declarada y efectiva, sus copias y su frecuencia realizadas y, por locus, la
+contabilidad del deslizamiento y sus bases de tracto. La configuración efectiva
+y el manifiesto general no publican nada propio de cada locus detectado, de
+modo que no crecen con su número; los loci declarados siguen publicándose
+enteros en ellos.»
+
+**REQ-VAL-60.** *Hoy:* «Un juez independiente debe **rehacer el abanico
+publicado** —desde la referencia publicada, los parámetros publicados y la
+semilla publicada— y contrastarlo con el escrito, alelo a alelo. No basta con
+reconstruir la configuración llamando al productor: eso compara el abanico
+consigo mismo y no puede fallar.» *Propuesto:* el mismo texto, y tras «alelo a
+alelo»: «El de un locus detectado lo rehace desde su fila del catálogo y el
+deslizamiento común de la sección de microsatélites publicados, y lo contrasta
+fila a fila con la tabla de alelos, incluida en cada fila la contabilidad del
+locus.»
+
+**REQ-VAL-62.** *Hoy* (fragmentos que cambian): «En la configuración efectiva,
+los loci —con sus alelos, declarados o generados— y los mínimos de admisión
+deben coincidir **exactamente** con los que resuelve el TOML copiado sobre la
+referencia publicada. En el manifiesto general, la sección de loci debe
+coincidir exactamente con la que resuelve el TOML **salvo lo medido** […]; y
+su parte VCF, en total y por locus, debe ser la que lleva el VCF publicado […].
+Las copias realizadas de cada alelo deben ser las que lleva la verdad
+publicada […].»
+*Propuesto:* «En la configuración efectiva, los loci declarados —con sus
+alelos, declarados o generados— y los mínimos de admisión, y en la tabla de
+alelos los alelos de los loci detectados, deben coincidir **exactamente** con
+los que resuelve el TOML copiado sobre la referencia publicada, salvo, en la
+tabla, las columnas medidas: copias y frecuencia realizadas y bases de tracto
+del VCF. En el manifiesto general, la sección de loci —la de los declarados—
+debe coincidir exactamente con la que resuelve el TOML **salvo lo medido** […];
+y su parte VCF, en total y por locus —los declarados en la configuración
+efectiva y los detectados en la tabla de alelos—, debe ser la que lleva el VCF
+publicado, atribuyendo cada registro de repetición al primer locus del
+catálogo que lo contiene […]. Las copias realizadas de cada alelo —en el
+manifiesto las de los declarados y en la tabla las de los detectados— deben
+ser las que lleva la verdad publicada […].» El resto, sin cambios.
+
+**REQ-VAL-64.** *Hoy* termina en «[…] y que la tabla dice lo mismo que
+`repeat_loci` de la configuración efectiva (`src/repeat_catalog_validation.rs`,
+01/11/2026).» *Propuesto:* «[…] que las filas declaradas de la tabla son los
+loci de `repeat_loci` de la configuración efectiva y las detectadas, los loci
+de la tabla de alelos, en el mismo orden. De la tabla de alelos exige además
+su forma, que las copias realizadas de cada locus suman las copias
+haplotípicas publicadas, que cada frecuencia realizada sale de sus copias y
+que los pasos aplicados y no aplicados suman los sorteados.»
+
+**REQ-MAN-29**, nota fechada nueva: «Con la sección de microsatélites, los loci
+**detectados** se registran en el catálogo y en la tabla de alelos, enlazados
+desde la configuración efectiva y listados con su huella en el manifiesto
+general (REQ-MAN-98), y no dentro del manifiesto (decisión del responsable del
+29/10/2026; DTC-035).»
+
+**DTC-035**, nota fechada nueva: «Excepción a "V1 no fragmenta manifiestos en
+JSONL ni tablas auxiliares": lo que crece con los loci **detectados** sobre el
+genoma —el catálogo de microsatélites y los alelos de los detectados— viaja en
+tablas propias, enlazadas con huella desde la configuración efectiva y listadas
+con tamaño y huella en el manifiesto general (REQ-MAN-98, DTC-104). Decidido
+por el responsable en la pausa de la entrega 1 del plan de detección
+(29/10/2026, DP-SSR-13 b): con 56 736 loci los dos documentos pasaban de medio
+gigabyte.»
+
+**DTC-104.** *Hoy:* «**Por ahora los loci siguen además en `repeat_loci`** de la
+efectiva y del manifiesto, con sus abanicos: sacar los detectados de esos dos
+documentos y llevar sus abanicos a una tabla propia es la entrega 4 bis del
+plan, con su cambio normativo previo (REQ-MAN-95, REQ-MAN-96, REQ-VAL-60 y
+REQ-VAL-62).» *Propuesto, en su lugar:* «**Los alelos de los detectados** van
+en `repeat_alleles.tsv`, una fila por alelo en el orden del catálogo y del
+abanico, con las columnas `locus_id`, `allele_index`, `sequence`, `origin`,
+`declared_frequency`, `effective_frequency`, `realized_copies`,
+`realized_frequency`, `drawn_events`, `applied_events`, `unapplied_events`,
+`truth_tract_bases_bound` y `vcf_tract_bases_bound` (las cinco últimas, del
+locus, repetidas en cada fila suya); se escribe siempre con la sección,
+después de la unidad genotípica y antes de la efectiva, que la enlaza con
+huella en `repeat_detection.alleles_table`, y figura en el manifiesto general.
+La anotación de cada alelo no se publica: se deriva de su secuencia y del
+motivo del catálogo. Lo común del deslizamiento —parámetros, versiones, ámbito,
+catálogo de ámbitos, linajes y las tres limitaciones— va una vez en
+`repeat_detection.slippage`, y las constantes de la normalización en
+`repeat_detection.frequency_normalization`. `repeat_loci` y
+`repeat_output_budget.per_locus` de la efectiva, y `repeat_loci.loci` del
+manifiesto, llevan solo los declarados. En un paquete fallido, el par del
+catálogo y la tabla de alelos forman parte de la unidad genotípica.» Y en el
+párrafo del juez, añadir la ampliación de su lista (REQ-VAL-64) y que el
+abanico de cada detectado lo rehace el juez de REQ-VAL-60 desde la tabla.
+
+**DTC-097**, nota fechada nueva: «Para los loci detectados (DTC-104), los
+alelos con su origen, sus frecuencias y lo realizado, la contabilidad del
+bloque `slippage` y la parte de la cota de cada locus viajan en la tabla de
+alelos, y lo fijo del bloque —modelo, tamaño de paso, media, sesgo, versiones,
+ámbito, versión del catálogo de ámbitos y limitaciones— y los linajes, una vez
+en `repeat_detection.slippage`. Lo que esta decisión exige de cada locus,
+incluida la parte VCF locus a locus, vale igual en la tabla.»
+
+**DTC-095**, ampliación del 28/10/2026: «las tres limitaciones declaradas, que
+hoy viajan en cada locus generado, se publicarían **una sola vez** si el
+catálogo se publica aparte (DTC-104)» pasa a «[…] se publican **una sola vez**
+para los detectados, en la sección de microsatélites de la efectiva (DTC-104);
+un declarado que genera sus alelos las sigue llevando en su bloque».
+
+**Ampliación de DTC-045** (qué conserva un paquete fallido), en «la unidad
+genotípica»: añadir «con la sección de microsatélites, también el par del
+catálogo y la tabla de alelos», y cambiar «Con loci de repetición,
+`repeat_loci` publica los sorteos […]» por «Con loci de repetición, `repeat_loci`
+publica los de los **declarados**, y la tabla de alelos conservada los de los
+detectados, con los sorteos y las bases de tracto que la verdad y el VCF
+conservados llevan de verdad; sin unidad, `repeat_loci` registra los declarados
+con cero copias sorteadas y cifras realizadas a cero».
+
+**Arquitectura, apartado 16.4**, viñeta «Lo publicado». *Hoy:* «los loci con sus
+alelos y su origen por alelo (REQ-MAN-95, REQ-MAN-96) en la configuración
+efectiva y el manifiesto general; […]». *Propuesto:* «los loci declarados con
+sus alelos y su origen por alelo (REQ-MAN-95, REQ-MAN-96) en la configuración
+efectiva y el manifiesto general; el catálogo de todos los loci y los alelos
+de los detectados en tablas aparte enlazadas con huella (REQ-MAN-98), de modo
+que los documentos JSON no crecen con los detectados; […]».
+
+##### 9. Pesos: medidos sobre lo publicado y extrapolados
+
+**Cómo se midió.** Binario de `afda48b` compilado con `--release` en un
+directorio de compilación propio. Dos referencias sintéticas de una secuencia
+con 250 y 1 000 microsatélites plantados (motivos de 1 a 6 pb al azar, entre 2
+y 12 copias por encima del suelo, uno cada 400 bases sobre un fondo sin
+tiradas de periodo 1 ni 2); el detector halló 251 y 1 006 loci. Una población
+diploide HWE de 10 y de 100 individuos, deslizamiento común con media 1, VCF de
+texto y una matriz de una fila fuera de todo tracto, como en el apartado 11.4.
+La forma propuesta se obtuvo **transformando los JSON publicados** con un
+guion propio (quitar los detectados, añadir lo común una vez, el enlace y la
+entrada del manifiesto) y escribiendo la tabla con sus columnas desde los
+mismos datos; la reescritura de los JSON reproduce el tamaño del fichero
+publicado con un error del 0,02 %. Las pendientes son la diferencia entre los
+dos tamaños dividida por los 755 loci de diferencia.
+
+| Fichero | 10 individuos | 100 individuos | Con 56 736 detectados (10 / 100) |
+|---|---:|---:|---:|
+| Efectiva hoy | 5 006 B/locus | 6 558 B/locus | 284 MB / 372 MB |
+| Manifiesto hoy | 5 256 B/locus | 7 116 B/locus | 298 MB / 404 MB |
+| **Efectiva propuesta** | 7,4 kB fijos | 8,8 kB fijos | **7,4 kB / 8,8 kB** |
+| **Manifiesto propuesto** | 8,4 kB fijos | 9,8 kB fijos | **8,4 kB / 9,8 kB** |
+| Tabla de alelos, solo secuencia (A2 a) | 526 B/locus | 848 B/locus | 30 MB / 48 MB |
+| … con las unidades (A2 b) | 558 B/locus | 896 B/locus | 32 MB / 51 MB |
+| … con toda la anotación (A2 c) | 657 B/locus | 1 048 B/locus | 37 MB / 59 MB |
+| `repeat_catalog.tsv` (sin cambio) | 60 B/locus | 60 B/locus | 3,4 MB |
+
+Los dos documentos propuestos cambian **3 y 7 bytes** entre 251 y 1 006 loci
+(los dígitos de los totales): ya no crecen con los detectados; lo que queda
+crece con los individuos (la lista de identificadores) y con los declarados.
+Hoy los dos suman unos 10,3 kB por locus con 10 individuos, algo más que los
+9,5 kB del apartado 11.6 porque los tractos sintéticos son algo más largos; con
+los pesos de 11.6 la tabla rondaría el 5 % de lo que hoy ocupan los dos JSON.
+La tabla la domina la secuencia de cada alelo (43 bases de media aquí; 4,6
+alelos por locus con 10 individuos y 7,0 con 100). Con la forma propuesta, la
+efectiva cae además por debajo de los 2 MB que la interfaz Marimo acepta para
+sus resúmenes; hoy los supera a partir de unos 400 loci.
+
+**Fuera de alcance, medido en 11.6:** el manifiesto del evento técnico también
+crece con los loci (226 B por locus con tartamudeo, unos 13 MB con 56 736:
+parámetros y pasos por locus); la verdad, con locus por individuo (DP-SSR-13:
+su formato no cambia).
+
+##### 10. Consumidores que hoy leen `repeat_loci` de lo publicado
+
+Buscado con `grep` en `src/`, `tests/`, `ui/`, `tests_ui/` y `scripts/`.
+
+- **Cambian** (`src/results.rs`): el juez del abanico
+  (`validate_published_slippage_fans`, no estaba en la lista de seis); el de
+  los loci frente al TOML (`validate_published_repeat_loci`); el de la
+  contabilidad de tracto (`judge_tract_output_accounting`); el de las cotas
+  frente al TOML (`validate_published_tract_bounds`, no estaba en la lista);
+  el de la efectiva frente al manifiesto
+  (`validate_effective_config_v3_against_manifest_bytes`: hoy exige «efectiva
+  con loci si y solo si manifiesto v6», y con solo detectados la efectiva no
+  tendría loci); el de los objetivos frente al TOML
+  (`validate_effective_targets_against_configuration`, por el catálogo vacío
+  del apartado 7); la forma de la sección del manifiesto
+  (`validate_repeat_loci_section`, que hoy rechaza una lista de loci vacía);
+  y el orquestador `validate_published_resources_v3`. En
+  `src/repeat_catalog_validation.rs`, la comparación con `repeat_loci`.
+  Escritura: `repeat_loci_json`, `repeat_loci_manifest_json`,
+  `repeat_output_budget_json`, `repeat_detection_json` y el escritor nuevo, en
+  `src/results.rs`; el orden de escritura y el paquete fallido, en
+  `src/execution.rs`.
+- **No cambian, aunque la lista de seis los nombraba**: el de la referencia
+  simulada (`published_simulated_tracts`) y el de la referencia final
+  (`judge_inserted_reference`) ya saltan los detectados; el de los nombres
+  (`validate_published_reference_names`) solo lee la referencia de la sección,
+  que se queda.
+- **La verdad, el VCF y el evento técnico** no dependen de que los abanicos
+  estén en la efectiva: sus jueces leen la verdad y el VCF publicados o rehacen
+  desde el TOML, y ninguno lee `repeat_loci` publicado.
+- **Pruebas**: la batería de parejas finales (`tests/final_pairs_oracle/mod.rs`
+  lee los intervalos de `repeat_loci` de la efectiva y debe leer los de los
+  detectados del catálogo), `tests/repeat_detection_run.rs` (su ayudante
+  `catalog`), `tests/repeat_catalog_validation.rs`, las cuatro huellas con la
+  sección de `tests/repeat_detection_frozen_identity.rs` y las de
+  `tests/technical_catalog_contract.rs` (cambian a propósito). Las demás
+  pruebas que leen `repeat_loci` usan el ayudante que deja el catálogo igual a
+  los declarados (`tests/support/detection_section.rs`), y no cambian.
+- **Interfaz Marimo: no se rompe nada.** El editor solo escribe
+  `[[reference.repeat_loci]]` en el TOML de entrada, que no cambia, y los
+  resúmenes de resultados (`ui/process_adapter.py`) no leen `repeat_loci`;
+  como solo abren documentos de hasta 2 MB, con la forma propuesta vuelven a
+  cargarse en ejecuciones con muchos loci. La entrega no añade ninguna opción
+  al TOML, así que no hay control nuevo que exigir (DP-SSR-16).
+- **Esquemas**: la efectiva v6 y el manifiesto v6 se retocan in situ por la
+  nota alfa de DTC-036 (`repeat_detection` gana campos; la lista de loci del
+  manifiesto admite estar vacía con la sección). La tabla, como la del catálogo
+  y la de la matriz, la juzga el código, sin esquema.
+- **Puerta de cobertura**: cambian las cifras del juez del catálogo y de
+  `src/results.rs` en `scripts/guard-coverage-baseline.tsv`; no entra ningún
+  módulo nuevo.
+
+##### 11. Decisiones (abiertas al escribir la propuesta; decididas el 01/11/2026)
+
+**El responsable decidió las tres el 01/11/2026 según la recomendación:
+A1 (a), A2 (a) y A3 (a).**
+
+**A1. ¿Se amplía el cambio normativo a DTC-035 y REQ-MAN-29?**
+
+| Opción | Consecuencia |
+|---|---|
+| **(a) Sí, con las notas fechadas del apartado 8** | La norma general recoge la excepción que el 29/10 ya se aceptó; los dos JSON quedan en unos 8 kB |
+| (b) No: el manifiesto conserva los alelos y lo realizado de los detectados | Solo adelgaza la efectiva; el manifiesto sigue creciendo unos 5,3 kB por locus (300 MB con 56 736), que es lo que 11.7 juzgó inviable |
+
+**Recomendación: (a). Decidido (a) por el responsable el 01/11/2026.**
+
+**A2. ¿Se publica la anotación de cada alelo de un detectado?**
+
+| Opción | Consecuencia |
+|---|---|
+| **(a) No: solo la secuencia** | Lo más pequeño; la arquitectura ya declara la anotación salida derivada; quien quiera las unidades divide la longitud entre la del motivo |
+| (b) Solo las unidades | Un 6 % más de tabla; ahorra una división a quien lea; una columna más que juzgar |
+| (c) Toda, como hoy (unidades, pureza, tirada, bloques, interrupciones) | Un 25 % más; el juez tendría que rehacer la descomposición con aritmética propia, sin la del productor |
+
+**Recomendación: (a). Decidido (a) por el responsable el 01/11/2026.**
+
+**A3. ¿Dónde va la contabilidad de cada locus (pasos y bases de tracto)?**
+
+| Opción | Consecuencia |
+|---|---|
+| **(a) Columnas de la tabla de alelos, repetidas en cada fila del locus** | Un solo fichero nuevo; unos 25 bytes por fila; el juez del abanico compara cada fila con lo rehecho y eso ya obliga a que coincidan |
+| (b) Una tabla aparte con una fila por detectado | Sin repetición, pero un fichero, un enlace y una huella más |
+| (c) Columnas nuevas en `repeat_catalog.tsv`, vacías para los declarados | Mezcla el resultado de la generación con un índice que se juzga contra el FASTA, y obliga a escribir el catálogo después del VCF |
+
+**Recomendación: (a). Decidido (a) por el responsable el 01/11/2026.**
+
+**Decidido aquí por ser mecánico o venir fijado** (el responsable puede
+reabrir cualquiera): los declarados se quedan en `repeat_loci`; nombre,
+artefacto, clase y sitio de la tabla; enlace `alleles_table` sin metadato
+propio; tabla siempre con la sección; orden y formato de las columnas;
+`drawn_copies` y las sumas de la normalización no se publican por detectado;
+linajes y constantes de la normalización una vez en `repeat_detection`; la
+sección de loci del manifiesto existe mientras el catálogo tenga algún locus y
+su lista puede quedar vacía; el par del catálogo y la tabla, dentro de la unidad
+genotípica del paquete fallido; el manifiesto del evento técnico no se toca en
+esta entrega.
 
 > **Revisión de la entrega 4 bis:** los JSON dejan de crecer con los loci y
 > los jueces siguen sin llamar al productor.
@@ -1929,6 +2576,13 @@ Pendientes; este plan no las resuelve.
   mano, pocos. Con detección, su rechazo sería casi seguro con una matriz
   generada y seguro con una suministrada (DP-SSR-11). Es la contradicción C-2
   del plan de indels, agravada.
+- **C-9. DTC-035 y REQ-MAN-29 frente a DP-SSR-13 (b).** DTC-035 dice que un
+  manifiesto contiene directamente todo lo que debe registrar y que no se
+  fragmenta en tablas auxiliares; REQ-MAN-29, que el manifiesto registra los
+  loci y lo realizado. La entrega 4 bis saca los detectados a una tabla, como
+  aceptó el responsable el 29/10/2026. **Resuelta el 01/11/2026:** el
+  responsable decidió A1 (a), y las dos normas llevan desde ese día una nota
+  fechada que recoge la excepción (propuesta normativa de la entrega 4 bis).
 
 ---
 

@@ -98,16 +98,30 @@ const EVIDENCE: &str = "evidence/dt-009-multiplicador-congelacion/inputs";
 // tamaño de la efectiva, que cita dos veces). Comprobado campo a campo contra
 // el binario de `45af26b`, compilado aparte: ningún otro fichero cambia. Las
 // huellas viejas quedan en el comentario de cada una.
+//
+// **01/11/2026 (entrega 4 bis del plan de detección):** las dos ejecuciones con
+// loci publican además la tabla de alelos de los detectados
+// (`repeat_alleles.tsv`), solo con su cabecera porque los dos loci son
+// declarados. Cambian a propósito la efectiva (en `repeat_detection` gana el
+// enlace `alleles_table`, las constantes de `frequency_normalization` y, en
+// `slippage`, las versiones, el ámbito, la versión de su catálogo, las tres
+// limitaciones y los linajes) y el manifiesto general (gana el artefacto en
+// `artifacts` y en `output_categories.minimum`, y cambian la huella y el tamaño
+// de la efectiva, que cita dos veces). Comprobado campo a campo contra el
+// binario de `afda48b`, compilado aparte: ningún otro fichero cambia, y las
+// ejecuciones amplificada sin loci y sin evento salen byte a byte iguales.
 // ---------------------------------------------------------------------------
 
-const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 14] = [
+const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 15] = [
     // Cambia a propósito el 30/10/2026 (entrega 3 del plan de detección): era
     // 61809c4359781e56ac0d419c77c1014a43e83c42b77a34260fbc9e3f4659b975.
     // Y otra vez el 01/11/2026 (entrega 4 del plan de detección): era
     // f9d7b7dd5c2bf0a0461ae8e4322d692e637df97af4275fd1125450465ea564f2.
+    // Y otra vez el 01/11/2026 (entrega 4 bis del plan de detección): era
+    // b94d849a8c8fb66f668e67cff9140e6039d0c82294121dfca033029f361e3b6c.
     (
         "effective-config.json",
-        "b94d849a8c8fb66f668e67cff9140e6039d0c82294121dfca033029f361e3b6c",
+        "ae7e04b032ed1e28e676cb04321b5826c7b6f17133b5b60723ffc4fe55b0a975",
     ),
     (
         "events/reads-main/manifest.json",
@@ -123,9 +137,11 @@ const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 14] = [
     // eaa1a6c1e9e2d2dc5db7cb9dea370951ae4a5ddad63984b0ed8b86c0635ca123.
     // Y otra vez el 01/11/2026 (entrega 4 del plan de detección): era
     // bb1498a051ae5363926b81fa9a055ee6a9f7273c32ded0dd070b9eb6fe4287dd.
+    // Y otra vez el 01/11/2026 (entrega 4 bis del plan de detección): era
+    // 7bfe4e2607848cf83b933f22ad19187cec4adbd823447c8eb18845f477fc281d.
     (
         "manifest.json",
-        "7bfe4e2607848cf83b933f22ad19187cec4adbd823447c8eb18845f477fc281d",
+        "445f2db1d767ae89fc19da8d430b1f137d2b4501e56aeec0329b86b27a3b3118",
     ),
     (
         "outputs/fastq/reads-main/sample-A_R1.fastq.gz",
@@ -156,6 +172,13 @@ const UNAMPLIFIED_WITH_LOCI: [(&str, &str); 14] = [
     (
         "population_snvs.tsv",
         "ea6647904791e5af257036dcd4ae8ebe7b869e8f1c170789d907b7fd187be9ad",
+    ),
+    // Nueva el 01/11/2026: la tabla de alelos de los detectados (entrega 4
+    // bis del plan de detección); solo la cabecera, porque los dos loci son
+    // declarados.
+    (
+        "repeat_alleles.tsv",
+        "c1dc0fe32075225c7d2d2cf9352ea8543c26033feeb54c2456ecc0b01b66ef6b",
     ),
     // Nuevos el 01/11/2026: el catálogo de microsatélites aparte (entrega 4
     // del plan de detección, REQ-MAN-98).
@@ -255,16 +278,18 @@ const WITHOUT_TECHNICAL_EVENT: [(&str, &str); 7] = [
     ),
 ];
 
-const AMPLIFIED_WITH_LOCI: [(&str, &str); 14] = [
+const AMPLIFIED_WITH_LOCI: [(&str, &str); 15] = [
     // Cambia a propósito el 12/10/2026 (DT-040): era
     // 834848fea5745b4d8e7b7e0f41a329bcc4d50a7a91fc28dfb82fcf82392b6b64.
     // Y otra vez el 30/10/2026 (entrega 3 del plan de detección): era
     // b9c5280d983d94b50aa08c4cab453ba67e5a260521cd814361d6770272a0b37e.
     // Y otra vez el 01/11/2026 (entrega 4 del plan de detección): era
     // 44019117080453d9c9e86f31e5122c77a82a083248d797aebbbbedce9e9710eb.
+    // Y otra vez el 01/11/2026 (entrega 4 bis del plan de detección): era
+    // 5b4e563c9d5181d2986e7c250c03544d6893d93bf6a1c2430c2e7597f1522d17.
     (
         "effective-config.json",
-        "5b4e563c9d5181d2986e7c250c03544d6893d93bf6a1c2430c2e7597f1522d17",
+        "3054b0c71cd52c9addc67e74e1fa1a37cf91e46e9e606acfe30cf4fb4cc51df8",
     ),
     (
         "events/reads-main/manifest.json",
@@ -282,9 +307,11 @@ const AMPLIFIED_WITH_LOCI: [(&str, &str); 14] = [
     // 679a61e0c7924f7256b049a41adeb80a5dda0aa4c1ff274c482d370acb1badf2.
     // Y otra vez el 01/11/2026 (entrega 4 del plan de detección): era
     // 8beaf3fcc5be556c1c78d6305dfb788fe57ccb833796f3044046816624bc962e.
+    // Y otra vez el 01/11/2026 (entrega 4 bis del plan de detección): era
+    // 9f8f6fddb5abbf2e4c8cd0dbcfc1a25d5b2fa9c0ba2d19785f603611c95b4b46.
     (
         "manifest.json",
-        "9f8f6fddb5abbf2e4c8cd0dbcfc1a25d5b2fa9c0ba2d19785f603611c95b4b46",
+        "13b6fae02fb3eaa7ec038b96e4010769e76e2fd88c21afcc0d63fd3666012178",
     ),
     (
         "outputs/fastq/reads-main/sample-A_R1.fastq.gz",
@@ -315,6 +342,13 @@ const AMPLIFIED_WITH_LOCI: [(&str, &str); 14] = [
     (
         "population_snvs.tsv",
         "ea6647904791e5af257036dcd4ae8ebe7b869e8f1c170789d907b7fd187be9ad",
+    ),
+    // Nueva el 01/11/2026: la tabla de alelos de los detectados (entrega 4
+    // bis del plan de detección); solo la cabecera, porque los dos loci son
+    // declarados.
+    (
+        "repeat_alleles.tsv",
+        "c1dc0fe32075225c7d2d2cf9352ea8543c26033feeb54c2456ecc0b01b66ef6b",
     ),
     // Nuevos el 01/11/2026: el catálogo de microsatélites aparte (entrega 4
     // del plan de detección, REQ-MAN-98).

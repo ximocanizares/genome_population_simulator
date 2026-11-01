@@ -2917,11 +2917,20 @@ fn the_guards_other_tests_only_triggered_have_their_exact_motive() {
         ("reference.fa", AMPLIFIED_FASTA),
         ("population-snvs.tsv", AMPLIFIED_SNVS),
     ]);
-    let cases = [eff(
-        "un manifiesto con loci y una efectiva sin ellos",
+    // Sin la sección de microsatélites en la efectiva: con ella, una efectiva
+    // sin loci puede ir con un manifiesto que los registra, porque los
+    // detectados no viajan en la efectiva (entrega 4 bis).
+    let cases = [case(
+        "un manifiesto con loci y una efectiva sin ellos ni la sección de microsatélites",
         "el manifiesto registra loci de repetición que la configuración efectiva no declara",
-        "/repeat_loci",
-        json!([]),
+        |effective, _| {
+            effective["repeat_loci"] = json!([]);
+            effective
+                .as_object_mut()
+                .expect("efectiva")
+                .remove("repeat_detection")
+                .expect("la efectiva publicaba la sección");
+        },
     )];
     assert_cases(Judge::Pair, &package, &cases);
 }

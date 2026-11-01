@@ -176,6 +176,12 @@ fn write_fasta(path: &Path, sequences: &[(&str, Vec<u8>)]) {
 /// `detection`, sin ella si no. La matriz suministrada lleva una fila dentro
 /// del `(CA)×10` y otra fuera de todo tracto.
 fn publish(label: &str, detection: bool) -> PathBuf {
+    publish_with(label, detection, "")
+}
+
+/// Lo mismo que [`publish`], con `extra` añadido al final del TOML (el VCF,
+/// por ejemplo).
+fn publish_with(label: &str, detection: bool, extra: &str) -> PathBuf {
     let root = temporary(label);
     let sequences = reference();
     write_fasta(&root.join("reference.fa"), &sequences);
@@ -215,7 +221,7 @@ fn publish(label: &str, detection: bool) -> PathBuf {
              [[reference.sequences]]\nid = \"chr2\"\nclass = \"chromosome\"\nlength = 3000\n\n\
              {section}\
              [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 2\nploidy = 2\n\
-             genotype_model = \"hwe\"\nindividual_ids = [\"I1\", \"I2\"]\n"
+             genotype_model = \"hwe\"\nindividual_ids = [\"I1\", \"I2\"]\n{extra}"
         ),
     )
     .expect("configuración");
@@ -243,7 +249,12 @@ impl Drop for Package {
 
 impl Package {
     fn copy() -> Self {
-        let destination = publish("case", true);
+        Self::copy_with("")
+    }
+
+    /// Un paquete con `extra` añadido al TOML (ver [`publish_with`]).
+    fn copy_with(extra: &str) -> Self {
+        let destination = publish_with("case", true, extra);
         Self {
             root: destination.parent().expect("raíz").to_path_buf(),
         }
@@ -271,7 +282,21 @@ impl Package {
     /// encadenan: la de la tabla en el metadato, la del metadato en el enlace
     /// de la efectiva, y las de los dos en el manifiesto.
     fn republish(&self, table: &str, metadata: &Value, effective: &Value) {
+        self.republish_with_alleles(table, self.text("repeat_alleles.tsv"), metadata, effective);
+    }
+
+    /// Lo mismo que [`Package::republish`] con la tabla de alelos dada, cuya
+    /// huella rehace en el enlace de la efectiva y en el manifiesto.
+    fn republish_with_alleles(
+        &self,
+        table: &str,
+        alleles: impl AsRef<[u8]>,
+        metadata: &Value,
+        effective: &Value,
+    ) {
+        let alleles = alleles.as_ref();
         fs::write(self.dir().join("repeat_catalog.tsv"), table).expect("tabla");
+        fs::write(self.dir().join("repeat_alleles.tsv"), alleles).expect("tabla de alelos");
         let mut metadata = metadata.clone();
         if metadata.is_object() {
             metadata["table"]["sha256"] = json!(sha(table.as_bytes()));
@@ -281,12 +306,16 @@ impl Package {
         if effective.get("repeat_detection").is_some() {
             effective["repeat_detection"]["catalog"]["metadata_sha256"] =
                 json!(sha(&metadata_bytes));
+            if effective["repeat_detection"]["alleles_table"].is_object() {
+                effective["repeat_detection"]["alleles_table"]["sha256"] = json!(sha(alleles));
+            }
         }
         let effective_bytes = self.write_json("effective-config.json", &effective);
         let mut manifest = self.json("manifest.json");
         for artifact in manifest["artifacts"].as_array_mut().expect("artefactos") {
             let bytes = match artifact["path"].as_str() {
                 Some("repeat_catalog.tsv") => table.as_bytes().to_vec(),
+                Some("repeat_alleles.tsv") => alleles.to_vec(),
                 Some("repeat_catalog.metadata.json") => metadata_bytes.clone(),
                 Some("effective-config.json") => effective_bytes.clone(),
                 _ => continue,
@@ -1527,36 +1556,6 @@ fn the_counts_are_judged() {
     ]);
 }
 
-/// **La tabla dice lo mismo que `repeat_loci` de la efectiva.**
-#[test]
-fn the_table_says_what_the_effective_loci_say() {
-    run_cases(&[
-        Case {
-            label: "un locus de menos en la efectiva",
-            expected: "la tabla tiene 5 loci y repeat_loci de la efectiva 4",
-            table: same,
-            metadata: untouched,
-            effective: |e| {
-                e["repeat_loci"].as_array_mut().expect("loci").pop();
-            },
-        },
-        Case {
-            label: "otro origen en la efectiva",
-            expected: "SSR-1-301-312-A: la fila no es el locus de repeat_loci de la efectiva",
-            table: same,
-            metadata: untouched,
-            effective: |e| e["repeat_loci"][0]["origin"] = json!("declared"),
-        },
-        Case {
-            label: "otro fin en la efectiva",
-            expected: "SSR-2-401-425-ACGTT: la fila no es el locus de repeat_loci de la efectiva",
-            table: same,
-            metadata: untouched,
-            effective: |e| e["repeat_loci"][4]["end"] = json!(424),
-        },
-    ]);
-}
-
 // ---------------------------------------------------------------------------
 // El juez completo
 // ---------------------------------------------------------------------------
@@ -1603,37 +1602,39 @@ fn the_reconstruction_ties_what_the_judge_cannot_see() {
 
     let package = Package::copy();
     let mut metadata = package.json("repeat_catalog.metadata.json");
-    let mut effective = package.json("effective-config.json");
+    let effective = package.json("effective-config.json");
     let counts = &mut metadata["counts_by_motif_length"][4];
     counts["published"] = json!(0);
     counts["accepted"] = json!(counts["accepted"].as_u64().expect("entero") - 1);
     counts["discarded"]["overlap"] =
         json!(counts["discarded"]["overlap"].as_u64().expect("entero") + 1);
-    effective["repeat_loci"].as_array_mut().expect("loci").pop();
     let table = TABLE.replace(
         "SSR-2-401-425-ACGTT\tchr2\t401\t425\tACGTT\t40\tdetected\n",
         "",
     );
-    package.republish(&table, &metadata, &effective);
+    let alleles = alter_rows(&package.text("repeat_alleles.tsv"), |rows| {
+        rows.retain(|row| row[0] != "SSR-2-401-425-ACGTT");
+    });
+    package.republish_with_alleles(&table, &alleles, &metadata, &effective);
     assert_eq!(
         detail(package.judge()),
         "aceptado",
         "el límite del juez: la exhaustividad"
     );
-    // Lo caza la comparación de los loci de la efectiva con los que rehace el
-    // TOML, que también detecta.
-    assert_eq!(
-        detail(package.judge_resources()),
-        "los loci de repetición efectivos no son los que el TOML y la referencia producen"
-    );
-    // Y si solo falta en la tabla (un escritor de la tabla que perdiera una
-    // fila, que la reconstrucción no vería porque usa el mismo escritor), lo
-    // caza el juez del catálogo al compararla con la efectiva.
+    // Desde la entrega 4 bis la efectiva ya no lleva los detectados: lo caza
+    // la reconstrucción, que también detecta.
+    assert_eq!(detail(package.judge_resources()), reconstruction);
+    // Y si solo falta en una de las dos tablas, lo caza el juez del catálogo
+    // al compararlas. Si faltara en las dos a la vez (un escritor que perdiera
+    // la misma fila en las dos), la reconstrucción no lo vería porque usa los
+    // mismos escritores: lo cazan las listas escritas a mano de
+    // `the_detected_loci_leave_the_json_documents` y de
+    // `the_published_catalog_is_the_planted_one_and_its_counts_add_up`.
     let package = Package::copy();
     package.republish(&table, &metadata, &package.json("effective-config.json"));
     assert_eq!(
         detail(package.judge()),
-        "la tabla tiene 4 loci y repeat_loci de la efectiva 5"
+        "los loci de la tabla de alelos no son los detectados del catálogo, en su orden"
     );
 }
 
@@ -1656,6 +1657,8 @@ fn the_catalog_judge_names_no_producer() {
         "observe_tract",
         "classify_interval",
         "tandem_repeat::",
+        "repeat_slippage::",
+        "repeat_genotypes::",
         "with_detected_repeat_loci",
         "results::",
         "application::",
@@ -1667,4 +1670,1064 @@ fn the_catalog_judge_names_no_producer() {
     }
     // Control positivo del instrumento: ve lo que hay.
     assert!(code.contains("fn decompose") && code.contains("guard_trace::record"));
+}
+
+// ---------------------------------------------------------------------------
+// Entrega 4 bis (F6.4.a.15c): los detectados salen de los documentos JSON y
+// sus alelos se publican en `repeat_alleles.tsv`
+// ---------------------------------------------------------------------------
+
+/// Los detectados del paquete, escritos a mano en el orden del catálogo: son
+/// las filas `detected` de [`TABLE`]. Un escritor que perdiera la misma fila
+/// en el catálogo y en la tabla de alelos pasaría el juez (las dos tablas
+/// dirían lo mismo) y la reconstrucción (usa los mismos escritores); lo caza
+/// esta lista.
+const DETECTED: [&str; 4] = [
+    "SSR-1-301-312-A",
+    "SSR-1-1301-1321-GAT",
+    "SSR-1-2601-2616-CA",
+    "SSR-2-401-425-ACGTT",
+];
+
+/// Cabecera de la tabla de alelos, escrita a mano (DTC-104).
+const ALLELES_HEADER: &str = "locus_id\tallele_index\tsequence\torigin\tdeclared_frequency\t\
+effective_frequency\trealized_copies\trealized_frequency\tdrawn_events\tapplied_events\t\
+unapplied_events\ttruth_tract_bases_bound\tvcf_tract_bases_bound";
+
+/// El VCF de texto, para los casos que atribuyen bases de tracto a los loci.
+const VCF: &str = "\n[vcf_output]\nmode = \"text\"\n";
+
+/// Las filas de la tabla de alelos, cada una como sus trece campos.
+fn allele_rows(alleles: &str) -> Vec<Vec<String>> {
+    alleles
+        .lines()
+        .skip(1)
+        .map(|line| line.split('\t').map(str::to_owned).collect())
+        .collect()
+}
+
+/// Vuelve a escribir la tabla de alelos desde sus filas.
+fn alleles_text(rows: &[Vec<String>]) -> String {
+    let mut text = format!("{ALLELES_HEADER}\n");
+    for row in rows {
+        text.push_str(&row.join("\t"));
+        text.push('\n');
+    }
+    text
+}
+
+/// Aplica `alter` a las filas de la tabla de alelos.
+fn alter_rows(alleles: &str, alter: impl FnOnce(&mut Vec<Vec<String>>)) -> String {
+    let mut rows = allele_rows(alleles);
+    alter(&mut rows);
+    alleles_text(&rows)
+}
+
+/// El índice de la primera fila de un locus con al menos dos alelos y ese
+/// locus: varios casos necesitan dos alelos del mismo locus.
+fn locus_with_two_alleles(rows: &[Vec<String>]) -> (usize, String) {
+    rows.windows(2)
+        .position(|pair| pair[0][0] == pair[1][0])
+        .map(|index| (index, rows[index][0].clone()))
+        .expect("algún detectado tiene dos alelos")
+}
+
+/// **Los detectados salen de los dos documentos JSON** (REQ-MAN-95,
+/// REQ-MAN-98, DTC-104): `repeat_loci` y `repeat_output_budget.per_locus` de
+/// la efectiva y `repeat_loci.loci` del manifiesto llevan solo el declarado
+/// `STR-AAAG`, y ni la efectiva ni el manifiesto nombran un solo `SSR-`. Lo
+/// común del deslizamiento va una vez en `repeat_detection`, con la tabla de
+/// alelos enlazada por su huella; la tabla lleva los detectados escritos a
+/// mano ([`DETECTED`]), en su orden, con su cabecera escrita a mano.
+///
+/// **Debe fallar contra** un abanico de un detectado que se quede en la
+/// efectiva o en el manifiesto (los dos `SSR-` de abajo), y contra un
+/// escritor que pierda la misma fila en el catálogo y en la tabla de alelos.
+#[test]
+fn the_detected_loci_leave_the_json_documents() {
+    let package = Package::copy();
+    let effective = package.json("effective-config.json");
+    let manifest = package.json("manifest.json");
+    let ids = |loci: &Value| -> Vec<String> {
+        loci.as_array()
+            .expect("lista")
+            .iter()
+            .map(|locus| locus["id"].as_str().expect("id").to_owned())
+            .collect()
+    };
+    assert_eq!(ids(&effective["repeat_loci"]), ["STR-AAAG"]);
+    assert_eq!(
+        ids(&effective["repeat_output_budget"]["per_locus"]),
+        ["STR-AAAG"]
+    );
+    assert_eq!(ids(&manifest["repeat_loci"]["loci"]), ["STR-AAAG"]);
+    for file in ["effective-config.json", "manifest.json"] {
+        assert!(
+            !package.text(file).contains("SSR-"),
+            "{file} nombra un locus detectado"
+        );
+    }
+    let detection = &effective["repeat_detection"];
+    let slippage = &detection["slippage"];
+    assert_eq!(slippage["model"], "stepwise");
+    assert_eq!(slippage["step_units"], 1);
+    assert_eq!(slippage["mean_events"], 1.0);
+    assert_eq!(slippage["algorithm"], "biological-slippage-v1");
+    assert_eq!(slippage["rng_scope"], "initial_repeat_slippage");
+    assert_eq!(slippage["limitations"].as_array().expect("lista").len(), 3);
+    // Dos individuos diploides: cuatro copias haplotípicas, cuatro linajes.
+    assert_eq!(slippage["lineages"], 4);
+    for field in ["drawn_events", "applied_events", "unapplied_events"] {
+        assert!(slippage.get(field).is_none(), "{field} es de cada locus");
+    }
+    assert_eq!(
+        detection["frequency_normalization"],
+        json!({"tolerance": effective["normalization"]["tolerance"],
+               "sum_algorithm": "neumaier_sum_v1", "canonical_order": "locus_id,allele_index"})
+    );
+    let alleles = package.text("repeat_alleles.tsv");
+    assert_eq!(
+        detection["alleles_table"],
+        json!({"path": "repeat_alleles.tsv", "sha256": sha(alleles.as_bytes())})
+    );
+    assert_eq!(alleles.lines().next(), Some(ALLELES_HEADER));
+    let rows = allele_rows(&alleles);
+    let mut loci: Vec<&str> = rows.iter().map(|row| row[0].as_str()).collect();
+    loci.dedup();
+    assert_eq!(loci, DETECTED);
+    for locus in DETECTED {
+        let rows: Vec<&Vec<String>> = rows.iter().filter(|row| row[0] == locus).collect();
+        let copies: u64 = rows
+            .iter()
+            .map(|row| row[6].parse::<u64>().expect("copias"))
+            .sum();
+        assert_eq!(
+            copies, 4,
+            "{locus}: las copias realizadas suman los linajes"
+        );
+        assert!(rows.iter().all(|row| row[3] == "generated"), "{locus}");
+    }
+    let manifest_artifact = manifest["artifacts"]
+        .as_array()
+        .expect("artefactos")
+        .iter()
+        .find(|artifact| artifact["id"] == "repeat-alleles-tsv")
+        .expect("la tabla figura en el manifiesto");
+    assert_eq!(manifest_artifact["kind"], "repeat_alleles_tsv");
+    assert_eq!(manifest_artifact["path"], "repeat_alleles.tsv");
+    assert_eq!(manifest_artifact["size_bytes"], alleles.len());
+    assert!(
+        manifest["output_categories"]["minimum"]
+            .as_array()
+            .expect("mínimo")
+            .contains(&json!("repeat-alleles-tsv"))
+    );
+    package
+        .judge_resources()
+        .expect("control positivo: el juez completo acepta el paquete intacto");
+}
+
+/// **Sin la sección no se publica la tabla de alelos**, y el juez rechaza
+/// una tabla de alelos listada en el manifiesto de una ejecución sin ella.
+#[test]
+fn without_the_section_no_alleles_table_is_published() {
+    let destination = publish("without-alleles", false);
+    assert!(!destination.join("repeat_alleles.tsv").exists());
+    let package = Package {
+        root: destination.parent().expect("raíz").to_path_buf(),
+    };
+    let mut manifest = package.json("manifest.json");
+    manifest["artifacts"]
+        .as_array_mut()
+        .expect("artefactos")
+        .push(json!({
+            "checksum": {"algorithm": "sha256", "digest": "0".repeat(64)},
+            "id": "repeat-alleles-tsv",
+            "kind": "repeat_alleles_tsv",
+            "path": "repeat_alleles.tsv",
+            "size_bytes": 0
+        }));
+    package.write_json("manifest.json", &manifest);
+    assert_eq!(
+        detail(package.judge()),
+        "hay un catálogo publicado y la configuración efectiva no declara la sección de microsatélites"
+    );
+}
+
+/// **El enlace y la identidad de la tabla de alelos.** Aquí las huellas no se
+/// rehacen después de la alteración que las rompe, salvo donde se dice.
+#[test]
+fn the_identity_of_the_alleles_table_is_judged() {
+    type Alter = fn(&Package, &mut Value, &mut Value);
+    let cases: [(&str, Alter); 7] = [
+        (
+            "repeat_detection.alleles_table no es un objeto",
+            |_, effective, _| {
+                effective["repeat_detection"]
+                    .as_object_mut()
+                    .expect("sección")
+                    .remove("alleles_table");
+            },
+        ),
+        (
+            "repeat_detection.alleles_table.path no es la ruta de la tabla de alelos",
+            |_, effective, _| {
+                effective["repeat_detection"]["alleles_table"]["path"] = json!("otra.tsv");
+            },
+        ),
+        ("alleles_table.sha256 no es un texto", |_, effective, _| {
+            effective["repeat_detection"]["alleles_table"]["sha256"] = json!(7);
+        }),
+        (
+            "el manifiesto no lista repeat-alleles-tsv con clase repeat_alleles_tsv y ruta \
+             repeat_alleles.tsv",
+            |_, _, manifest| {
+                for artifact in manifest["artifacts"].as_array_mut().expect("artefactos") {
+                    if artifact["id"] == "repeat-alleles-tsv" {
+                        artifact["kind"] = json!("otra");
+                    }
+                }
+            },
+        ),
+        (
+            "la huella de la tabla de alelos no es la del enlace de la efectiva o la del manifiesto",
+            |_, effective, _| {
+                effective["repeat_detection"]["alleles_table"]["sha256"] = json!("0".repeat(64));
+            },
+        ),
+        (
+            "la huella de la tabla de alelos no es la del enlace de la efectiva o la del manifiesto",
+            |_, _, manifest| {
+                for artifact in manifest["artifacts"].as_array_mut().expect("artefactos") {
+                    if artifact["id"] == "repeat-alleles-tsv" {
+                        artifact["checksum"]["digest"] = json!("0".repeat(64));
+                    }
+                }
+            },
+        ),
+        (
+            "el tamaño de la tabla de alelos no es el del manifiesto",
+            |_, _, manifest| {
+                for artifact in manifest["artifacts"].as_array_mut().expect("artefactos") {
+                    if artifact["id"] == "repeat-alleles-tsv" {
+                        artifact["size_bytes"] =
+                            json!(artifact["size_bytes"].as_u64().expect("tamaño") + 1);
+                    }
+                }
+            },
+        ),
+    ];
+    for (expected, alter) in cases {
+        let package = Package::copy();
+        let mut effective = package.json("effective-config.json");
+        let mut manifest = package.json("manifest.json");
+        let before = (effective.clone(), manifest.clone());
+        alter(&package, &mut effective, &mut manifest);
+        assert!(
+            before != (effective.clone(), manifest.clone()),
+            "{expected}: no alteró"
+        );
+        // El enlace del metadato del catálogo sigue apuntando a sus bytes; la
+        // efectiva y el manifiesto se escriben sin rehacer nada más.
+        package.write_json("effective-config.json", &effective);
+        package.write_json("manifest.json", &manifest);
+        assert_eq!(detail(package.judge()), expected);
+    }
+    // Sin el fichero.
+    let package = Package::copy();
+    fs::remove_file(package.dir().join("repeat_alleles.tsv")).expect("borrado");
+    assert!(
+        detail(package.judge()).starts_with("no se puede leer:"),
+        "{}",
+        detail(package.judge())
+    );
+}
+
+/// Un caso de la tabla de alelos: qué se altera y el motivo exacto.
+struct AllelesCase {
+    label: &'static str,
+    expected: &'static str,
+    alleles: fn(&str) -> String,
+    effective: fn(&mut Value),
+}
+
+/// Publica un paquete por caso, altera la tabla de alelos (y la efectiva),
+/// rehace las huellas y exige el motivo exacto del juez del catálogo.
+fn run_alleles_cases(cases: &[AllelesCase]) {
+    for case in cases {
+        let package = Package::copy();
+        let alleles = package.text("repeat_alleles.tsv");
+        let metadata = package.json("repeat_catalog.metadata.json");
+        let mut effective = package.json("effective-config.json");
+        let altered = (case.alleles)(&alleles);
+        let before = effective.clone();
+        (case.effective)(&mut effective);
+        assert!(
+            altered != alleles || before != effective,
+            "«{}»: la alteración no alteró nada",
+            case.label
+        );
+        package.republish_with_alleles(TABLE, &altered, &metadata, &effective);
+        assert_eq!(
+            detail(package.judge()),
+            case.expected,
+            "«{}» se rechazó por otra razón",
+            case.label
+        );
+    }
+}
+
+fn same_alleles(alleles: &str) -> String {
+    alleles.to_owned()
+}
+
+/// **La forma de la tabla de alelos**, leída con su lector estricto.
+#[test]
+fn the_alleles_table_is_read_strictly() {
+    run_alleles_cases(&[
+        AllelesCase {
+            label: "sin salto final",
+            expected: "la tabla de alelos no termina en un salto de línea",
+            alleles: |a| a.trim_end_matches('\n').to_owned(),
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "otra cabecera",
+            expected: "la cabecera de la tabla de alelos no es la del contrato",
+            alleles: |a| a.replacen("allele_index", "index", 1),
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "una columna de menos",
+            expected: "SSR-1-301-312-A: una fila de la tabla de alelos no tiene trece columnas",
+            alleles: |a| {
+                alter_rows(a, |rows| {
+                    rows[0].pop();
+                })
+            },
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "entero no canónico",
+            expected: "SSR-1-301-312-A: una columna entera no es un entero canónico",
+            alleles: |a| alter_rows(a, |rows| rows[0][6] = format!("0{}", rows[0][6])),
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "cota de la verdad no entera",
+            expected: "SSR-1-301-312-A: una columna entera no es un entero canónico",
+            alleles: |a| alter_rows(a, |rows| rows[0][11] = "-1".to_owned()),
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "frecuencia declarada fuera de [0, 1]",
+            expected: "SSR-1-301-312-A: una frecuencia no es un decimal en [0, 1]",
+            alleles: |a| alter_rows(a, |rows| rows[0][4] = "1.5".to_owned()),
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "frecuencia efectiva no decimal",
+            expected: "SSR-1-301-312-A: una frecuencia no es un decimal en [0, 1]",
+            alleles: |a| alter_rows(a, |rows| rows[0][5] = "x".to_owned()),
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "frecuencia realizada vacía",
+            expected: "SSR-1-301-312-A: la frecuencia realizada no es un decimal en [0, 1] ni «.»",
+            alleles: |a| alter_rows(a, |rows| rows[0][7] = String::new()),
+            effective: untouched,
+        },
+    ]);
+}
+
+/// **Una tabla de alelos que no es UTF-8**, con las huellas rehechas.
+#[test]
+fn an_alleles_table_that_is_not_utf8_is_rejected() {
+    let package = Package::copy();
+    let mut bytes = package.text("repeat_alleles.tsv").into_bytes();
+    let at = bytes.len() - 2;
+    bytes[at] = 0x80;
+    package.republish_with_alleles(
+        TABLE,
+        &bytes,
+        &package.json("repeat_catalog.metadata.json"),
+        &package.json("effective-config.json"),
+    );
+    assert_eq!(detail(package.judge()), "la tabla de alelos no es UTF-8");
+}
+
+/// **Los loci y la aritmética de la tabla de alelos** (REQ-VAL-64). Cada caso
+/// cambia una sola cosa; donde hace falta, recompone lo demás para que solo
+/// falle lo que se prueba.
+#[test]
+fn the_alleles_table_arithmetic_is_judged() {
+    let loci = "los loci de la tabla de alelos no son los detectados del catálogo, en su orden";
+    run_alleles_cases(&[
+        AllelesCase {
+            label: "falta un detectado entero",
+            expected: loci,
+            alleles: |a| alter_rows(a, |rows| rows.retain(|row| row[0] != "SSR-1-2601-2616-CA")),
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "un locus que no es un detectado",
+            expected: loci,
+            alleles: |a| {
+                alter_rows(a, |rows| {
+                    for row in rows
+                        .iter_mut()
+                        .filter(|row| row[0] == "SSR-2-401-425-ACGTT")
+                    {
+                        row[0] = "STR-AAAG".to_owned();
+                    }
+                })
+            },
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "los detectados en otro orden",
+            expected: loci,
+            alleles: |a| {
+                alter_rows(a, |rows| {
+                    let first = rows[0][0].clone();
+                    let (head, tail): (Vec<_>, Vec<_>) =
+                        rows.drain(..).partition(|row| row[0] == first);
+                    rows.extend(tail);
+                    rows.extend(head);
+                })
+            },
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "un hueco en los índices",
+            expected: "SSR-1-301-312-A: los índices de alelo no van de 0 en 0 sin huecos",
+            alleles: |a| alter_rows(a, |rows| rows[0][1] = "1".to_owned()),
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "un alelo declarado",
+            expected: "SSR-1-301-312-A: un alelo de un detectado no es generated",
+            alleles: |a| alter_rows(a, |rows| rows[0][3] = "declared".to_owned()),
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "una X en la secuencia",
+            expected: "SSR-1-301-312-A: la secuencia de un alelo no es una cadena de A, C, G, T y N",
+            alleles: |a| alter_rows(a, |rows| rows[0][2].replace_range(0..1, "X")),
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "una secuencia vacía",
+            expected: "SSR-1-301-312-A: la secuencia de un alelo no es una cadena de A, C, G, T y N",
+            alleles: |a| alter_rows(a, |rows| rows[0][2] = String::new()),
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "pasos que no suman",
+            expected: "SSR-1-301-312-A: los pasos aplicados y no aplicados no suman los sorteados",
+            alleles: |a| {
+                alter_rows(a, |rows| {
+                    let drawn: u64 = rows[0][8].parse().expect("entero");
+                    rows[0][8] = (drawn + 1).to_string();
+                })
+            },
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "una copia de más",
+            expected: "SSR-1-301-312-A: las copias realizadas suman 5 y las copias haplotípicas \
+                       publicadas son 4",
+            alleles: |a| {
+                alter_rows(a, |rows| {
+                    let copies: u64 = rows[0][6].parse().expect("entero");
+                    rows[0][6] = (copies + 1).to_string();
+                })
+            },
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "copias haplotípicas que la efectiva no publica",
+            expected: "la efectiva no publica las copias haplotípicas de sus poblaciones iniciales",
+            alleles: same_alleles,
+            effective: |e| e["initial_populations"][0]["ploidy"] = json!("dos"),
+        },
+        AllelesCase {
+            label: "una frecuencia realizada que no es copias entre copias",
+            expected: "SSR-1-301-312-A: la frecuencia realizada de un alelo no es sus copias entre \
+                       las del locus, o «.» sin copias",
+            alleles: |a| {
+                alter_rows(a, |rows| {
+                    let frequency: f64 = rows[0][7].parse().expect("decimal");
+                    rows[0][7] = if frequency == 0.0 {
+                        "0.25".to_owned()
+                    } else {
+                        (frequency / 2.0).to_string()
+                    };
+                })
+            },
+            effective: untouched,
+        },
+        AllelesCase {
+            label: "un punto con copias",
+            expected: "SSR-1-301-312-A: la frecuencia realizada de un alelo no es sus copias entre \
+                       las del locus, o «.» sin copias",
+            alleles: |a| alter_rows(a, |rows| rows[0][7] = ".".to_owned()),
+            effective: untouched,
+        },
+    ]);
+}
+
+/// **Dos alelos iguales en un locus** se rechazan nombrando el locus, que se
+/// busca aquí: el primero con dos alelos.
+#[test]
+fn two_equal_alleles_are_named_by_their_locus() {
+    let package = Package::copy();
+    let alleles = package.text("repeat_alleles.tsv");
+    let (_, locus) = locus_with_two_alleles(&allele_rows(&alleles));
+    let altered = alter_rows(&alleles, |rows| {
+        let (index, _) = locus_with_two_alleles(rows);
+        rows[index + 1][2] = rows[index][2].clone();
+    });
+    package.republish_with_alleles(
+        TABLE,
+        &altered,
+        &package.json("repeat_catalog.metadata.json"),
+        &package.json("effective-config.json"),
+    );
+    assert_eq!(
+        detail(package.judge()),
+        format!("{locus}: dos alelos tienen la misma secuencia")
+    );
+}
+
+/// **Las filas declaradas del catálogo son los loci de `repeat_loci` de la
+/// efectiva** (REQ-VAL-64 desde la entrega 4 bis). El segundo caso es el
+/// abanico de un detectado que se queda en la efectiva: el juez lo rechaza
+/// por el recuento.
+#[test]
+fn the_declared_rows_are_the_effective_loci() {
+    run_cases(&[
+        Case {
+            label: "el declarado falta en la efectiva",
+            expected: "la tabla tiene 1 loci declarados y repeat_loci de la efectiva 0",
+            table: same,
+            metadata: untouched,
+            effective: |e| {
+                e["repeat_loci"].as_array_mut().expect("loci").clear();
+            },
+        },
+        Case {
+            label: "un detectado se queda en la efectiva",
+            expected: "la tabla tiene 1 loci declarados y repeat_loci de la efectiva 2",
+            table: same,
+            metadata: untouched,
+            effective: |e| {
+                let mut detected = e["repeat_loci"][0].clone();
+                detected["id"] = json!("SSR-1-301-312-A");
+                detected["origin"] = json!("detected");
+                e["repeat_loci"]
+                    .as_array_mut()
+                    .expect("loci")
+                    .insert(0, detected);
+            },
+        },
+        Case {
+            label: "otro origen en la efectiva",
+            expected: "STR-AAAG: la fila no es el locus de repeat_loci de la efectiva",
+            table: same,
+            metadata: untouched,
+            effective: |e| e["repeat_loci"][0]["origin"] = json!("detected"),
+        },
+        Case {
+            label: "otro fin en la efectiva",
+            expected: "STR-AAAG: la fila no es el locus de repeat_loci de la efectiva",
+            table: same,
+            metadata: untouched,
+            effective: |e| e["repeat_loci"][0]["end"] = json!(1823),
+        },
+    ]);
+}
+
+/// **Un detectado que se queda en la efectiva o en el manifiesto lo rechaza
+/// también el juez completo**, al atar los dos documentos a lo que resuelve
+/// el TOML: un locus `SSR-1-301-312-A` hecho a mano con el bloque del
+/// declarado, añadido a la efectiva y, aparte, al manifiesto.
+#[test]
+fn a_detected_locus_left_in_the_json_documents_is_rejected_by_the_full_judge() {
+    let package = Package::copy();
+    let mut effective = package.json("effective-config.json");
+    let mut detected = effective["repeat_loci"][0].clone();
+    detected["id"] = json!("SSR-1-301-312-A");
+    detected["origin"] = json!("detected");
+    // Sin su bloque del generador, para que el juez del abanico de los
+    // declarados, que lee la efectiva antes, no lo rehaga: así se ve la
+    // atadura al TOML.
+    detected
+        .as_object_mut()
+        .expect("locus")
+        .remove("slippage")
+        .expect("el declarado genera sus alelos");
+    effective["repeat_loci"]
+        .as_array_mut()
+        .expect("loci")
+        .insert(0, detected);
+    package.republish(
+        TABLE,
+        &package.json("repeat_catalog.metadata.json"),
+        &effective,
+    );
+    assert_eq!(
+        detail(package.judge_resources()),
+        "los loci de repetición efectivos no son los que el TOML y la referencia producen"
+    );
+
+    let package = Package::copy();
+    let mut manifest = package.json("manifest.json");
+    let mut detected = manifest["repeat_loci"]["loci"][0].clone();
+    detected["id"] = json!("SSR-1-301-312-A");
+    detected["origin"] = json!("detected");
+    manifest["repeat_loci"]["loci"]
+        .as_array_mut()
+        .expect("loci")
+        .insert(0, detected);
+    package.write_json("manifest.json", &manifest);
+    assert_eq!(
+        detail(package.judge_resources()),
+        "la sección de loci del manifiesto no es la que el TOML y la referencia producen"
+    );
+}
+
+/// Publica un paquete (con `extra` en el TOML), altera la tabla de alelos y la
+/// efectiva, rehace las huellas y devuelve el veredicto del **juez completo**.
+fn judged_in_full(
+    extra: &str,
+    alter: impl FnOnce(&mut Vec<Vec<String>>, &mut Value),
+) -> (String, Vec<Vec<String>>) {
+    let package = Package::copy_with(extra);
+    let alleles = package.text("repeat_alleles.tsv");
+    let original = allele_rows(&alleles);
+    let mut rows = original.clone();
+    let mut effective = package.json("effective-config.json");
+    let before = effective.clone();
+    alter(&mut rows, &mut effective);
+    assert!(
+        rows != original || effective != before,
+        "la alteración no alteró"
+    );
+    package.republish_with_alleles(
+        TABLE,
+        alleles_text(&rows),
+        &package.json("repeat_catalog.metadata.json"),
+        &effective,
+    );
+    (detail(package.judge_resources()), original)
+}
+
+/// **El abanico de cada detectado lo rehace un juez independiente desde lo
+/// publicado** (REQ-VAL-60 para los detectados, entrega 4 bis): su fila del
+/// catálogo, el deslizamiento común de la efectiva, la referencia y la
+/// semilla publicadas. Cada caso altera la tabla de alelos o el deslizamiento
+/// común y se rechaza en el juez completo con el motivo de ese juez, que corre
+/// antes de atar nada al TOML.
+///
+/// El espectro emparejado al revés (las frecuencias de dos alelos
+/// intercambiadas) lo mata, con el productor estropeado, la prueba de
+/// independencia registrada en el plan; aquí cada comprobación se dispara con
+/// la tabla alterada a mano.
+#[test]
+fn the_fan_of_each_detected_locus_is_rebuilt_from_what_is_published() {
+    let prefix = |locus: &str, detail: &str| format!("abanico del detectado {locus}: {detail}");
+
+    // La frecuencia declarada de un alelo, por otra admisible.
+    let (verdict, original) = judged_in_full("", |rows, _| {
+        let frequency: f64 = rows[0][4].parse().expect("decimal");
+        rows[0][4] = if frequency == 0.25 { "0.5" } else { "0.25" }.to_owned();
+    });
+    let published = if original[0][4] == "0.25" {
+        "0.5"
+    } else {
+        "0.25"
+    };
+    let rebuilt: f64 = original[0][4].parse().expect("decimal");
+    assert_eq!(
+        verdict,
+        prefix(
+            &original[0][0],
+            &format!(
+                "la frecuencia de un alelo no es la proporción de linajes que terminan en él \
+                 (alelo 0: publicada {published}, rehecha {rebuilt} = {}/4)",
+                (rebuilt * 4.0) as u64
+            )
+        )
+    );
+
+    // Dos alelos de un locus en otro orden: el orden canónico no es el suyo.
+    let (verdict, original) = judged_in_full("", |rows, _| {
+        let (index, _) = locus_with_two_alleles(rows);
+        let (left, right) = (rows[index][2].clone(), rows[index + 1][2].clone());
+        rows[index][2] = right;
+        rows[index + 1][2] = left;
+    });
+    let (_, locus) = locus_with_two_alleles(&original);
+    assert_eq!(
+        verdict,
+        prefix(
+            &locus,
+            "la secuencia de un alelo publicado no es la que el modelo produce, o el orden \
+             canónico no es el suyo"
+        )
+    );
+
+    // Un alelo de menos.
+    let (verdict, original) = judged_in_full("", |rows, _| {
+        let (index, _) = locus_with_two_alleles(rows);
+        rows.remove(index + 1);
+    });
+    let (_, locus) = locus_with_two_alleles(&original);
+    assert_eq!(
+        verdict,
+        prefix(
+            &locus,
+            "el número de alelos publicados no es el que el modelo produce"
+        )
+    );
+
+    // La contabilidad de la **segunda** fila de un locus (la primera queda
+    // bien): cada fila se compara, no solo la primera.
+    let (verdict, original) = judged_in_full("", |rows, _| {
+        let (index, _) = locus_with_two_alleles(rows);
+        let row = &mut rows[index + 1];
+        for column in [8, 9] {
+            let value: u64 = row[column].parse().expect("entero");
+            row[column] = (value + 1).to_string();
+        }
+    });
+    let (_, locus) = locus_with_two_alleles(&original);
+    assert_eq!(
+        verdict,
+        prefix(
+            &locus,
+            "la contabilidad publicada del generador en el alelo 1 no es la que el modelo produce"
+        )
+    );
+
+    // El deslizamiento común.
+    for (expected, alter) in [
+        (
+            "los linajes del deslizamiento común no son las copias haplotípicas de las \
+             poblaciones iniciales",
+            (|e: &mut Value| e["repeat_detection"]["slippage"]["lineages"] = json!(5))
+                as fn(&mut Value),
+        ),
+        (
+            "la media de pasos del deslizamiento común rebasa el tope que el generador admite",
+            |e| e["repeat_detection"]["slippage"]["mean_events"] = json!(1000.5),
+        ),
+        (
+            "el deslizamiento común publicado no tiene media y sesgo decimales",
+            |e| e["repeat_detection"]["slippage"]["expansion_bias"] = json!("media"),
+        ),
+        ("el tope de unidades de la sección no es un entero", |e| {
+            e["repeat_detection"]["max_units"] = json!("doscientas")
+        }),
+    ] {
+        let (verdict, _) = judged_in_full("", |_, effective| alter(effective));
+        assert_eq!(verdict, expected);
+    }
+}
+
+/// **La tabla de alelos es la que resuelve el TOML copiado, con lo medido**
+/// (REQ-VAL-62 para los detectados). Lo que el juez independiente no mira —las
+/// copias de cada alelo frente a la verdad, la frecuencia efectiva, la cota de
+/// la verdad del locus— lo ata la reconstrucción del juez completo.
+#[test]
+fn the_alleles_table_is_tied_to_the_toml_and_to_the_truth() {
+    // Una copia pasa de un alelo a otro del mismo locus, con las frecuencias
+    // realizadas rehechas: el juez del catálogo y el del abanico lo aceptan, y
+    // la verdad lo desmiente.
+    let (verdict, original) = judged_in_full("", |rows, _| {
+        let (_, locus) = locus_with_two_alleles(rows);
+        let of_locus: Vec<usize> = (0..rows.len()).filter(|i| rows[*i][0] == locus).collect();
+        let from = *of_locus
+            .iter()
+            .find(|i| rows[**i][6] != "0")
+            .expect("un alelo con copias");
+        let to = *of_locus.iter().find(|i| **i != from).expect("otro alelo");
+        for (row, delta) in [(from, -1_i64), (to, 1)] {
+            let copies = rows[row][6].parse::<i64>().expect("entero") + delta;
+            rows[row][6] = copies.to_string();
+            rows[row][7] = (copies as f64 / 4.0).to_string();
+        }
+    });
+    let (_, locus) = locus_with_two_alleles(&original);
+    assert_eq!(
+        verdict,
+        format!("las copias realizadas de los alelos de {locus} no son las que la verdad lleva")
+    );
+    let tied = "la tabla de alelos publicada no es la que el TOML, la referencia, la matriz y lo \
+                medido producen";
+    // La frecuencia efectiva de un alelo.
+    let (verdict, _) = judged_in_full("", |rows, _| {
+        rows[0][5] = if rows[0][5] == "0.25" { "0.5" } else { "0.25" }.to_owned();
+    });
+    assert_eq!(verdict, tied);
+    // La cota de la verdad de un locus, en todas sus filas.
+    let (verdict, _) = judged_in_full("", |rows, _| {
+        let locus = rows[0][0].clone();
+        for row in rows.iter_mut().filter(|row| row[0] == locus) {
+            let bound: u64 = row[11].parse().expect("entero");
+            row[11] = (bound + 1).to_string();
+        }
+    });
+    assert_eq!(verdict, tied);
+}
+
+/// **Las bases de tracto del VCF de cada detectado son las que llevan sus
+/// registros**, atribuidos al primer locus **del catálogo** que los contiene
+/// (REQ-VAL-62, DTC-097). Con VCF de texto.
+///
+/// **Debe fallar contra** un juez que atribuya las bases solo a los
+/// declarados: el paquete intacto, cuyos registros de repetición caen en los
+/// detectados, se rechazaría por un registro que no contiene ningún locus.
+#[test]
+fn the_vcf_tract_bases_of_each_detected_locus_are_recounted() {
+    let package = Package::copy_with(VCF);
+    let rows = allele_rows(&package.text("repeat_alleles.tsv"));
+    let carrying: Vec<&str> = rows
+        .iter()
+        .filter(|row| row[12] != "0")
+        .map(|row| row[0].as_str())
+        .collect();
+    assert!(
+        !carrying.is_empty(),
+        "control: algún detectado lleva bases de tracto en el VCF"
+    );
+    package
+        .judge_resources()
+        .expect("control positivo: el paquete con VCF intacto se acepta");
+
+    // Las bases de un detectado pasan a otro: la suma no cambia.
+    let (verdict, original) = judged_in_full(VCF, |rows, _| {
+        let from = rows
+            .iter()
+            .find(|row| row[12] != "0")
+            .map(|row| row[0].clone())
+            .expect("un detectado con bases");
+        let to = rows
+            .iter()
+            .find(|row| row[0] != from)
+            .map(|row| row[0].clone())
+            .expect("otro detectado");
+        let bases: u64 = rows
+            .iter()
+            .find(|row| row[0] == from)
+            .map(|row| row[12].parse().expect("entero"))
+            .expect("fila");
+        let other: u64 = rows
+            .iter()
+            .find(|row| row[0] == to)
+            .map(|row| row[12].parse().expect("entero"))
+            .expect("fila");
+        for row in rows.iter_mut() {
+            if row[0] == from {
+                row[12] = "0".to_owned();
+            } else if row[0] == to {
+                row[12] = (other + bases).to_string();
+            }
+        }
+    });
+    let from = original
+        .iter()
+        .find(|row| row[12] != "0")
+        .map(|row| row[0].clone())
+        .expect("fila");
+    let to = original
+        .iter()
+        .find(|row| row[0] != from)
+        .map(|row| row[0].clone())
+        .expect("fila");
+    let first = DETECTED
+        .iter()
+        .find(|locus| **locus == from || **locus == to)
+        .expect("uno de los dos");
+    assert_eq!(
+        verdict,
+        format!(
+            "las bases de tracto del VCF del detectado {first} no son las que llevan sus registros"
+        )
+    );
+
+    // Solo la segunda fila de un locus: la primera, que es la que se suma,
+    // queda bien.
+    let (verdict, original) = judged_in_full(VCF, |rows, _| {
+        let (index, _) = locus_with_two_alleles(rows);
+        let bases: u64 = rows[index + 1][12].parse().expect("entero");
+        rows[index + 1][12] = (bases + 1).to_string();
+    });
+    let (_, locus) = locus_with_two_alleles(&original);
+    assert_eq!(
+        verdict,
+        format!(
+            "las bases de tracto del VCF del detectado {locus} no son las que llevan sus registros"
+        )
+    );
+
+    // Sin la tabla de alelos, el juez público de la contabilidad de tracto no
+    // la inventa.
+    fs::remove_file(package.dir().join("repeat_alleles.tsv")).expect("borrado");
+    let dir = package.dir();
+    let effective_path = dir.join("effective-config.json");
+    let manifest_path = dir.join("manifest.json");
+    let verdict = detail(
+        genome_population_simulator::results::validate_published_tract_output_accounting(
+            &effective_path,
+            &fs::read(&effective_path).expect("efectiva"),
+            &manifest_path,
+            &fs::read(&manifest_path).expect("manifiesto"),
+            &dir.join("outputs/truth.jsonl"),
+            Some(&dir.join("outputs/truth.vcf")),
+        ),
+    );
+    assert_eq!(
+        verdict,
+        "no se puede leer el catálogo de microsatélites o la tabla de alelos publicados"
+    );
+}
+
+/// Publica una referencia de una secuencia con `count` microsatélites
+/// plantados (motivos de 1 a 6 bases, uno cada 200 bases) y la sección de
+/// microsatélites, y devuelve el paquete.
+fn publish_planted(count: usize) -> Package {
+    const MOTIFS: [(&str, usize); 6] = [
+        ("A", 12),
+        ("CA", 10),
+        ("GAT", 8),
+        ("AAAG", 7),
+        ("ACGTT", 6),
+        ("AACGTT", 5),
+    ];
+    // El guardián existe antes de publicar: un fallo no deja la carpeta.
+    let package = Package {
+        root: temporary(&format!("planted-{count}")),
+    };
+    let root = package.root.clone();
+    let length = 200 * count + 200;
+    let mut chr1 = background(0x9E37_79B9_7F4A_7C15, length);
+    for index in 0..count {
+        let (motif, units) = MOTIFS[index % MOTIFS.len()];
+        plant(&mut chr1, 101 + 200 * index, motif, units);
+    }
+    write_fasta(&root.join("reference.fa"), &[("chr1", chr1)]);
+    let config = root.join("general.toml");
+    fs::write(
+        &config,
+        format!(
+            "config_kind = \"general\"\nschema_version = \"4\"\nseed = \"{SEED}\"\n\n\
+             [population_snvs]\nmode = \"generate\"\n\n\
+             [population_snvs.generate]\ncount_mode = \"exact\"\nlocus_count = 1\n\
+             spatial_mode = \"uniform\"\nsubstitution_profile = \"uniform_snv12_v1\"\n\n\
+             [[population_snvs.generate.populations]]\npopulation_id = \"P1\"\n\
+             frequency_model = \"uniform\"\nmin_alt_af = 0.2\nmax_alt_af = 0.8\n\n\
+             [reference]\nkind = \"supplied\"\nid = \"ref-main\"\nfasta = \"reference.fa\"\n\n\
+             [[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = {length}\n\n\
+             [reference.repeat_detection]\n\n\
+             [reference.repeat_detection.slippage]\nmodel = \"stepwise\"\nmean_events = 1.0\n\n\
+             [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 2\nploidy = 2\n\
+             genotype_model = \"hwe\"\nindividual_ids = [\"I1\", \"I2\"]\n\n\
+             [vcf_output]\nmode = \"text\"\n"
+        ),
+    )
+    .expect("configuración");
+    execute_validated_config(
+        &load_and_validate_config(&config).expect("configuración válida"),
+        &root.join("published"),
+    )
+    .unwrap_or_else(|error| panic!("publicación: {}", error.render_human()));
+    package
+}
+
+/// **La efectiva y el manifiesto no crecen con los detectados** (REQ-MAN-98,
+/// entrega 4 bis): con 12 y con 48 microsatélites plantados, los dos
+/// documentos cambian unos pocos bytes (los dígitos de las longitudes, de los
+/// totales y de los tamaños de los ficheros), mientras el catálogo y la tabla
+/// de alelos crecen con cada locus.
+///
+/// **Debe fallar contra** dejar los detectados en los documentos JSON: hasta
+/// la entrega 4 cada uno añadía unos 4 kB a cada documento (apartado 9 de la
+/// propuesta de la entrega 4 bis en el plan).
+#[test]
+fn the_json_documents_do_not_grow_with_the_detected_loci() {
+    let small = publish_planted(12);
+    let large = publish_planted(48);
+    let size = |package: &Package, file: &str| {
+        fs::metadata(package.dir().join(file))
+            .expect("fichero publicado")
+            .len()
+    };
+    let rows = |package: &Package| package.text("repeat_catalog.tsv").lines().count() - 1;
+    // Control: el detector halla lo plantado (alguno puede quedar fuera por la
+    // fila de la matriz generada o por el fondo; no importa cuál).
+    let (few, many) = (rows(&small), rows(&large));
+    assert!(
+        few >= 10 && many >= 44,
+        "control: {few} y {many} detectados"
+    );
+    for file in ["effective-config.json", "manifest.json"] {
+        let (a, b) = (size(&small, file), size(&large, file));
+        assert!(
+            b.abs_diff(a) <= 32,
+            "{file} crece con los detectados: {a} bytes con 12 y {b} con 48"
+        );
+    }
+    for file in ["repeat_catalog.tsv", "repeat_alleles.tsv"] {
+        let (a, b) = (size(&small, file), size(&large, file));
+        assert!(b > a + (many - few) as u64 * 40, "{file}: {a} y {b} bytes");
+    }
+    // Con solo detectados, la lista de loci del manifiesto está vacía y los
+    // dos documentos pasan su esquema; una efectiva sin el enlace a la tabla
+    // de alelos, o con el deslizamiento común sin sus limitaciones, no.
+    let manifest = large.json("manifest.json");
+    let effective = large.json("effective-config.json");
+    assert_eq!(manifest["repeat_loci"]["loci"], json!([]));
+    assert_eq!(effective["repeat_loci"], json!([]));
+    let mut without_link = effective.clone();
+    without_link["repeat_detection"]
+        .as_object_mut()
+        .expect("sección")
+        .remove("alleles_table");
+    let mut without_limitations = effective.clone();
+    without_limitations["repeat_detection"]["slippage"]
+        .as_object_mut()
+        .expect("deslizamiento")
+        .remove("limitations");
+    for (document, schema, accepted) in [
+        (manifest, "manifest-general-v6.schema.json", true),
+        (effective, "effective-config-v6.schema.json", true),
+        (without_link, "effective-config-v6.schema.json", false),
+        (
+            without_limitations,
+            "effective-config-v6.schema.json",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            schema_accepts(&large, &document, schema),
+            accepted,
+            "{schema}: aceptado = {accepted}"
+        );
+    }
+}
+
+/// Si el validador de esquemas externo (Python) acepta `document`.
+fn schema_accepts(package: &Package, document: &Value, schema: &str) -> bool {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let path = package.root.join("instance.json");
+    fs::write(&path, json_document_bytes(document).expect("JSON")).expect("instancia");
+    Command::new("python3")
+        .arg(root.join("tests/external_jsonschema_validator.py"))
+        .arg(root.join("schemas").join(schema))
+        .arg(&path)
+        .status()
+        .expect("validador de esquemas en Python")
+        .success()
 }

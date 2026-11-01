@@ -375,32 +375,60 @@ impl PublishedRun {
             &population_of,
         );
 
-        let loci = effective["repeat_loci"]
-            .as_array()
-            .map(|loci| {
-                loci.iter()
-                    .map(|locus| {
-                        let id = text(&locus["id"], "repeat_loci.id").to_owned();
-                        Locus {
-                            typed: RepeatLocusId::parse(id.clone(), "oracle")
-                                .expect("identificador de locus"),
-                            id,
-                            sequence_id: text(&locus["sequence_id"], "repeat_loci.sequence_id")
-                                .to_owned(),
-                            // Coordenadas declaradas en base 1 e inclusivas.
-                            start: integer(&locus["start"], "repeat_loci.start") - 1,
-                            end: integer(&locus["end"], "repeat_loci.end"),
-                            motifs: locus["motifs"]
-                                .as_array()
-                                .expect("motivos del locus")
-                                .iter()
-                                .map(|motif| text(motif, "motif").as_bytes().to_vec())
-                                .collect(),
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        // Con la sección de microsatélites, los loci son los del catálogo
+        // publicado: desde la entrega 4 bis la efectiva solo lleva los
+        // declarados y los detectados viven en `repeat_catalog.tsv`.
+        let catalog = std::fs::read_to_string(root.join("repeat_catalog.tsv")).ok();
+        let loci = if let Some(catalog) = catalog {
+            catalog
+                .lines()
+                .skip(1)
+                .map(|line| {
+                    let fields: Vec<&str> = line.split('\t').collect();
+                    let id = fields[0].to_owned();
+                    Locus {
+                        typed: RepeatLocusId::parse(id.clone(), "oracle")
+                            .expect("identificador de locus"),
+                        id,
+                        sequence_id: fields[1].to_owned(),
+                        // Base 1 e inclusivas en la tabla.
+                        start: fields[2].parse::<u64>().expect("inicio") - 1,
+                        end: fields[3].parse().expect("fin"),
+                        motifs: fields[4]
+                            .split(',')
+                            .map(|motif| motif.as_bytes().to_vec())
+                            .collect(),
+                    }
+                })
+                .collect()
+        } else {
+            effective["repeat_loci"]
+                .as_array()
+                .map(|loci| {
+                    loci.iter()
+                        .map(|locus| {
+                            let id = text(&locus["id"], "repeat_loci.id").to_owned();
+                            Locus {
+                                typed: RepeatLocusId::parse(id.clone(), "oracle")
+                                    .expect("identificador de locus"),
+                                id,
+                                sequence_id: text(&locus["sequence_id"], "repeat_loci.sequence_id")
+                                    .to_owned(),
+                                // Coordenadas declaradas en base 1 e inclusivas.
+                                start: integer(&locus["start"], "repeat_loci.start") - 1,
+                                end: integer(&locus["end"], "repeat_loci.end"),
+                                motifs: locus["motifs"]
+                                    .as_array()
+                                    .expect("motivos del locus")
+                                    .iter()
+                                    .map(|motif| text(motif, "motif").as_bytes().to_vec())
+                                    .collect(),
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
 
         let event = read_event(&effective, seed, &reference_id, repository);
         let event_manifest =
