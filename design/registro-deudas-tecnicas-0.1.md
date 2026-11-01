@@ -94,7 +94,8 @@ convivir con ella y **qué condición** obligaría a reconsiderarla.
 | DT-058 | Los alelos de los microsatélites ignoran el coeficiente de endogamia F: con `f_diploid` se sorteaban copia a copia como en Hardy-Weinberg | Media | 25/10/2026 | **Cerrada (25/10/2026)** |
 | DT-059 | Con `schema_version = "3"` y microsatélites, el error habla del escenario F5 y de un campo desconocido `initial_populations`, no de la versión | Baja | 25/10/2026 | Abierta |
 | DT-060 | En una molécula quimérica, el tartamudeo situaba los tractos con la copia del primer tramo sobre la molécula entera: tartamudeaba bases que no eran un tracto y no evaluaba los tractos del segundo tramo | Media | 27/10/2026 | **Cerrada (27/10/2026)** |
-| DT-061 | Se pierden microsatélites pegados a otro: (a) por **nuestra** regla de solapes, que descarta entero el tramo que pisa a otro solo en la copia parcial de la frontera (`(CA)×10 A×12`, el `(TCTG)` central de un compuesto); (b) por el buscador de `pop_var_caller`, que no emite un microsatélite corto entre dos tiras largas de una misma base ni recupera una repetición con una interrupción que desplaza la fase | Media | 30/10/2026 | Abierta: (a) arreglo propio pendiente de decisión; (b) pendiente de una versión nueva de `pop_var_caller` |
+| DT-061 | Se pierden microsatélites pegados a otro: (a) por **nuestra** regla de solapes, que descarta entero el tramo que pisa a otro solo en la copia parcial de la frontera (`(CA)×10 A×12`, el `(TCTG)` central de un compuesto); (b) por el buscador de `pop_var_caller`, que no emite un microsatélite corto entre dos tiras largas de una misma base ni recupera una repetición con una interrupción que desplaza la fase | Media | 30/10/2026 | Parte (a) **cerrada el 01/11/2026**; parte (b) abierta, pendiente de una versión nueva de `pop_var_caller` |
+| DT-062 | El código copiado de `pop_var_caller` no lleva el aviso completo de su licencia MIT: falta el texto del permiso, y `LICENSE` no nombra a sus autores | Baja | 31/10/2026 | **Cerrada (01/11/2026)** |
 
 ---
 
@@ -5635,7 +5636,7 @@ M23).
 **Gravedad: media.** Hallada el 30/10/2026 al copiar en
 `src/repeat_detection.rs` el núcleo nuevo de `pop_var_caller` (`fa215c23`,
 rama `str-adjacent-runs`). Ver el apartado 11.11 del plan de detección de
-microsatélites. **Abierta.** **Corregida el 31/10/2026:** la primera versión
+microsatélites. **Parte (a) cerrada el 01/11/2026; parte (b) abierta.** **Corregida el 31/10/2026:** la primera versión
 de esta entrada atribuía todas las pérdidas al buscador copiado; una sonda que
 separa lo que devuelve el buscador de lo que hacen después nuestros criterios
 y nuestra regla de solapes demostró que la parte (a) es nuestra.
@@ -5669,12 +5670,28 @@ que el responsable decidió el 29/10/2026 (apartado 11.8 del plan).
 candidatos que el núcleo anterior aceptaba se pierden por solape con uno nuevo
 de otro motivo; 58 de ellos por una sola base.
 
-**Arreglo propuesto, pendiente de decisión del responsable.** Cuando dos
-candidatos se solapan en menos de una copia del motivo del que pierde, se
-recorta este en vez de descartarlo y se vuelve a comprobar el suelo de
-copias; un solape de una copia o más se sigue resolviendo como hoy. El
-30/10/2026 se había descartado esta propuesta, pero sobre la premisa falsa de
-que la pérdida era del buscador.
+**Cerrada el 01/11/2026.** El responsable aprobó el arreglo con el umbral de
+«una copia o menos»: cuando un aspirante pisa a los ya aceptados **una copia de
+su propio motivo o menos por cada lado** (solape ≤ periodo), `resolve_overlaps`
+**lo recorta** a la parte que no solapa y ese tramo **vuelve a pasar por todos
+los criterios** (suelo, pureza, tirada, tope y bordes); con más de una copia
+por algún lado, o con un aceptado dentro o alrededor, se descarta entero como
+antes. Con «menos de una copia» una tira de una sola base no se habría
+recortado nunca (un solape de una base ya es una copia), y el caso `(CA)×10
+A×12` seguiría perdiendo su tira. Decisiones de detalle: la puntuación del
+recortado se recalcula con su propio tramo; su motivo se lee al nuevo inicio
+(sale una rotación: el `(TCTG)` central sale `GTCT`) y el identificador lleva
+ese motivo; un recortado que cae se cuenta en «solape»; las regiones se
+aplican antes y el recortado, un subconjunto, siempre cabe. Un solape de una
+copia o más del que pierde se descarta; el caso `(CA)×10 G (CAG)×7`, donde el
+`(CAG)×8` pisa dos bases al `(CA)×10`, da ahora los dos. Ver DP-SSR-05
+reescrita en el plan y el apartado 11.12 con la medición.
+
+**Medido en el tomate (apartado 11.12).** De los 100 candidatos que se perdían
+por solape, **36 se recuperan**; 24 caen aun así porque son tiras de 8 bases
+(el suelo) que pierden una base al recortarse y quedan en 7, y 40 siguen
+descartados porque el solape es de más de una copia del que pierde (decisión
+del responsable). En total el catálogo pasa de 56 186 a 56 736 candidatos.
 
 ### (b) El buscador de `pop_var_caller` no emite el tramo
 
@@ -5699,12 +5716,39 @@ nueva de `pop_var_caller`, cuyo núcleo se copiará como se hizo con
 
 ### Cómo se cierra
 
-- **(a)** Con el arreglo de la regla de solapes, si el responsable lo aprueba,
-  y pruebas que fallen contra la regla de hoy: `(CA)×10 A×12` debe dar dos
-  loci y el compuesto, tres.
+- **(a)** **Hecho el 01/11/2026**, con el arreglo de la regla de solapes y
+  pruebas que fallan contra la regla de antes (se comprobó por mutación sobre
+  una copia): `(CA)×10 A×12` da dos loci y el compuesto, tres. La medición del
+  tomate está en el apartado 11.12 del plan.
 - **(b)** Copiando el núcleo corregido, con pruebas que fallen contra el de
   `fa215c23`: `G×116 (CA)×13 G×122` debe dar el `(CA)×13`, y una repetición
   con desplazamiento de fase debe salir entera.
 - En los dos casos, volviendo a medir el tomate (apartado 11.1 del plan) para
-  anotar cuántos de los 100 y de los 5 se recuperan. Las cifras congeladas que
+  anotar cuántos de los 100 y de los 5 se recuperan (parte (a): 36 de los 100,
+  apartado 11.12; la parte (b) está por hacer). Las cifras congeladas que
   dependen del catálogo detectado cambiarán y se decidirán por escrito.
+
+## DT-062. El código copiado de `pop_var_caller` no lleva el aviso completo de su licencia
+
+**Gravedad: baja.** Hallada el 31/10/2026 al revisar el historial antes de
+hacer público el repositorio. **Cerrada el 01/11/2026.**
+
+**Qué pasa.** El núcleo del buscador de `src/repeat_detection.rs` está copiado
+de `pop_var_caller` (repositorio `join_per_sample_vcfs`, público, licencia MIT,
+«Copyright (c) 2026 Jose Blanca & Joaquin Cañizares»). La MIT exige que toda
+copia de una parte sustancial incluya **el aviso de copyright y el texto del
+permiso**. La cabecera del módulo cita el copyright, pero no el texto del
+permiso, y `LICENSE` de este proyecto solo nombra a «Cañizares Sales, Joaquin».
+
+**Cómo se cierra.** Añadir a `LICENSE` una nota de procedencia: «Partes de
+`src/repeat_detection.rs` proceden de `pop_var_caller`, Copyright (c) 2026
+Jose Blanca & Joaquin Cañizares, bajo la misma licencia MIT», de modo que el
+texto del permiso que ya contiene `LICENSE` cubra también esa copia.
+
+**Cómo se cerró.** `LICENSE` lleva una segunda línea de copyright, «Copyright
+(c) 2026 Jose Blanca & Joaquin Cañizares», acotada al núcleo del buscador de
+`src/repeat_detection.rs` y con la dirección del repositorio original
+(`https://github.com/JoseBlanca/pop_var_caller`). El texto del permiso que ya
+contiene `LICENSE` cubre así también esa copia. Se añadió como línea de
+copyright, y no como párrafo aparte, para que GitHub siga reconociendo la
+licencia como MIT.

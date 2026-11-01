@@ -89,6 +89,17 @@
 //! pausa de decisión de la entrega 1, con las cifras medidas. Por eso los
 //! umbrales son parámetros ([`DetectionCriteria`]) y no constantes.
 //!
+//! **Los solapes (DP-SSR-05, reescrita el 01/11/2026).** Un microsatélite suele
+//! acabar con una copia parcial del motivo que coincide con el principio de
+//! lo que viene detrás, y el buscador entrega los dos tramos pisándose esa
+//! copia. La regla ordena por prioridad (puntuación, longitud, periodo menor,
+//! posición) y, de cada aspirante: lo que no pisa a un aceptado se acepta; lo
+//! que pisa por cada lado **una copia de su propio motivo o menos** (solape ≤
+//! periodo) **se recorta** a la parte que no solapa y vuelve a pasar por todos
+//! los criterios; lo que pisa más de una copia por algún lado, o contiene o
+//! queda cubierto por un aceptado, se descarta entero. Un recortado que cae se
+//! cuenta en «solape». Ver `resolve_overlaps`.
+//!
 //! Desde la entrega 3 (29/10/2026) la usa la ejecución:
 //! `EffectiveConfig::with_detected_repeat_loci` barre cada secuencia de la
 //! referencia final con [`detect_repeat_candidates_in_regions`] cuando el
@@ -959,7 +970,8 @@ pub enum DetectionStage {
     /// Se aplica antes de los solapes: lo que queda fuera no puede quitarle
     /// el sitio a lo de dentro.
     OutsideRegions,
-    /// Solapa con otro candidato que gana por la regla de DP-SSR-05.
+    /// Solapa con otro candidato que gana por la regla de DP-SSR-05 y no se
+    /// salva recortándose, o es un recortado que ya no supera los criterios.
     Overlap,
 }
 
@@ -1072,7 +1084,8 @@ impl DetectionCounts {
 /// Un tramo que supera los criterios por sí solo. Coordenadas en base cero y
 /// semiabiertas sobre la secuencia barrida; el motivo es el de la fase del
 /// inicio del tramo (DP-SSR-03, opción (a)) y las fronteras son las del
-/// detector, sin recortar (DP-SSR-04, opción (a)).
+/// detector, sin recortar (DP-SSR-04, opción (a)), salvo el recorte por solape
+/// de una copia o menos (DP-SSR-05).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RepeatCandidate {
     start: u64,
@@ -1201,9 +1214,9 @@ pub fn detect_repeat_candidates_in_regions(
             Err(stage) => counts.discard(stage, motif_length),
         }
     }
-    let (candidates, overlapped) = resolve_overlaps(survivors);
-    for loser in &overlapped {
-        counts.discard(DetectionStage::Overlap, loser.motif.length() as usize);
+    let (candidates, overlapped) = resolve_overlaps(bases, criteria, survivors);
+    for motif_length in overlapped {
+        counts.discard(DetectionStage::Overlap, motif_length);
     }
     for candidate in &candidates {
         counts.accepted[candidate.motif.length() as usize - 1] += 1;
@@ -1363,39 +1376,125 @@ pub fn classify_interval(
     })
 }
 
-/// Resuelve los solapes con la regla de DP-SSR-05, opción (a): ordena los
-/// candidatos por prioridad —mayor puntuación del detector; a igual
-/// puntuación, más bases; luego periodo menor; luego el de la izquierda— y
-/// los recorre en ese orden aceptando cada uno que **no solape a uno ya
-/// aceptado**.
+/// Resuelve los solapes con la regla de DP-SSR-05: ordena los candidatos por
+/// prioridad —mayor puntuación del detector; a igual puntuación, más bases;
+/// luego periodo menor; luego el de la izquierda— y los recorre en ese orden.
+/// De cada aspirante:
+///
+/// - **sin solape** con los ya aceptados, se acepta;
+/// - con solape de **una copia de su motivo o menos por cada lado** (solape ≤
+///   periodo del aspirante) y sin ningún aceptado dentro de él ni que lo cubra
+///   entero, **se recorta** a la parte que no solapa, y ese tramo recortado
+///   **vuelve a pasar por todos los criterios** ([`classify_interval`]): entra
+///   solo si los supera;
+/// - en cualquier otro caso (algún lado con más de una copia de solape, un
+///   aceptado dentro de él o que lo cubre) **se descarta entero**.
+///
+/// Un microsatélite suele acabar con una copia parcial del motivo que coincide
+/// con el principio de lo que viene detrás: `(CA)×10 A×12` da `CA` y `A`
+/// pisándose una base, y el recorte conserva los dos.
+///
+/// **El recortado cae, si cae, en «solape»** (devuelve su longitud de motivo
+/// entre los descartados), y no en la etapa del criterio que ya no supera:
+/// superó todos por sí solo, y lo pierde el solape. Así las columnas de suelo,
+/// pureza y demás siguen contando solo lo que cae por sí solo.
+///
+/// **La puntuación del recortado se recalcula** con las comparaciones de su
+/// propio tramo, como el recorte del inicio del buscador: es lo que todo
+/// candidato lleva, recortado o no. No decide nada aquí, porque el recortado
+/// se acepta en el acto y no vuelve a competir.
+///
+/// **El recortado no necesita comprobar las regiones**: es un subconjunto del
+/// aspirante, que ya cabía en la suya (las regiones se aplican antes).
 ///
 /// No es «de cada grupo solapado gana uno»: en una cadena A–B–C donde A gana
-/// a B y C solo solapa a B, B se descarta y **quedan A y C**, porque C ya no
-/// solapa a nadie aceptado. El resultado **no depende del orden de
-/// entrada**: la clave ordena del todo (dos candidatos con la misma clave
-/// tendrían el mismo intervalo y periodo, y el detector no los emite).
-/// Dos tramos que solo se tocan (uno acaba donde empieza el otro) no se
-/// solapan. Devuelve (aceptados ordenados por inicio, descartados).
+/// a B y C solo solapa a B, B se recorta o se descarta y C compite contra lo
+/// aceptado. El resultado **no depende del orden de entrada**: la clave
+/// ordena del todo (dos candidatos con la misma clave tendrían el mismo
+/// intervalo y periodo, y el detector no los emite). Dos tramos que solo se
+/// tocan no se solapan. Devuelve (aceptados ordenados por inicio, longitudes de
+/// motivo de los descartados).
 fn resolve_overlaps(
+    bases: &[u8],
+    criteria: &DetectionCriteria,
     mut survivors: Vec<RepeatCandidate>,
-) -> (Vec<RepeatCandidate>, Vec<RepeatCandidate>) {
+) -> (Vec<RepeatCandidate>, Vec<usize>) {
     survivors.sort_by_key(RepeatCandidate::priority);
     // Aceptados por inicio. Son disjuntos, así que también están ordenados por
-    // fin y basta mirar el último que empieza antes del fin del aspirante.
+    // fin y los que solapan al aspirante son los últimos que empiezan antes de
+    // su fin.
     let mut accepted: BTreeMap<u64, RepeatCandidate> = BTreeMap::new();
     let mut discarded = Vec::new();
     for candidate in survivors {
-        let overlaps = accepted
-            .range(..candidate.end)
-            .next_back()
-            .is_some_and(|(_, previous)| previous.end > candidate.start);
-        if overlaps {
-            discarded.push(candidate);
-        } else {
-            accepted.insert(candidate.start, candidate);
+        let (start, end) = (candidate.start, candidate.end);
+        let period = candidate.motif.length();
+        // Solape por la izquierda y por la derecha; `whole` si algún aceptado
+        // está dentro del aspirante o lo cubre entero (no hay nada que recortar).
+        let (mut left, mut right, mut whole) = (0, 0, false);
+        for (_, previous) in accepted.range(..end).rev() {
+            if previous.end <= start {
+                break;
+            }
+            if previous.start <= start && previous.end < end {
+                left = previous.end - start;
+            } else if previous.start > start && previous.end >= end {
+                right = end - previous.start;
+            } else {
+                whole = true;
+                break;
+            }
+        }
+        if whole || left > period || right > period {
+            discarded.push(period as usize);
+            continue;
+        }
+        if left == 0 && right == 0 {
+            accepted.insert(start, candidate);
+            continue;
+        }
+        let (trimmed_start, trimmed_end) = (start + left, end - right);
+        // `classify_interval` lee un motivo entero: un resto más corto que él
+        // no es un tramo.
+        if trimmed_end - trimmed_start < period {
+            discarded.push(period as usize);
+            continue;
+        }
+        let trimmed = RepeatInterval {
+            start: trimmed_start,
+            end: trimmed_end,
+            period: period as u8,
+            score: own_score(bases, trimmed_start, trimmed_end, period),
+        };
+        match classify_interval(bases, &trimmed, criteria) {
+            Ok(rejudged) => {
+                accepted.insert(rejudged.start, rejudged);
+            }
+            Err(_) => discarded.push(period as usize),
         }
     }
     (accepted.into_values().collect(), discarded)
+}
+
+/// Puntuación de un tramo con las comparaciones **de su propio tramo**: la
+/// recompensa por cada base igual a la que está `period` antes dentro del
+/// tramo, y la penalización por cada una distinta o no ACGT. Es la que el
+/// buscador da a un tramo sin recortar.
+fn own_score(bases: &[u8], start: u64, end: u64, period: u64) -> i32 {
+    let params = ScanParams::default();
+    let (start, end, period) = (start as usize, end as usize, period as usize);
+    (start + period..end)
+        .map(|j| {
+            let (here, back) = (
+                CANONICAL[bases[j] as usize],
+                CANONICAL[bases[j - period] as usize],
+            );
+            if here != 0 && here == back {
+                params.match_reward
+            } else {
+                -params.mismatch_penalty
+            }
+        })
+        .sum()
 }
 
 #[cfg(test)]
@@ -2265,27 +2364,299 @@ mod tests {
     /// 7/9) **y** sus tres trozos: `[0, 35)` `TCTA`, `[32, 67)` `TCTG` y
     /// `[64, 96)` `TCTA`. El unido cae en la pureza; los trozos pasan solos.
     ///
-    /// **Lo que no resuelve, dicho sin adornos:** cada trozo acaba con la copia
-    /// parcial `TCT` que comparte con el motivo siguiente, así que el del
-    /// centro solapa 3 bases con cada vecino. La regla de solapes (DP-SSR-05)
-    /// se queda con el primero (empate a 62 de puntuación y 35 bases; gana el
-    /// de la izquierda) y luego con el tercero, que ya no solapa a nadie
-    /// aceptado; el `(TCTG)n` se descarta por solape. Esta prueba fija ese
-    /// resultado tal cual es hoy; si se decide otra cosa (recortar la copia
-    /// parcial final, por ejemplo), es la que debe cambiar.
+    /// Cada trozo acaba con la copia parcial `TCT` que comparte con el motivo
+    /// siguiente, así que el del centro solapa 3 bases con cada vecino, menos
+    /// de una copia (4). Antes la regla de solapes descartaba el `(TCTG)n`
+    /// entero; ahora **se recorta** y se queda. El primero (empate a 62 y 35
+    /// bases: gana el de la izquierda) se acepta tal cual; el del centro pierde
+    /// por la izquierda 3 bases y queda `[35, 67)`, de **motivo `GTCT`** (el
+    /// motivo se lee al inicio del tramo, una rotación de `TCTG`) y puntuación
+    /// 56 (28 comparaciones propias); el tercero ya solapa 3 bases con el
+    /// centro recortado y queda `[67, 96)`, de motivo `ATCT` y puntuación 50.
+    /// Los tres se vuelven a juzgar y superan los criterios; no hay descartes
+    /// por solape.
+    ///
+    /// **Debe fallar contra** la regla de antes (descartar entero): daría solo
+    /// los dos tramos de los extremos, `[0, 35)` y `[64, 96)`.
     #[test]
-    fn a_compound_tract_yields_its_outer_pieces() {
+    fn a_compound_tract_yields_all_three_pieces() {
         let core = [b"TCTA".repeat(8), b"TCTG".repeat(8), b"TCTA".repeat(8)].concat();
         let (candidates, counts) = detect_core(b"G", &core, b"G");
         assert_eq!(
             candidates,
             vec![
                 (0, 35, b"TCTA".to_vec(), 62),
-                (64, 96, b"TCTA".to_vec(), 56)
+                (35, 67, b"GTCT".to_vec(), 56),
+                (67, 96, b"ATCT".to_vec(), 50)
             ]
         );
+        assert!(counts.is_balanced(), "{counts:?}");
         assert_eq!(counts.discarded(DetectionStage::MinPurity, 4), 1);
-        assert_eq!(counts.discarded(DetectionStage::Overlap, 4), 1);
+        assert_eq!(counts.discarded_total(DetectionStage::Overlap), 0);
+        assert_eq!(counts.accepted(4), 3);
+    }
+
+    /// **Regresión: `(CA)×10 A×12`.** El buscador da `CA [0, 20)` y la tira de
+    /// `A [19, 32)` (13 bases), que se pisan **una base** (la última `A` del
+    /// dinucleótido). Una base es una copia del motivo de la tira, justo el
+    /// límite que el responsable fijó el 01/11/2026 (solape ≤ periodo): la
+    /// tira se recorta a `[20, 32)`, 12 bases, se vuelve a juzgar (suelo de 8
+    /// copias) y se queda, con la puntuación de su propio tramo (11
+    /// comparaciones, 22). Cada una cuenta en su longitud de motivo y no hay
+    /// descarte por solape.
+    ///
+    /// **Debe fallar contra** la regla de antes: solo saldría el `(CA)×10`.
+    #[test]
+    fn overlap_trim_keeps_a_homopolymer_sharing_one_base_with_a_dinucleotide() {
+        let core = [b"CA".repeat(10), b"A".repeat(12)].concat();
+        let (candidates, counts) = detect_core(b"G", &core, b"G");
+        assert_eq!(
+            candidates,
+            vec![(0, 20, b"CA".to_vec(), 36), (20, 32, b"A".to_vec(), 22)]
+        );
+        assert!(counts.is_balanced(), "{counts:?}");
+        assert_eq!((counts.accepted(1), counts.accepted(2)), (1, 1));
+        assert_eq!(counts.discarded_total(DetectionStage::Overlap), 0);
+    }
+
+    /// **`(CA)×10 G (CAG)×7` da los dos.** Es el caso que la regla de antes
+    /// resolvía descartando el `(CA)×10`: el `(CAG)×8` empieza en el último
+    /// `CA` (`CAG` con la `G`), `[18, 42)` con puntuación 42, y gana al
+    /// `(CA)×10` `[0, 20)` (36). El `(CA)×10` lo pisa **dos bases**, una copia
+    /// de su motivo: se recorta a `[0, 18)` (`(CA)×9`, 16 comparaciones, 32) y
+    /// supera el suelo de 6 copias. Son dos microsatélites reales pegados.
+    ///
+    /// **Debe fallar contra** la regla de antes: solo saldría el `(CAG)×8`.
+    #[test]
+    fn overlap_trim_keeps_a_dinucleotide_overlapped_by_one_copy_by_a_trinucleotide() {
+        let core = [b"CA".repeat(10), b"G".to_vec(), b"CAG".repeat(7)].concat();
+        let (candidates, counts) = detect_core(b"T", &core, b"T");
+        assert_eq!(
+            candidates,
+            vec![(0, 18, b"CA".to_vec(), 32), (18, 42, b"CAG".to_vec(), 42)]
+        );
+        assert!(counts.is_balanced(), "{counts:?}");
+        assert_eq!(counts.discarded_total(DetectionStage::Overlap), 0);
+    }
+
+    /// **Un solape de más de una copia del que pierde se sigue descartando
+    /// entero.** `(GC)×8 (ACGC)×6`: el `(ACGC)` entra tres bases en el
+    /// dinucleótido (`[13, 16)`), más que sus dos bases de periodo, y gana por
+    /// puntuación; el `(GC)×8` se descarta y se cuenta en «solape», sin
+    /// recortarlo a `[0, 13)` (seis copias completas de `GC`), que pasaría el
+    /// suelo.
+    ///
+    /// **Debe fallar contra** recortar con cualquier solape: saldría también
+    /// ese `GC` de seis copias.
+    #[test]
+    fn an_overlap_of_more_than_one_copy_still_discards_the_loser_whole() {
+        let core = [b"GC".repeat(8), b"ACGC".repeat(6)].concat();
+        let (candidates, counts) = detect_core(b"T", &core, b"T");
+        assert_eq!(candidates, vec![(13, 40, b"CGCA".to_vec(), 46)]);
+        assert!(counts.is_balanced(), "{counts:?}");
+        assert_eq!(counts.discarded(DetectionStage::Overlap, 2), 1);
+        assert_eq!(counts.discarded_total(DetectionStage::Overlap), 1);
+    }
+
+    /// **El límite exacto, por `resolve_overlaps` y con las bases a la vista.**
+    /// Un `(GAT)×8` con un ganador escrito a mano que lo pisa por la
+    /// izquierda: con 3 bases (una copia) se recorta y se queda en `[33, 54)`;
+    /// con 4 (una copia y una base) se descarta entero. Es lo que distingue
+    /// `≤` de `<` en el umbral, por cada lado: la prueba repite el caso por la
+    /// derecha, con el ganador a la derecha.
+    #[test]
+    fn the_trim_threshold_is_exactly_one_copy_on_each_side() {
+        let mut bases = background(0x41, 30);
+        bases.extend(b"GAT".repeat(8));
+        bases.extend(background(0x42, 30));
+        let criteria = DetectionCriteria::default();
+        let aspirant = || {
+            classify_interval(&bases, &interval(30, 54, 3, 46), &criteria)
+                .expect("el (GAT)×8 pasa solo")
+        };
+        // Por la izquierda.
+        for (overlap, kept) in [(3u64, Some((33u64, 54u64))), (4, None)] {
+            let winner = candidate(20, 30 + overlap, b"CA", 1_000);
+            let (accepted, lost) =
+                resolve_overlaps(&bases, &criteria, vec![winner.clone(), aspirant()]);
+            let got: Vec<(u64, u64)> = accepted
+                .iter()
+                .filter(|c| c.motif().length() == 3)
+                .map(|c| (c.start(), c.end()))
+                .collect();
+            assert_eq!(
+                got,
+                kept.into_iter().collect::<Vec<_>>(),
+                "izquierda {overlap}"
+            );
+            assert_eq!(
+                lost.len(),
+                usize::from(kept.is_none()),
+                "izquierda {overlap}"
+            );
+        }
+        // Por la derecha.
+        for (overlap, kept) in [(3u64, Some((30u64, 51u64))), (4, None)] {
+            let winner = candidate(54 - overlap, 64, b"CA", 1_000);
+            let (accepted, lost) =
+                resolve_overlaps(&bases, &criteria, vec![winner.clone(), aspirant()]);
+            let got: Vec<(u64, u64)> = accepted
+                .iter()
+                .filter(|c| c.motif().length() == 3)
+                .map(|c| (c.start(), c.end()))
+                .collect();
+            assert_eq!(
+                got,
+                kept.into_iter().collect::<Vec<_>>(),
+                "derecha {overlap}"
+            );
+            assert_eq!(lost.len(), usize::from(kept.is_none()), "derecha {overlap}");
+        }
+    }
+
+    /// **Un solape por los dos lados, uno dentro del umbral y otro no, se
+    /// descarta entero**; y un aceptado **dentro** del aspirante o que lo
+    /// **cubre** tampoco se recorta (no hay un resto con sentido). Escrito con
+    /// ganadores a mano sobre un `(GAT)×8` en `[30, 54)`.
+    #[test]
+    fn overlaps_on_both_sides_or_around_the_aspirant_are_not_trimmed() {
+        let mut bases = background(0x43, 30);
+        bases.extend(b"GAT".repeat(8));
+        bases.extend(background(0x44, 30));
+        let criteria = DetectionCriteria::default();
+        let aspirant = classify_interval(&bases, &interval(30, 54, 3, 46), &criteria)
+            .expect("el (GAT)×8 pasa solo");
+        let cases: [(&str, Vec<RepeatCandidate>, usize); 5] = [
+            // Tres bases por la izquierda (dentro) y cuatro por la derecha.
+            (
+                "izquierda ok, derecha excede",
+                vec![
+                    candidate(20, 33, b"CA", 1_000),
+                    candidate(50, 64, b"CA", 999),
+                ],
+                0,
+            ),
+            // Tres por cada lado: se recorta por los dos y quedan 18 bases.
+            (
+                "los dos lados dentro",
+                vec![
+                    candidate(20, 33, b"CA", 1_000),
+                    candidate(51, 64, b"CA", 999),
+                ],
+                1,
+            ),
+            // Un aceptado dentro del aspirante.
+            ("dentro", vec![candidate(40, 44, b"CA", 1_000)], 0),
+            // Un aceptado que lo cubre entero.
+            ("cubre", vec![candidate(20, 64, b"CA", 1_000)], 0),
+            // Un aceptado que lo cubre entero y empieza justo en su inicio.
+            (
+                "cubre desde el inicio",
+                vec![candidate(30, 60, b"CA", 1_000)],
+                0,
+            ),
+        ];
+        for (label, winners, expected_trimmed) in cases {
+            let mut input = winners.clone();
+            input.push(aspirant.clone());
+            let (accepted, lost) = resolve_overlaps(&bases, &criteria, input);
+            let trimmed = accepted.iter().filter(|c| c.motif().length() == 3).count();
+            assert_eq!(trimmed, expected_trimmed, "{label}");
+            assert_eq!(lost.len(), 1 - expected_trimmed, "{label}");
+            assert_eq!(accepted.len(), winners.len() + expected_trimmed, "{label}");
+        }
+    }
+
+    /// **Un recortado que ya no llega al suelo cae**, y cae en «solape», no en
+    /// la etapa del suelo. `(CA)×8 A×7`: la tira de `A` mide 8 bases `[17, 25)`
+    /// y pasa el suelo de 8 por sí sola; pierde la base que comparte con el
+    /// dinucleótido, queda en 7 y **al volver a juzgarla** no lo alcanza. El
+    /// `(CA)×8`, que gana, se queda.
+    ///
+    /// Esta prueba **no distingue** la regla de hoy de la nueva por el
+    /// resultado (con las dos cae); fija que el recortado se **vuelve a
+    /// juzgar** y no se acepta tal cual (aceptarlo daría `[18, 25)`), y dónde
+    /// se cuenta.
+    #[test]
+    fn a_trimmed_tract_below_the_floor_falls_and_counts_as_overlap() {
+        let core = [b"CA".repeat(8), b"A".repeat(7)].concat();
+        let (candidates, counts) = detect_core(b"G", &core, b"G");
+        assert_eq!(candidates, vec![(0, 16, b"CA".to_vec(), 28)]);
+        assert!(counts.is_balanced(), "{counts:?}");
+        assert_eq!(counts.discarded(DetectionStage::Overlap, 1), 1);
+        // Cae en «solape», no en el suelo que ya no supera.
+        assert_eq!(counts.accepted(1), 0);
+    }
+
+    /// **Un tramo que no cabe en su región se descarta antes de los solapes y
+    /// no recorta a nadie.** `(CA)×10 A×12` con la región justo sobre la tira
+    /// de `A` (`[19, 32)`, sus 13 bases): el `(CA)×10` no cabe y cae en
+    /// «fuera de las regiones»; la tira se queda **entera**, con sus 13 bases,
+    /// y no recortada a 12 como si el dinucleótido la hubiera pisado. Con la
+    /// región sobre el `(CA)×10`, la tira cae fuera y el dinucleótido no
+    /// cambia.
+    ///
+    /// **Debe fallar contra** aplicar las regiones **después** de los solapes:
+    /// la tira saldría recortada, `[20, 32)`.
+    #[test]
+    fn a_tract_outside_the_regions_is_dropped_before_overlaps_and_trims_nobody() {
+        let core = [b"CA".repeat(10), b"A".repeat(12)].concat();
+        let mut sequence = background(0xD1, 30);
+        let offset = sequence.len() as u64;
+        sequence.push(b'G');
+        sequence.extend_from_slice(&core);
+        sequence.push(b'G');
+        sequence.extend(background(0xD2, 30));
+        let start = offset + 1;
+        let criteria = DetectionCriteria::default();
+        let run = |regions: &[(u64, u64)]| {
+            let detection =
+                detect_repeat_candidates_in_regions(&sequence, &criteria, Some(regions));
+            let kept: Vec<(u64, u64)> = detection
+                .candidates()
+                .iter()
+                .map(|c| (c.start() - start, c.end() - start))
+                .collect();
+            (kept, detection.counts().clone())
+        };
+        let (kept, counts) = run(&[(start + 19, start + 32)]);
+        assert_eq!(kept, vec![(19, 32)]);
+        assert_eq!(counts.discarded(DetectionStage::OutsideRegions, 2), 1);
+        assert_eq!(counts.discarded_total(DetectionStage::Overlap), 0);
+        assert!(counts.is_balanced(), "{counts:?}");
+        let (kept, counts) = run(&[(start, start + 20)]);
+        assert_eq!(kept, vec![(0, 20)]);
+        assert_eq!(counts.discarded(DetectionStage::OutsideRegions, 1), 1);
+        assert!(counts.is_balanced(), "{counts:?}");
+    }
+
+    /// **Un recorte demasiado corto para tener un motivo no cuelga ni
+    /// entra.** Un aspirante de 6 bases de periodo 3 con dos bases que le
+    /// quitan por un lado y una por el otro (todas dentro de una copia) deja
+    /// 3 bases: justo un motivo, y `classify_interval` lo juzga. Con 2 por
+    /// cada lado deja 2, menos que el periodo, y cae sin leer el motivo (que
+    /// no cabe).
+    #[test]
+    fn a_trim_shorter_than_one_motif_falls_without_panicking() {
+        let bases = [&b"CAGT"[..], &b"GAT".repeat(2), &b"CAGT"[..]].concat();
+        let criteria = DetectionCriteria {
+            min_copies: [1; 6],
+            min_purity: 0.0,
+            min_longest_run_units: 1,
+            ..DetectionCriteria::default()
+        };
+        let aspirant = candidate(4, 10, b"GAT", 2);
+        for (left, right, kept) in [(2u64, 1u64, true), (2, 2, false), (3, 3, false)] {
+            let winners = vec![
+                candidate(0, 4 + left, b"CAGT", 1_000),
+                candidate(10 - right, 14, b"CAGT", 999),
+            ];
+            let mut input = winners.clone();
+            input.push(aspirant.clone());
+            let (accepted, lost) = resolve_overlaps(&bases, &criteria, input);
+            assert_eq!(accepted.len(), 2 + usize::from(kept), "{left} {right}");
+            assert_eq!(lost.len(), usize::from(!kept), "{left} {right}");
+        }
     }
 
     /// El suelo `min_copies` descarta segmentos cortos (p. ej. una coincidencia
@@ -2651,9 +3022,14 @@ mod tests {
 
     /// Resuelve en los dos órdenes de entrada y comprueba que el ganador es el
     /// mismo: es lo que distingue una regla fija de «el primero que llegue».
+    /// Los solapes de estas parejas son de más de una copia del que pierde, así
+    /// que se descarta entero y las bases no se miran.
     fn winner_in_both_orders(a: RepeatCandidate, b: RepeatCandidate) -> RepeatCandidate {
-        let (forward, lost_forward) = resolve_overlaps(vec![a.clone(), b.clone()]);
-        let (backward, lost_backward) = resolve_overlaps(vec![b, a]);
+        let bases = background(0x31, 100);
+        let criteria = DetectionCriteria::default();
+        let (forward, lost_forward) =
+            resolve_overlaps(&bases, &criteria, vec![a.clone(), b.clone()]);
+        let (backward, lost_backward) = resolve_overlaps(&bases, &criteria, vec![b, a]);
         assert_eq!(forward, backward, "el ganador no depende del orden");
         assert_eq!(
             (forward.len(), lost_forward.len(), lost_backward.len()),
@@ -2685,25 +3061,35 @@ mod tests {
     }
 
     /// Dos tramos que solo se tocan no se solapan; y un perdedor no bloquea a
-    /// un tercero que solo lo solapaba a él.
+    /// un tercero que solo lo solapaba a él. Los solapes son de más de una
+    /// copia del que pierde, de modo que se descarta entero (el recorte lo
+    /// prueban las pruebas de `overlap_trim_*`).
     #[test]
     fn touching_tracts_are_kept_and_losers_do_not_block() {
-        let (kept, lost) = resolve_overlaps(vec![
-            candidate(10, 20, b"CA", 10),
-            candidate(20, 30, b"GT", 10),
-        ]);
+        let bases = background(0x31, 100);
+        let criteria = DetectionCriteria::default();
+        let (kept, lost) = resolve_overlaps(
+            &bases,
+            &criteria,
+            vec![candidate(10, 20, b"CA", 10), candidate(20, 30, b"GT", 10)],
+        );
         assert_eq!((kept.len(), lost.len()), (2, 0));
-        // A gana a B; C solo solapa a B y queda.
-        let (kept, lost) = resolve_overlaps(vec![
-            candidate(18, 40, b"GAT", 20),
-            candidate(0, 20, b"CA", 30),
-            candidate(38, 60, b"AC", 10),
-        ]);
+        // A gana a B (solape de 10 bases, más de una copia de `GAT`); C solo
+        // solapa a B y queda.
+        let (kept, lost) = resolve_overlaps(
+            &bases,
+            &criteria,
+            vec![
+                candidate(10, 40, b"GAT", 20),
+                candidate(0, 20, b"CA", 30),
+                candidate(38, 60, b"AC", 10),
+            ],
+        );
         assert_eq!(
             kept.iter().map(RepeatCandidate::start).collect::<Vec<_>>(),
             vec![0, 38]
         );
-        assert_eq!(lost.len(), 1);
+        assert_eq!(lost, vec![3]);
     }
 
     /// El recuento cuadra y atribuye cada descarte a su etapa, por la función
@@ -2741,17 +3127,21 @@ mod tests {
     ///   tirada**;
     /// - tirada, periodo 4: `((ACTG)×4 ATTG)×3 (ACTG)×4`, pureza 0,84 y
     ///   tirada 4;
-    /// - solape, periodo 2 contra 3: `(CA)×10 G (CAG)×7`; el tramo de periodo
-    ///   3 empieza en el último `CA` del dinucleótido (`CAG` con la `G`) y lo
-    ///   pisa dos bases; el `(CA)×10` (puntuación 36) pierde ante el `(CAG)×8`
-    ///   (puntuación 42);
-    /// - solape, periodo 1 contra 2: `(CA)×40 A×8`. El tramo de periodo 2 se
-    ///   alarga por el poli-A del final (allí también coinciden las bases a
-    ///   distancia 2) y conserva pureza 80/88; el poli-A, que empieza en la
-    ///   última `A` del dinucleótido, queda dentro y pierde por puntuación.
-    ///   Un poli-A **delante** de un `(CA)n` ya no sirve: desde que el inicio
-    ///   recortado sale de la tira de una sola base, los dos solo se tocan y se
-    ///   aceptan ambos (lo prueban las regresiones de `A×8 (GA)×10` y `T×12
+    /// - solape, periodo 2 contra 4: `(GC)×8 (ACGC)×6`; el tramo de periodo 4
+    ///   (`CGCA`) empieza tres bases antes de acabar el dinucleótido, **más de
+    ///   una copia de este (dos bases)**, y gana por puntuación; el `(GC)×8`
+    ///   se descarta entero. Con un solape de una copia o menos se recortaría
+    ///   en vez de descartarse (`(CA)×10 G (CAG)×7` da los dos; lo fija
+    ///   `overlap_trim_keeps_a_dinucleotide_overlapped_by_one_copy_by_a_trinucleotide`),
+    ///   así que este caso es el que ejercita la etapa «solape» con el
+    ///   descarte entero;
+    /// - sin solape tras recortar, periodo 1 contra 2: `(CA)×40 A×8`. El
+    ///   poli-A `[403, 412)` pisa **una base** al `(CA)×40` `[324, 404)`, una
+    ///   copia de su motivo: se recorta a `[404, 412)`, 8 bases, justo el
+    ///   suelo, y se queda; **no** cuenta en «solape»;
+    /// - un poli-A **delante** de un `(CA)n` tampoco pierde: desde que el
+    ///   inicio recortado sale de la tira de una sola base, los dos solo se
+    ///   tocan (lo prueban las regresiones de `A×8 (GA)×10` y `T×12
     ///   (CTT)×7`).
     #[test]
     fn counts_purity_run_and_overlap_through_the_detector() {
@@ -2767,9 +3157,8 @@ mod tests {
         let run_tract = [&run_block[..], &run_block, &run_block, b"ACTGACTGACTGACTG"].concat();
         sequence.extend_from_slice(&run_tract);
         sequence.extend(background(0x103, 40));
-        sequence.extend(b"CA".repeat(10));
-        sequence.push(b'G');
-        sequence.extend(b"CAG".repeat(7));
+        sequence.extend(b"GC".repeat(8));
+        sequence.extend(b"ACGC".repeat(6));
         sequence.extend(background(0x105, 40));
         sequence.extend(b"CA".repeat(40));
         sequence.extend_from_slice(&[b'A'; 8]);
@@ -2804,12 +3193,12 @@ mod tests {
         );
         assert_eq!(
             counts.discarded(DetectionStage::Overlap, 1),
-            1,
+            0,
             "{counts:?}"
         );
         assert_eq!(
             counts.discarded_total(DetectionStage::Overlap),
-            2,
+            1,
             "{counts:?}"
         );
         assert_eq!(
@@ -2817,8 +3206,8 @@ mod tests {
                 .into_iter()
                 .map(|(_, _, motif)| motif)
                 .collect::<Vec<_>>(),
-            vec![b"CAG".to_vec(), b"CA".to_vec()],
-            "quedan el (CAG)n y el (CA)n, que ganan sus solapes"
+            vec![b"CGCA".to_vec(), b"CA".to_vec(), b"A".to_vec()],
+            "quedan el (ACGC)n, el (CA)n y el poli-A recortado a una copia de solape"
         );
     }
 

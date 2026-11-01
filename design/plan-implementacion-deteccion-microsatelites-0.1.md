@@ -430,14 +430,74 @@ El detector conserva un tramo corto que vive dentro de otro largo (la `AAA`
 dentro de un `(GAAA)n`); el simulador rechaza dos loci solapados
 (`src/application.rs:4919-4931`). En el sondeo quedaron 25 pares solapados.
 
+**Reescrita el 01/11/2026** (decisión del responsable, opción A; ver el
+apartado 11.12). La regla original, opción (a), recorría los tramos por
+prioridad y descartaba **entero** cualquier aspirante que pisara a uno ya
+aceptado, aunque compartiera una sola base. Eso perdía microsatélites reales
+pegados a otro: un microsatélite suele acabar con una copia parcial del motivo
+que coincide con el principio de lo que viene detrás, y el buscador entrega
+los dos tramos pisándose esa copia (`(CA)×10 A×12`; el `(TCTG)` central de
+`(TCTA)×8 (TCTG)×8 (TCTA)×8`). Es DT-061, parte (a).
+
 | Opción | Consecuencia |
 |---|---|
-| **(a) Gana uno, por regla fija**: mayor puntuación del detector; empate, más bases; empate, periodo menor; empate, el de la izquierda. Los demás se descartan y se cuentan | Determinista; no depende del orden de entrada; la puntuación es la medida del detector de longitud y pureza a la vez |
+| (a) Gana uno, por regla fija; los demás se descartan enteros (la original) | Determinista; pierde el microsatélite que solo pisa la copia parcial de la frontera |
+| **(a′) La misma prioridad, pero el aspirante que pisa una copia de su motivo o menos por cada lado se recorta y se vuelve a juzgar** | Conserva los dos microsatélites pegados; el resultado sigue sin depender del orden de entrada; el recortado pasa por los mismos criterios que cualquier tramo |
 | (b) Se descartan todos los solapados | Pierde el locus bueno con el malo |
 | (c) Se funden en un locus compuesto | Exige derivar bloques, que S-30 prohíbe |
 
-**Recomendación: (a).** Dos tramos que solo se tocan (uno acaba donde empieza
-el otro) no se solapan y se conservan, como hoy con los declarados.
+**Regla vigente: (a′).** Se recorren los candidatos por prioridad: mayor
+puntuación del detector; empate, más bases; empate, periodo menor; empate, el
+de la izquierda. De cada aspirante:
+
+1. **Sin solape** con los ya aceptados: se acepta.
+2. **Solape de una copia de su propio motivo o menos por cada lado** (solape ≤
+   periodo del aspirante), sin ningún aceptado dentro de él ni que lo cubra
+   entero: **se recorta** a la parte que no solapa y ese tramo **vuelve a
+   pasar por todos los criterios** (`classify_interval`: suelo de copias,
+   pureza, tirada, tope y base A/C/G/T a cada lado). Entra solo si los supera.
+3. **Cualquier otro caso** (más de una copia de solape por algún lado, un
+   aceptado dentro del aspirante o que lo cubre): se descarta entero, como
+   antes.
+
+Decisiones de detalle, con su porqué:
+
+- **Puntuación del recortado:** se recalcula con las comparaciones de su
+  propio tramo (+2 y −7), como el recorte del inicio del buscador, de modo que
+  todo candidato lleva la suma de sus propias comparaciones. No decide nada
+  en la resolución, porque el recortado se acepta en el acto y no vuelve a
+  competir.
+- **Motivo del recortado:** se lee al inicio del tramo recortado (DP-SSR-03),
+  así que tras recortar el inicio sale una **rotación**: el `(TCTG)` central
+  del compuesto sale como `GTCT`, y el identificador lleva ese motivo
+  (`SSR-1-2736-2767-GTCT`). La coincidencia de un declarado (DP-SSR-09)
+  compara rotaciones y no se ve afectada.
+- **Dónde se cuenta:** un recortado que entra se cuenta como aceptado en su
+  longitud de motivo; **uno que cae** (porque ya no llega al suelo, a la
+  pureza, etc.) se cuenta en **solape**, no en la etapa del criterio que ya no
+  supera: superó todos por sí solo y lo pierde el solape, de modo que las
+  columnas de suelo, pureza y demás siguen contando solo lo que cae por sí
+  solo y el balance detectados = descartados + aceptados se mantiene.
+- **Regiones:** se aplican **antes** de los solapes (DP-SSR-18). El recortado
+  es un subconjunto del aspirante, que ya cabía en su región, así que no
+  necesita volver a comprobarlas; y un tramo que no cabe en su región no
+  recorta a nadie.
+- **Motivo no primitivo tras recortar:** comprobado por fuerza bruta
+  (1 800 000 secuencias de dos a cuatro bloques con mutaciones, 665 000
+  recortados aceptados, con pureza mínima de 0 a 0,5): ninguno. Con la pureza
+  por omisión es inalcanzable en la práctica, y no se añade guarda.
+
+**El umbral es «una copia o menos», no «menos de una copia».** Con «menos de
+una copia» una tira de una sola base (periodo 1) no podría recortarse nunca,
+porque un solape de una base es ya una copia, y `(CA)×10 A×12` seguiría
+perdiendo su tira de `A`. El responsable fijó «una copia o menos» el
+01/11/2026. Consecuencia: `(CA)×10 G (CAG)×7`, donde el `(CAG)×8` pisa dos
+bases al `(CA)×10` (una copia), da ahora los dos, el `(CA)×10` recortado a
+`(CA)×9`.
+
+**Recomendación original (a), sustituida por (a′).** Dos tramos que solo se
+tocan (uno acaba donde empieza el otro) no se solapan y se conservan, como hoy
+con los declarados.
 
 ### DP-SSR-06. Tractos compuestos e impuros
 
@@ -2667,3 +2727,103 @@ tiras largas de una misma base y los 5 de desplazamiento de fase son del
 buscador y esperan su nueva versión. Detalle en el registro de deudas
 técnicas (DT-061). Mientras tanto, la entrega 3 sigue con el núcleo de
 `fa215c23` y congela el catálogo que este da.
+
+*Nota del 01/11/2026: el arreglo propuesto para la regla de solapes se decidió
+y se aplicó; ver el apartado 11.12.*
+
+### 11.12. La regla de solapes recorta en vez de descartar (01/11/2026)
+
+**Qué cambia.** DP-SSR-05 se reescribe (apartado 3): un aspirante que pisa a los
+aceptados **una copia de su propio motivo o menos por cada lado** (solape ≤
+periodo) se recorta a la parte que no solapa y vuelve a pasar por todos los
+criterios; con más de una copia por algún lado, o con un aceptado dentro o
+alrededor, se descarta entero como antes. Decisión del responsable del
+01/11/2026 (opción A: con «menos de una copia» una tira de una sola base no
+se habría recortado nunca, porque un solape de una base ya es una copia). El
+núcleo copiado del buscador no cambia; solo cambian `resolve_overlaps` y el
+recuento de `detect_repeat_candidates_in_regions`. Es el cierre de la parte
+(a) de DT-061.
+
+**Medición.** Mismos FASTA (SHA-256 `f5a8d13a…`, 13 secuencias, 78 252 003
+bases) y mismos comandos que el apartado 11.1, `rustc 1.97.1`. «Antes» es el
+árbol de la entrega 3 (`src/repeat_detection.rs` de SHA-256 `de1c504a…`,
+binario de medida `ecab10be…`), que reproduce **cifra a cifra** el apartado
+11.11; «después», el árbol con la regla nueva (`254ca582…`, binario
+`86fdb761…`). Los dos binarios se compilaron en copias aparte, sin tocar el
+árbol de trabajo. **Dos pasadas de `measure_detection_stages` por árbol, con
+recuentos idénticos línea a línea** (se compararon sin los tiempos).
+Suelo por omisión `[8,6,6,6,5,4]`, antes → después; solo cambian las dos
+últimas filas:
+
+| Etapa | p1 | p2 | p3 | p4 | p5 | p6 | Total |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Intervalos del detector | 15 822 760 | 2 789 346 | 1 178 087 | 341 924 | 132 757 | 57 244 | 20 322 118 |
+| Suelo de copias | 15 773 834 | 2 783 034 | 1 175 382 | 341 711 | 132 727 | 57 022 | 20 263 710 |
+| Pureza | 27 | 117 | 826 | 49 | 5 | 86 | 1 110 |
+| Tirada | 0 | 0 | 0 | 0 | 0 | 3 | 3 |
+| Tope | 0 | 0 | 10 | 0 | 0 | 0 | 10 |
+| Borde | 1 | 0 | 3 | 0 | 0 | 0 | 4 |
+| Fuera de regiones | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Solape | 306 → **269** | 552 → **209** | 200 → **59** | 28 → **7** | 0 → 0 | 9 → **1** | 1 095 → **545** |
+| **Aceptados** | 48 592 → **48 629** | 5 643 → **5 986** | 1 666 → **1 807** | 136 → **157** | 25 → 25 | 124 → **132** | 56 186 → **56 736** |
+
+Los intervalos del detector y las etapas de cada tramo por sí solo no cambian
+(la regla actúa después). El saldo es **+550** candidatos: cada recortado que
+entra sale de «solape», y los demás descartes por solape también bajan porque
+un recortado deja sitio al siguiente. Con los otros suelos: el bajo pasa de
+274 286 a **275 626** aceptados (solapes 3 341 → 2 001) y el alto, de 16 122 a
+**16 402** (solapes 515 → 235). Bases en candidatos con el suelo por omisión:
+673 012 → **684 434** (0,860 % → 0,875 %). Pares de candidatos que se tocan:
+1 012 → **1 616**. Entre los candidatos nuevos no queda ningún par solapado
+(comprobado sobre el volcado de todo el genoma).
+
+**Cuántos de los 100 se recuperan.** Los 100 candidatos de la sección 11.11
+(los que el núcleo viejo `deecb79` aceptaba y se perdían por solape con uno
+nuevo de otro motivo) se identifican comparando los volcados de candidatos de
+los tres árboles: un candidato viejo «sigue ahí» si hay uno actual de su
+motivo, rotado o no, que lo solape; da 54 que siguen, **100 perdidos por
+solape** y 5 desaparecidos, como en 11.11. Con la regla nueva:
+
+- **36 se recuperan** (34 de periodo 1, 1 de periodo 2 y 1 de periodo 3);
+- **24 caen aun así**: todas son tiras de una sola base de **exactamente 8
+  bases** (el suelo) que pisan una base; al recortarlas quedan en 7 y **el
+  recortado ya no llega al suelo**. Se cuenta como solape (decisión de este
+  apartado) y no en el suelo;
+- **40 siguen descartados** porque el solape es de más de una copia del que
+  pierde: 12 tiras de una base que pisan 2 bases, una cubierta entera, 22
+  dinucleótidos que pisan 3 bases, 4 que pisan 5 y un trinucleótido que pisa 5
+  (`(AC)n` contra un `(CACG)n` pegado y casos así). Es lo que la regla
+  aprobada deja fuera;
+- los 5 desaparecidos (repeticiones con una interrupción que desplaza la
+  fase) siguen sin aparecer: son del buscador, parte (b) de DT-061.
+
+De las 58 pérdidas por **una sola base**, **34 se recuperan** y 24 caen por el
+suelo tras recortar. En total hay 583 candidatos que antes no estaban y 33
+que antes estaban y ya no figuran con esas coordenadas (22 de ellos están
+ahora recortados por un extremo; los otros 11 no se han clasificado).
+
+**Barrido** (`measure_scan`, cinco pasadas por árbol, alternadas, en la misma
+sesión y sin nada más en marcha): `scan_seconds` antes 3,96–5,43 s (mediana
+5,02), después 5,21–5,71 s (mediana 5,41). La dispersión entre pasadas del
+**mismo** binario (1,5 s) es mayor que la diferencia entre árboles, así que
+no se afirma ninguna diferencia de tiempo: el recorte solo corre en los aspirantes que pisan
+a uno ya aceptado, una fracción mínima de los candidatos (los descartes por
+solape de antes eran 1 095 de 56 000). Memoria residente
+máxima: antes
+181 072–181 768 kB, después 181 604–181 772 kB (cargar el FASTA solo, 156 996
+kB): **no cambia**.
+
+**Lo que no cambia.** Las huellas congeladas (la de escala y las demás) no
+cambian: ninguna de las pruebas que las comparan falla. El catálogo detectado
+del tomate sí cambia (56 186 → 56 736 loci), pero ninguna cifra congelada
+depende de él.
+
+**Comprobación de que ninguna prueba gana un locus que no declara.** Con un
+registro de cada locus detectado que entra en el catálogo, la batería entera
+(2 213 pruebas antes, 2 223 después) en el árbol de antes y en el de después da
+**el mismo conjunto de loci detectados, prueba a prueba**, salvo los de las dos
+pruebas nuevas; y todos los loci detectados de la batería salen de
+`tests/repeat_detection_run.rs` (ningún otro fichero de pruebas ni ningún
+subproceso registra uno). Las secciones de detección que fabrica
+`tests/support/detection_section.rs` (seis bases de margen) no ganan nada con
+el recorte.

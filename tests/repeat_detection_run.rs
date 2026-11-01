@@ -547,7 +547,8 @@ fn regions_keep_only_tracts_that_fit_entirely_inside() {
 ///   dos. Los tramos son un `(CA)×10` en 2601..2620 y un `(GAT)×7` en
 ///   2623..2643, separados por dos bases de flanco: así el detector da las dos
 ///   piezas (lo fija el control, sin el declarado), y no se pierde ninguna por
-///   la deuda de la frontera entre repeticiones pegadas (DT-061), que es lo
+///   la deuda de la frontera entre repeticiones pegadas (DT-061, cerrada en su
+///   parte (a) el 01/11/2026 con el recorte de la regla de solapes), que es lo
 ///   que le pasaba al `(TC)×8 (TCTG)×6` de antes.
 ///
 /// **Debe fallar contra** emparejar por igualdad de cadena del motivo, por
@@ -597,6 +598,162 @@ fn declared_loci_match_by_overlap_and_rotation_and_keep_their_boundaries() {
     expected.insert(
         4,
         entry("STR-COMP", "declared", "chr1", 2601, 2643, "CA,GAT"),
+    );
+    assert_eq!(catalog(&effective), expected);
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Escribe `text` desde la base `start` (base uno) con una `G` en cada flanco
+/// (que no prolonga ninguno de los tractos de las pruebas que lo usan).
+fn put(bases: &mut [u8], start: usize, text: &str) {
+    let begin = start - 1;
+    let end = begin + text.len();
+    bases[begin..end].copy_from_slice(text.as_bytes());
+    bases[begin - 1] = b'G';
+    bases[end] = b'G';
+}
+
+/// **Tractos pegados: el recorte de la regla de solapes en el producto**
+/// (DP-SSR-05, reescrita el 01/11/2026), con el identificador y las
+/// coordenadas escritos a mano.
+///
+/// - `(CA)×10 A×12` en 2201: el buscador da `CA` y una tira de `A` de 13 bases
+///   que comparten la última `A` del dinucleótido; la tira se recorta a 12 y
+///   son **dos loci**, `SSR-1-2201-2220-CA` y `SSR-1-2221-2232-A`.
+/// - `(TCTA)×8 (TCTG)×8 (TCTA)×8` en 2701 (2701..2796): tres trozos que se
+///   pisan 3 bases con su vecino, y son **tres loci**. El del centro y el
+///   tercero se recortan por la izquierda, y el motivo se lee al inicio del
+///   tramo recortado, así que salen **rotaciones**: `GTCT` (de `TCTG`) y
+///   `ATCT` (de `TCTA`). El identificador lleva el motivo rotado.
+///
+/// Con el compuesto **declarado** `(TCTA)(TCTG)(TCTA)`: sigue coincidiendo (su
+/// primer motivo es rotación de un detectado, y el del centro también) y
+/// **sustituye a los tres** detectados; manda su identificador y su tramo. El
+/// control de la parte sin declarar es el que dice que sin él salen tres.
+///
+/// **Debe fallar contra** la regla de antes (descartar entero): sin recorte
+/// faltaría la tira de `A` y el `(TCTG)` central; y contra sustituir solo a
+/// los que el compuesto solapa de uno en uno (quedaría algún detectado).
+#[test]
+fn adjacent_tracts_are_trimmed_and_a_declared_compound_replaces_all_three() {
+    let mut sequences = planted_reference();
+    put(
+        &mut sequences[0].1,
+        2201,
+        &["CA".repeat(10), "A".repeat(12)].concat(),
+    );
+    put(
+        &mut sequences[0].1,
+        2701,
+        &["TCTA".repeat(8), "TCTG".repeat(8), "TCTA".repeat(8)].concat(),
+    );
+    let section = format!("[reference.repeat_detection]\n\n{SLIPPAGE}");
+    let mut with_tracts = planted_catalog();
+    // chr1 va primero: tras el `AAAG` (índice 3) entran los cinco nuevos.
+    for (offset, (id, start, end, motif)) in [
+        ("SSR-1-2201-2220-CA", 2201, 2220, "CA"),
+        ("SSR-1-2221-2232-A", 2221, 2232, "A"),
+        ("SSR-1-2701-2735-TCTA", 2701, 2735, "TCTA"),
+        ("SSR-1-2736-2767-GTCT", 2736, 2767, "GTCT"),
+        ("SSR-1-2768-2796-ATCT", 2768, 2796, "ATCT"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        with_tracts.insert(4 + offset, entry(id, "detected", "chr1", start, end, motif));
+    }
+
+    let root = temporary("trim-control");
+    let config = write_config(&root, SEED_A, &sequences, &[("chr1", 2000)], &section, "");
+    let effective = run(&root, &config).expect("sin declarados");
+    assert_eq!(
+        catalog(&effective),
+        with_tracts,
+        "control: cinco detectados"
+    );
+    let _ = fs::remove_dir_all(&root);
+
+    let root = temporary("trim-compound");
+    let reference = format!(
+        "{section}\
+         [[reference.repeat_loci]]\nid = \"STR-COMP3\"\nsequence = \"chr1\"\nstart = 2701\n\
+         end = 2796\nmotifs = [\"TCTA\", \"TCTG\", \"TCTA\"]\nmin_purity = 0.5\n\
+         min_longest_run_units = 2\n\n\
+         [[reference.repeat_loci.alleles]]\nunits = [8, 8, 8]\nfrequency = 1.0\n\n"
+    );
+    let config = write_config(&root, SEED_A, &sequences, &[("chr1", 2000)], &reference, "");
+    let effective = run(&root, &config).expect("el compuesto coincide con lo detectado");
+    let mut expected = with_tracts.clone();
+    expected.splice(
+        6..9,
+        [entry(
+            "STR-COMP3",
+            "declared",
+            "chr1",
+            2701,
+            2796,
+            "TCTA,TCTG,TCTA",
+        )],
+    );
+    assert_eq!(
+        catalog(&effective),
+        expected,
+        "el compuesto sustituye a los tres"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// **Un declarado empareja por rotación con un detectado recortado.** El
+/// `(TCTG)×8` central del compuesto `(TCTA)×8 (TCTG)×8 (TCTA)×8` se detecta
+/// recortado por la izquierda, con motivo `GTCT` (rotación de `TCTG`) en
+/// 2736..2767. Un declarado `TCTG` en 2740..2760 solo solapa a ese detectado y
+/// coincide por rotación: conserva su nombre y sus fronteras y lo sustituye;
+/// los dos de los lados siguen detectados.
+///
+/// **Debe fallar contra** emparejar por igualdad de cadena (`GTCT` no es
+/// `TCTG`): el locus se rechazaría por no coincidir con ningún detectado.
+#[test]
+fn a_declared_locus_matches_a_trimmed_detected_one_by_rotation() {
+    let mut sequences = planted_reference();
+    put(
+        &mut sequences[0].1,
+        2701,
+        &["TCTA".repeat(8), "TCTG".repeat(8), "TCTA".repeat(8)].concat(),
+    );
+    let root = temporary("trim-rotation");
+    let reference = format!(
+        "[reference.repeat_detection]\n\n{SLIPPAGE}\
+         [[reference.repeat_loci]]\nid = \"STR-CENTER\"\nsequence = \"chr1\"\nstart = 2740\n\
+         end = 2760\nmotif = \"TCTG\"\nmax_units = 30\n\n"
+    );
+    let config = write_config(&root, SEED_A, &sequences, &[("chr1", 2000)], &reference, "");
+    let effective = run(&root, &config).expect("el declarado coincide con el recortado");
+    let mut expected = planted_catalog();
+    expected.insert(
+        4,
+        entry(
+            "SSR-1-2701-2735-TCTA",
+            "detected",
+            "chr1",
+            2701,
+            2735,
+            "TCTA",
+        ),
+    );
+    expected.insert(
+        5,
+        entry("STR-CENTER", "declared", "chr1", 2740, 2760, "TCTG"),
+    );
+    expected.insert(
+        6,
+        entry(
+            "SSR-1-2768-2796-ATCT",
+            "detected",
+            "chr1",
+            2768,
+            2796,
+            "ATCT",
+        ),
     );
     assert_eq!(catalog(&effective), expected);
     let _ = fs::remove_dir_all(&root);

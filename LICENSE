@@ -1,6 +1,9 @@
 MIT License
 
 Copyright (c) 2026 Cañizares Sales, Joaquin
+Copyright (c) 2026 Jose Blanca & Joaquin Cañizares (the tandem-repeat scanner
+core in src/repeat_detection.rs, copied from pop_var_caller,
+https://github.com/JoseBlanca/pop_var_caller)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

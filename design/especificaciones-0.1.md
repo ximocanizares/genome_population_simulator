@@ -1718,10 +1718,17 @@ su asignación por fase está en la matriz de trazabilidad.
   - el motivo es la lectura del tramo **en la fase de su inicio**, y las
     **fronteras** son las del detector, sin recortar (el tramo no empieza
     dentro de una tira previa de su misma base);
-  - entre **tramos solapados** gana uno por regla fija —mayor puntuación del
-    detector, luego más bases, luego periodo menor, luego el de la
-    izquierda— y los demás se descartan y se cuentan; dos tramos que solo se
-    tocan no se solapan;
+  - entre **tramos solapados** se recorre por una prioridad fija —mayor
+    puntuación del detector, luego más bases, luego periodo menor, luego el de
+    la izquierda— y de cada aspirante: si pisa a uno ya aceptado **una copia
+    de su propio motivo o menos por cada lado** (solape ≤ periodo), **se
+    recorta** a la parte que no solapa y ese tramo recortado **vuelve a pasar
+    por todos los criterios**, entrando solo si los supera (decidido el
+    01/11/2026: `(CA)×10 A×12` da los dos loci); si pisa más de una copia por
+    algún lado, o un aceptado queda dentro de él o lo cubre entero, se
+    descarta entero. Lo descartado se cuenta, y un recortado que cae también
+    se cuenta como descartado por solape. Dos tramos que solo se tocan no se
+    solapan;
   - la detección produce **solo loci de un motivo**: un compuesto se declara
     a mano (REQ-REF-40);
   - un tramo de más de un **tope de unidades** común, 200 por omisión y
@@ -1735,8 +1742,9 @@ su asignación por fase está en la matriz de trazabilidad.
     `SSR-<índice de la secuencia en base uno>-<inicio>-<fin>-<motivo>`, en base
     uno y en coordenadas de la referencia final (DTC-096).
   El algoritmo de detección es el del proyecto `pop_var_caller`, copiado con su
-  atribución y sin depender de él (DTC-103). Sus pérdidas conocidas en la
-  frontera entre repeticiones pegadas están en DT-061.
+  atribución y sin depender de él (DTC-103). Sus pérdidas conocidas por el buscador
+  (no por la regla de solapes, que desde el 01/11/2026 recorta) están en DT-061,
+  parte (b).
 - **REQ-REF-40.** Con la sección de microsatélites, **todo locus declarado a mano,
   todo tracto insertado y todo tracto plantado debe coincidir con uno
   detectado**, o la configuración se rechaza antes de simular, nombrando el

@@ -2776,9 +2776,22 @@ son constantes del algoritmo y no se exponen como parámetro.
 la descomposición del simulador, y la pureza y la tirada mínimas que ya rigen
 la admisión de todo locus. Las fronteras son las del detector, sin recortar,
 con la única desviación propia del núcleo copiado: el tramo no empieza dentro
-de una tira previa de su misma base (apartado 11.8 del plan). Entre tramos
-solapados gana uno por regla fija (mayor puntuación, luego más bases, luego
-periodo menor, luego el de la izquierda) y dos que solo se tocan no se solapan.
+de una tira previa de su misma base (apartado 11.8 del plan). **Solapes
+(DP-SSR-05, reescrita el 01/11/2026).** Los tramos se recorren por prioridad
+fija (mayor puntuación, luego más bases, luego periodo menor, luego el de la
+izquierda). Un aspirante que no pisa a uno ya aceptado se acepta. Si lo pisa
+**una copia de su propio motivo o menos por cada lado** (solape ≤ periodo), no
+se descarta: **se recorta** a la parte que no solapa y ese tramo recortado
+**vuelve a pasar por todos los criterios** (suelo de copias, pureza, tirada,
+tope de unidades y base A/C/G/T a cada lado), entrando solo si los supera; su
+puntuación se recalcula con su propio tramo y su motivo se lee en su nuevo
+inicio, así que puede salir una rotación. Si pisa **más de una copia** por
+algún lado, o un aceptado queda dentro de él o lo cubre entero, se descarta
+entero. Las regiones se aplican antes. Un recortado que cae se cuenta en
+«solape». Dos tramos que solo se tocan no se solapan. Antes de esta reescritura
+se descartaba entero cualquier tramo que pisara a uno aceptado, aunque fuera
+una sola base, y se perdían microsatélites reales pegados a otro (DT-061,
+parte (a)).
 La detección solo produce loci de un motivo y los compuestos se declaran. Un
 tramo de más de un tope común de unidades, 200 por omisión y declarable, se
 descarta como satélite. Una `N` suelta dentro de un tracto cuenta como
